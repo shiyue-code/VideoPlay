@@ -11,12 +11,15 @@ class QToolBar;
 class QLabel;
 class QDockWidget;
 class QVBoxLayout;
+class QStackedWidget;
 class PlaylistWidget;
+class SubtitleParser;
 
 namespace VideoPlay {
 
 class PlayerEngine;
 class Controls;
+class SubtitleOverlay;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -36,6 +39,7 @@ protected:
 
 private slots:
     void onOpenFile();
+    void onLoadSubtitle();
     void onStateChanged(PlaybackState state);
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
@@ -46,13 +50,18 @@ private slots:
     void onToggleAlwaysOnTop();
     void onToggleLoopMode();
     void onTakeScreenshot();
+    void onSubtitleDelayPlus();
+    void onSubtitleDelayMinus();
 
 private:
     PlayerEngine* m_engine;
     QVideoWidget* m_videoWidget;
+    QWidget* m_videoContainer;
     Controls* m_controls;
     PlaylistWidget* m_playlistWidget;
     QDockWidget* m_playlistDock;
+    SubtitleParser* m_subtitleParser;
+    SubtitleOverlay* m_subtitleOverlay;
     QAction* m_fullscreenAction;
     QAction* m_alwaysOnTopAction;
     QAction* m_loopModeAction;
@@ -60,13 +69,16 @@ private:
     QLabel* m_statusLabel;
     bool m_isFullscreen;
     bool m_alwaysOnTop;
-    int m_loopMode; // 0: no loop, 1: single, 2: all
+    int m_loopMode;
+    int m_subtitleDelay;
 
     void setupUi();
     void setupConnections();
     void loadSettings();
     void saveSettings();
     void updateWindowTitle();
+    void updateSubtitle(qint64 position);
+    void resizeEvent(QResizeEvent* event) override;
 };
 
 } // namespace VideoPlay

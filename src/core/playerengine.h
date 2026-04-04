@@ -5,8 +5,6 @@
 #include <QString>
 #include <QMediaPlayer>
 #include <QAudioOutput>
-#include <QVideoSink>
-#include <QVideoFrame>
 #include "core/common.h"
 
 namespace VideoPlay {
@@ -35,7 +33,6 @@ public:
     double playbackSpeed() const;
     int volume() const;
     bool isMuted() const;
-    QVideoSink* videoSink() const { return m_videoSink; }
     QMediaPlayer* mediaPlayer() const { return m_mediaPlayer; }
 
 signals:
@@ -58,7 +55,6 @@ private slots:
 private:
     QMediaPlayer* m_mediaPlayer;
     QAudioOutput* m_audioOutput;
-    QVideoSink* m_videoSink;
     QString m_filePath;
     PlaybackState m_state;
     double m_playbackSpeed;

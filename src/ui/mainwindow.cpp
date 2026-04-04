@@ -1,4 +1,3 @@
-#include <QDebug>
 #include <QScreen>
 #include <QPixmap>
 #include <QDateTime>
@@ -29,6 +28,8 @@
 #include "utils/logger.h"
 #include "ui/controls.h"
 #include "ui/playlistwidget.h"
+#include "subtitles/subtitleparser.h"
+#include "subtitles/subtitleoverlay.h"
 
 namespace VideoPlay {
 
@@ -39,6 +40,8 @@ MainWindow::MainWindow(QWidget* parent)
     , m_controls(nullptr)
     , m_playlistWidget(nullptr)
     , m_playlistDock(nullptr)
+    , m_subtitleParser(new SubtitleParser(this))
+    , m_subtitleOverlay(nullptr)
     , m_fullscreenAction(nullptr)
     , m_alwaysOnTopAction(nullptr)
     , m_loopModeAction(nullptr)
@@ -47,6 +50,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_isFullscreen(false)
     , m_alwaysOnTop(false)
     , m_loopMode(0)
+    , m_subtitleDelay(0)
 {
     Logger::instance().info("MainWindow created");
     setAcceptDrops(true);
@@ -91,13 +95,31 @@ void MainWindow::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    m_videoWidget = new QVideoWidget(central);
-    m_engine->mediaPlayer()->setVideoOutput(m_videoWidget);
-    
-    m_controls = new Controls(central);
+    // Container for video + subtitle
+    m_videoContainer = new QWidget(central);
+    m_videoContainer->setMinimumSize(320, 240);
+    m_videoContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    auto* videoLayout = new QVBoxLayout(m_videoContainer);
+    videoLayout->setContentsMargins(0, 0, 0, 0);
+    videoLayout->setSpacing(0);
 
-    layout->addWidget(m_videoWidget, 1);
+    m_videoWidget = new QVideoWidget(m_videoContainer);
+    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_engine->mediaPlayer()->setVideoOutput(m_videoWidget);
+    videoLayout->addWidget(m_videoWidget);
+
+    // Subtitle overlay as top-level window (because QVideoWidget creates native window on Windows)
+    m_subtitleOverlay = new SubtitleOverlay(nullptr);
+    m_subtitleOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_subtitleOverlay->setWindowFlags(Qt::FramelessWindowHint | Qt::Tool);
+    m_subtitleOverlay->setAttribute(Qt::WA_ShowWithoutActivating);
+    m_subtitleOverlay->show();
+
+    layout->addWidget(m_videoContainer, 1);
+
+    m_controls = new Controls(central);
     layout->addWidget(m_controls);
+
     setCentralWidget(central);
 
     // Playlist dock
@@ -131,6 +153,12 @@ void MainWindow::setupUi()
     m_loopModeAction = playbackMenu->addAction(tr("Loop: &Off"), this, &MainWindow::onToggleLoopMode, Qt::Key_L);
     m_loopModeAction->setCheckable(true);
     playbackMenu->addAction(tr("Take &Screenshot"), this, &MainWindow::onTakeScreenshot, Qt::Key_S);
+
+    QMenu* subtitleMenu = menuBar()->addMenu(tr("&Subtitle"));
+    subtitleMenu->addAction(tr("&Load Subtitle..."), this, &MainWindow::onLoadSubtitle);
+    subtitleMenu->addSeparator();
+    subtitleMenu->addAction(tr("Delay &+100ms"), this, &MainWindow::onSubtitleDelayPlus, Qt::Key_BracketRight);
+    subtitleMenu->addAction(tr("Delay &-100ms"), this, &MainWindow::onSubtitleDelayMinus, Qt::Key_BracketLeft);
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     m_fullscreenAction = viewMenu->addAction(tr("&Fullscreen"), this, &MainWindow::onToggleFullscreen, Qt::Key_F11);
@@ -335,6 +363,7 @@ void MainWindow::onPositionChanged(qint64 position)
 {
     m_controls->setPosition(position);
     m_timeLabel->setText(QString("%1 / %2").arg(formatTime(position)).arg(formatTime(m_engine->duration())));
+    updateSubtitle(position);
 }
 
 void MainWindow::onDurationChanged(qint64 duration)
@@ -454,6 +483,57 @@ void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
         m_engine->play();
     }
     event->accept();
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    if (m_videoContainer && m_subtitleOverlay) {
+        QPoint geo = m_videoContainer->mapToGlobal(QPoint(0, 0));
+        QSize sz = m_videoContainer->size();
+        m_subtitleOverlay->setGeometry(geo.x(), geo.y(), sz.width(), sz.height());
+        m_subtitleOverlay->raise();
+    }
+}
+
+void MainWindow::onLoadSubtitle()
+{
+    QString path = QFileDialog::getOpenFileName(this, tr("Load Subtitle"), QString(),
+        tr("Subtitles (*.srt *.ass *.ssa *.vtt);;All (*)"));
+    if (path.isEmpty())
+        return;
+
+    if (m_subtitleParser->loadFile(path)) {
+        m_statusLabel->setText(tr("Subtitle loaded: %1").arg(QFileInfo(path).fileName()));
+        Logger::instance().info(QString("Subtitle loaded: %1").arg(path));
+    } else {
+        m_statusLabel->setText(tr("Failed to load subtitle"));
+        Logger::instance().error(QString("Failed to load subtitle: %1").arg(path));
+    }
+}
+
+void MainWindow::onSubtitleDelayPlus()
+{
+    m_subtitleDelay += 100;
+    m_statusLabel->setText(tr("Subtitle delay: +%1ms").arg(m_subtitleDelay));
+}
+
+void MainWindow::onSubtitleDelayMinus()
+{
+    m_subtitleDelay -= 100;
+    m_statusLabel->setText(tr("Subtitle delay: %1ms").arg(m_subtitleDelay));
+}
+
+void MainWindow::updateSubtitle(qint64 position)
+{
+    if (!m_subtitleParser->isLoaded()) {
+        m_subtitleOverlay->setText(QString());
+        return;
+    }
+
+    qint64 adjustedPos = position + m_subtitleDelay;
+    QString text = m_subtitleParser->subtitleAt(adjustedPos);
+    m_subtitleOverlay->setText(text);
 }
 
 } // namespace VideoPlay
