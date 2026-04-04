@@ -1,13 +1,18 @@
 #include "core/settings.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QDebug>
 
 namespace VideoPlay {
 
 Settings::Settings(QObject* parent)
     : QObject(parent)
-    , m_settings(new QSettings("VideoPlay", "VideoPlay", this))
 {
+    // 使用 INI 格式，确保跨平台兼容
+    QString configPath = QCoreApplication::applicationDirPath() + "/settings.ini";
+    m_settings = new QSettings(configPath, QSettings::IniFormat, this);
+    qDebug() << "Settings file:" << configPath;
 }
 
 Settings::~Settings() = default;
@@ -20,13 +25,20 @@ Settings& Settings::instance()
 
 void Settings::setWindowGeometry(const QRect& geometry)
 {
-    m_settings->setValue("window/geometry", geometry);
-    m_settings->setValue("window/state", 0);
+    m_settings->setValue("window/x", geometry.x());
+    m_settings->setValue("window/y", geometry.y());
+    m_settings->setValue("window/width", geometry.width());
+    m_settings->setValue("window/height", geometry.height());
+    m_settings->sync();
 }
 
 QRect Settings::windowGeometry() const
 {
-    return m_settings->value("window/geometry", QRect(960, 640, 960, 640)).toRect();
+    int x = m_settings->value("window/x", 100).toInt();
+    int y = m_settings->value("window/y", 100).toInt();
+    int w = m_settings->value("window/width", 960).toInt();
+    int h = m_settings->value("window/height", 640).toInt();
+    return QRect(x, y, w, h);
 }
 
 void Settings::setWindowState(int state)
