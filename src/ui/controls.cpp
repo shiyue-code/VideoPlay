@@ -35,6 +35,7 @@ Controls::Controls(QWidget* parent)
     connect(m_fullscreenBtn, &QPushButton::clicked, this, &Controls::fullscreenClicked);
     connect(m_positionSlider, &QSlider::valueChanged, this, &Controls::onPositionSliderMoved);
     connect(m_positionSlider, &QSlider::sliderPressed, this, &Controls::onPositionSliderPressed);
+    connect(m_positionSlider, &QSlider::sliderReleased, this, &Controls::onPositionSliderReleased);
     connect(m_volumeSlider, &QSlider::valueChanged, this, &Controls::onVolumeSliderMoved);
     connect(m_muteBtn, &QPushButton::clicked, this, &Controls::muteToggled);
     connect(m_speedSlider, &QSlider::valueChanged, this, &Controls::onSpeedSliderMoved);
@@ -204,12 +205,17 @@ void Controls::onPositionSliderMoved(int value)
             formatTime(static_cast<qint64>(value)),
             this);
     }
-    emit seekRequested(value);
 }
 
 void Controls::onPositionSliderPressed()
 {
     m_sliderPressed = true;
+}
+
+void Controls::onPositionSliderReleased()
+{
+    m_sliderPressed = false;
+    emit seekRequested(m_positionSlider->value());
 }
 
 void Controls::onVolumeSliderMoved(int value)
