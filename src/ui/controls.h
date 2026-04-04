@@ -43,6 +43,7 @@ private slots:
     void onPlayPauseClicked();
     void onPositionSliderMoved(int value);
     void onPositionSliderPressed();
+    void onPositionSliderReleased();
     void onVolumeSliderMoved(int value);
     void onSpeedSliderMoved(int value);
     void onHideTimeout();
