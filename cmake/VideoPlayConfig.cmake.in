@@ -1,0 +1,18 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# 查找依赖
+find_dependency(Qt6 6.2 COMPONENTS Core Widgets Gui Multimedia Concurrent)
+find_dependency(FFmpeg REQUIRED)
+
+# 包含目标
+include("${CMAKE_CURRENT_LIST_DIR}/VideoPlayTargets.cmake")
+
+# 设置变量
+set(VidePlay_VERSION PACKAGE_VERSION)
+set(VideoPlay_LIBRARIES video_core video_plugins video_ui video_utils)
+set(VideoPlay_INCLUDE_DIRS "@PACKAGE_INCLUDE_DIRS@")
+
+# 提供目标
+@PACKAGE_INIT_INCLUDE_EXPORT_TARGETS@

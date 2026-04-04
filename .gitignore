@@ -1,0 +1,121 @@
+# Qt
+*.pro.user
+*.pro.user.*
+*.autosave
+*.qws
+.qmake.stash
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Build directories
+build/
+Build/
+out/
+x64/
+x86/
+bin/
+lib/
+libs/
+*.cbp
+*.workspace
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CMakeScripts
+Testing/
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+*.sw?
+*~
+.DS_Store
+
+# VideoPlay specific
+plugins/*/*.dll
+plugins/*/*.so
+plugins/*/*.dylib
+plugins/*/*.dbg
+resources/icons/*.ico
+resources/icons/*.icns
+logs/*.log
+settings.ini
+
+# Logs
+*.log
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# FFmpeg
+ffmpeg/
+libav/
+libsw/
+libavcodec/
+libavformat/
+libavutil/
+libswscale/
+libswresample/
+
+# Dependencies
+thirdparty/
+external/
+deps/
+vendor/
+
+# Package
+packages/
+*.deb
+*.rpm
+*.dmg
+*.exe
+*.msi
+*.zip
+*.tar.gz
+
+# Test coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# Misc
+*.manifest
+*.recipe
+*.db
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux specific
+*#
+.#*
+*~
+
+# macOS specific
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.DS_Store

@@ -1,0 +1,21 @@
+1
+00:00:01,000 --> 00:00:04,000
+This is the first subtitle line.
+
+2
+00:00:05,000 --> 00:00:08,000
+This is the second subtitle line.
+It can have multiple lines.
+
+3
+00:00:10,000 --> 00:00:14,000
+Third subtitle with <b>bold</b> and <i>italic</i> tags.
+
+4
+00:00:15,000 --> 00:00:19,000
+Fourth subtitle demonstrating
+line breaks within the text.
+
+5
+00:00:20,000 --> 00:00:25,000
+Final subtitle at 20 seconds.
