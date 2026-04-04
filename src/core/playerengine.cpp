@@ -12,7 +12,6 @@ PlayerEngine::PlayerEngine(QObject* parent)
     : QObject(parent)
     , m_mediaPlayer(new QMediaPlayer(this))
     , m_audioOutput(new QAudioOutput(this))
-    , m_videoSink(new QVideoSink(this))
     , m_state(PlaybackState::Stopped)
     , m_playbackSpeed(1.0)
     , m_volume(100)
@@ -20,7 +19,6 @@ PlayerEngine::PlayerEngine(QObject* parent)
     , m_autoPlayAfterLoad(false)
 {
     m_mediaPlayer->setAudioOutput(m_audioOutput);
-    m_mediaPlayer->setVideoOutput(m_videoSink);
     
     connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged,
             this, &PlayerEngine::onMediaStatusChanged);

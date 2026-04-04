@@ -70,6 +70,7 @@ set(SOURCES
     src/ui/controls.cpp
     src/ui/playlistwidget.cpp
     src/subtitles/subtitleparser.cpp
+    src/subtitles/subtitleoverlay.cpp
     src/utils/logger.cpp
 )
 
@@ -82,6 +83,7 @@ set(HEADERS
     src/ui/controls.h
     src/ui/playlistwidget.h
     src/subtitles/subtitleparser.h
+    src/subtitles/subtitleoverlay.h
     src/utils/logger.h
 )
 

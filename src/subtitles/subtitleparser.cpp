@@ -23,6 +23,11 @@ bool SubtitleParser::loadFile(const QString& filePath)
     QString content = stream.readAll();
     file.close();
 
+    // 检测 BOM 并自动处理编码
+    if (content.startsWith(QChar(0xFEFF))) {
+        content.remove(0, 1);
+    }
+
     m_filePath = filePath;
     QString suffix = QFileInfo(filePath).suffix().toLower();
 
@@ -89,8 +94,9 @@ bool SubtitleParser::parseSRT(const QString& content)
 
 bool SubtitleParser::parseASS(const QString& content)
 {
+    // Match Dialogue lines - captures start time, end time, and all remaining text
     static const QRegularExpression eventRegex(
-        R"(Dialogue:\s*\d+,(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2}),.*?,.*?,.*?,.*?,.*?,.*?,(.*))");
+        "Dialogue:\\s*\\d+,(\\d+:\\d{2}:\\d{2}\\.\\d{2}),(\\d+:\\d{2}:\\d{2}\\.\\d{2}),(.*?),.*?,.*?,.*?,.*?,.*?,(.*)");
 
     QRegularExpressionMatchIterator it = eventRegex.globalMatch(content);
 
@@ -101,15 +107,17 @@ bool SubtitleParser::parseASS(const QString& content)
             entry.startTime = parseTimecode(match.captured(1));
             entry.endTime = parseTimecode(match.captured(2));
 
-            QString text = match.captured(3);
-            text.replace(R"(\N)", "\n");
-            text.replace(R"(\n)", "\n");
+            QString text = match.captured(4);
             
-            // Remove ASS override tags like \pos(x,y), \fs20, etc.
-            static const QRegularExpression assTagRegex(R"(\\[a-zA-Z]+\([^)]*\))");
-            static const QRegularExpression assSimpleTagRegex(R"(\\[a-zA-Z]+\d+)");
+            // Replace ASS line breaks
+            text.replace("\\N", "\n");
+            text.replace("\\n", "\n");
+            
+            // Remove all ASS override tags: {\...} and \tag
+            static const QRegularExpression assBlockRegex("\\{[^}]*\\}");
+            static const QRegularExpression assTagRegex("\\\\[a-zA-Z][^a-zA-Z\\n]*");
+            text.remove(assBlockRegex);
             text.remove(assTagRegex);
-            text.remove(assSimpleTagRegex);
             text = text.trimmed();
 
             if (!text.isEmpty()) {
