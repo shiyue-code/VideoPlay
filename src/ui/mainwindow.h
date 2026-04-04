@@ -3,7 +3,7 @@
 
 #include <QMainWindow>
 #include <QVideoWidget>
-#include "common.h"
+#include "core/common.h"
 
 class QAction;
 class QMenu;

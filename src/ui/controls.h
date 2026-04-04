@@ -8,7 +8,7 @@
 #include <QComboBox>
 #include <QTimer>
 
-#include "common.h"
+#include "core/common.h"
 
 namespace VideoPlay {
 

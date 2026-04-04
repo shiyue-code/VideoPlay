@@ -1,4 +1,4 @@
-#include "playlistwidget.h"
+#include "ui/playlistwidget.h"
 
 #include <QVBoxLayout>
 #include <QMenu>

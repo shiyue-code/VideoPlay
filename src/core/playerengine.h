@@ -7,7 +7,7 @@
 #include <QAudioOutput>
 #include <QVideoSink>
 #include <QVideoFrame>
-#include "common.h"
+#include "core/common.h"
 
 namespace VideoPlay {
 

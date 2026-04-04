@@ -1,4 +1,4 @@
-#include "subtitleparser.h"
+#include "subtitles/subtitleparser.h"
 #include <QFile>
 #include <QTextStream>
 #include <QRegularExpression>

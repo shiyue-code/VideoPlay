@@ -1,4 +1,4 @@
-#include "controls.h"
+#include "ui/controls.h"
 
 #include <QHBoxLayout>
 #include <QToolTip>

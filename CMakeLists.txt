@@ -63,22 +63,26 @@ endif()
 # 源文件
 set(SOURCES
     src/main.cpp
-    src/playerengine.cpp
-    src/mainwindow.cpp
-    src/videowidget.cpp
-    src/controls.cpp
-    src/playlistwidget.cpp
-    src/subtitleparser.cpp
+    src/core/playerengine.cpp
+    src/core/settings.cpp
+    src/ui/mainwindow.cpp
+    src/ui/videowidget.cpp
+    src/ui/controls.cpp
+    src/ui/playlistwidget.cpp
+    src/subtitles/subtitleparser.cpp
+    src/utils/logger.cpp
 )
 
 set(HEADERS
-    src/common.h
-    src/playerengine.h
-    src/mainwindow.h
-    src/videowidget.h
-    src/controls.h
-    src/playlistwidget.h
-    src/subtitleparser.h
+    src/core/common.h
+    src/core/playerengine.h
+    src/core/settings.h
+    src/ui/mainwindow.h
+    src/ui/videowidget.h
+    src/ui/controls.h
+    src/ui/playlistwidget.h
+    src/subtitles/subtitleparser.h
+    src/utils/logger.h
 )
 
 # 资源文件 (如果存在)

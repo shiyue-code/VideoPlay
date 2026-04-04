@@ -4,7 +4,7 @@
 #include <QProcessEnvironment>
 #include <QDebug>
 #include <oclero/qlementine.hpp>
-#include "mainwindow.h"
+#include "ui/mainwindow.h"
 
 using namespace VideoPlay;
 
