@@ -1,0 +1,19 @@
+WEBVTT
+
+NOTE This is a sample WebVTT subtitle file
+
+00:00:01.000 --> 00:00:04.000
+This is the first WebVTT subtitle.
+
+00:00:05.000 --> 00:00:08.000
+Second subtitle with <b>bold</b> text.
+
+00:00:10.000 --> 00:00:14.000 align:center
+Centered subtitle text
+
+00:00:15.000 --> 00:00:19.000 position:90%
+Positioned subtitle near bottom
+
+00:00:20.000 --> 00:00:25.000
+Final WebVTT subtitle with
+multiple lines.
