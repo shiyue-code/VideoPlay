@@ -1,4 +1,11 @@
 #include <QDebug>
+#include <QScreen>
+#include <QPixmap>
+#include <QDateTime>
+#include <QStandardPaths>
+#include <QGuiApplication>
+#include <QPainter>
+#include <QWindow>
 #include "ui/mainwindow.h"
 
 #include <QApplication>
@@ -18,6 +25,8 @@
 #include <QMediaPlayer>
 
 #include "core/playerengine.h"
+#include "core/settings.h"
+#include "utils/logger.h"
 #include "ui/controls.h"
 #include "ui/playlistwidget.h"
 
@@ -31,15 +40,20 @@ MainWindow::MainWindow(QWidget* parent)
     , m_playlistWidget(nullptr)
     , m_playlistDock(nullptr)
     , m_fullscreenAction(nullptr)
+    , m_alwaysOnTopAction(nullptr)
+    , m_loopModeAction(nullptr)
     , m_timeLabel(nullptr)
     , m_statusLabel(nullptr)
     , m_isFullscreen(false)
+    , m_alwaysOnTop(false)
+    , m_loopMode(0)
 {
+    Logger::instance().info("MainWindow created");
     setAcceptDrops(true);
     setupUi();
     setupConnections();
+    loadSettings();
     setMinimumSize(640, 480);
-    resize(960, 640);
 }
 
 MainWindow::~MainWindow() = default;
@@ -48,6 +62,8 @@ bool MainWindow::openFile(const QString& filePath)
 {
     if (filePath.isEmpty() || !QFileInfo::exists(filePath))
         return false;
+
+    Logger::instance().info(QString("Opening file: %1").arg(filePath));
 
     if (m_engine->loadFile(filePath)) {
         // 检查播放列表中是否已存在，避免重复添加
@@ -59,7 +75,8 @@ bool MainWindow::openFile(const QString& filePath)
             }
         }
         m_playlistWidget->addItem(filePath);
-        setWindowTitle(QString("%1 - VideoPlay").arg(QFileInfo(filePath).fileName()));
+        Settings::instance().addRecentFile(filePath);
+        updateWindowTitle();
         m_engine->play();
         return true;
     }
@@ -74,7 +91,6 @@ void MainWindow::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Use QVideoWidget from Qt Multimedia
     m_videoWidget = new QVideoWidget(central);
     m_engine->mediaPlayer()->setVideoOutput(m_videoWidget);
     
@@ -111,9 +127,15 @@ void MainWindow::setupUi()
     playbackMenu->addAction(tr("Backward -5s"), this, [this]() {
         m_engine->seek(m_engine->position() - 5000);
     }, Qt::Key_Left);
+    playbackMenu->addSeparator();
+    m_loopModeAction = playbackMenu->addAction(tr("Loop: &Off"), this, &MainWindow::onToggleLoopMode, Qt::Key_L);
+    m_loopModeAction->setCheckable(true);
+    playbackMenu->addAction(tr("Take &Screenshot"), this, &MainWindow::onTakeScreenshot, Qt::Key_S);
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     m_fullscreenAction = viewMenu->addAction(tr("&Fullscreen"), this, &MainWindow::onToggleFullscreen, Qt::Key_F11);
+    m_alwaysOnTopAction = viewMenu->addAction(tr("Always on &Top"), this, &MainWindow::onToggleAlwaysOnTop, Qt::Key_T);
+    m_alwaysOnTopAction->setCheckable(true);
     viewMenu->addAction(m_playlistDock->toggleViewAction());
 
     menuBar()->addMenu(tr("&Help"))->addAction(tr("&About"), this, &MainWindow::onAbout);
@@ -122,8 +144,8 @@ void MainWindow::setupUi()
     QToolBar* toolbar = addToolBar(tr("Main"));
     toolbar->addAction(fileMenu->actions().first());
     toolbar->addSeparator();
-    toolbar->addAction(playbackMenu->actions().at(0)); // Play/Pause
-    toolbar->addAction(playbackMenu->actions().at(1)); // Stop
+    toolbar->addAction(playbackMenu->actions().at(0));
+    toolbar->addAction(playbackMenu->actions().at(1));
 
     // Status bar
     m_statusLabel = new QLabel(tr("Ready"), this);
@@ -134,13 +156,11 @@ void MainWindow::setupUi()
 
 void MainWindow::setupConnections()
 {
-    // Engine signals
     connect(m_engine, &PlayerEngine::stateChanged, this, &MainWindow::onStateChanged);
     connect(m_engine, &PlayerEngine::positionChanged, this, &MainWindow::onPositionChanged);
     connect(m_engine, &PlayerEngine::durationChanged, this, &MainWindow::onDurationChanged);
     connect(m_engine, &PlayerEngine::errorOccurred, this, &MainWindow::onError);
 
-    // Controls signals
     connect(m_controls, &Controls::playClicked, m_engine, &PlayerEngine::play);
     connect(m_controls, &Controls::pauseClicked, m_engine, &PlayerEngine::pause);
     connect(m_controls, &Controls::stopClicked, m_engine, &PlayerEngine::stop);
@@ -156,10 +176,59 @@ void MainWindow::setupConnections()
     });
     connect(m_controls, &Controls::fullscreenClicked, this, &MainWindow::onToggleFullscreen);
 
-    // Playlist
     connect(m_playlistWidget, &PlaylistWidget::itemDoubleClicked, this, &MainWindow::onPlaylistDoubleClicked);
+}
 
-    // Video widget - using QVideoWidget, handle double click via event
+void MainWindow::loadSettings()
+{
+    auto& settings = Settings::instance();
+    
+    // Window geometry
+    QRect geo = settings.windowGeometry();
+    setGeometry(geo);
+
+    // Volume
+    int vol = settings.volume();
+    m_engine->setVolume(vol);
+    m_controls->setVolume(vol);
+
+    // Muted
+    bool muted = settings.isMuted();
+    m_engine->setMuted(muted);
+    m_controls->setMuted(muted);
+
+    // Playback speed
+    double speed = settings.playbackSpeed();
+    m_engine->setPlaybackSpeed(speed);
+    m_controls->setPlaybackSpeed(speed);
+
+    // Always on top
+    m_alwaysOnTop = false;
+    m_alwaysOnTopAction->setChecked(false);
+
+    // Loop mode
+    m_loopMode = 0;
+    m_loopModeAction->setText(tr("Loop: &Off"));
+    m_loopModeAction->setChecked(false);
+
+    Logger::instance().info(QString("Settings loaded: volume=%1, speed=%2, muted=%3").arg(vol).arg(speed).arg(muted ? "true" : "false"));
+}
+
+void MainWindow::saveSettings()
+{
+    auto& settings = Settings::instance();
+    settings.setWindowGeometry(geometry());
+    settings.setVolume(m_engine->volume());
+    settings.setMuted(m_engine->isMuted());
+    settings.setPlaybackSpeed(m_engine->playbackSpeed());
+}
+
+void MainWindow::updateWindowTitle()
+{
+    QString fileName = m_engine->filePath().isEmpty() 
+        ? "VideoPlay" 
+        : QString("%1 - VideoPlay").arg(QFileInfo(m_engine->filePath()).fileName());
+    setWindowTitle(fileName);
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event)
@@ -204,6 +273,15 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
     case Qt::Key_F11:
         onToggleFullscreen();
         break;
+    case Qt::Key_T:
+        onToggleAlwaysOnTop();
+        break;
+    case Qt::Key_L:
+        onToggleLoopMode();
+        break;
+    case Qt::Key_S:
+        onTakeScreenshot();
+        break;
     default:
         QMainWindow::keyPressEvent(event);
     }
@@ -211,6 +289,8 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    Logger::instance().info("MainWindow closing, saving settings");
+    saveSettings();
     m_engine->stop();
     event->accept();
 }
@@ -231,6 +311,24 @@ void MainWindow::onStateChanged(PlaybackState state)
     case PlaybackState::Paused:  m_statusLabel->setText(tr("Paused"));  break;
     }
     m_controls->setPlaybackState(state);
+
+    // Handle loop mode when playback stops
+    if (state == PlaybackState::Stopped && m_loopMode > 0) {
+        if (m_loopMode == 1) {
+            // Single loop
+            m_engine->seek(0);
+            m_engine->play();
+        } else if (m_loopMode == 2) {
+            // Loop all - play next item
+            int current = m_playlistWidget->currentIndex();
+            int next = (current + 1) % m_playlistWidget->count();
+            if (next == 0 && m_playlistWidget->count() > 0) {
+                openFile(m_playlistWidget->item(0));
+            } else if (m_playlistWidget->count() > 0) {
+                openFile(m_playlistWidget->item(next));
+            }
+        }
+    }
 }
 
 void MainWindow::onPositionChanged(qint64 position)
@@ -247,8 +345,7 @@ void MainWindow::onDurationChanged(qint64 duration)
 void MainWindow::onError(const QString& error)
 {
     m_statusLabel->setText(tr("Error: %1").arg(error));
-    QMessageBox::warning(this, tr("Playback Error"), error);
-    qDebug() << "Playback error:" << error;
+    Logger::instance().error(QString("Playback error: %1").arg(error));
 }
 
 void MainWindow::onPlaylistDoubleClicked(int index)
@@ -261,8 +358,86 @@ void MainWindow::onPlaylistDoubleClicked(int index)
 void MainWindow::onToggleFullscreen()
 {
     m_isFullscreen = !m_isFullscreen;
-    if (m_isFullscreen) showFullScreen();
-    else showNormal();
+    if (m_isFullscreen) {
+        menuBar()->hide();
+        statusBar()->hide();
+        m_playlistDock->hide();
+        showFullScreen();
+    } else {
+        menuBar()->show();
+        statusBar()->show();
+        m_playlistDock->show();
+        showNormal();
+    }
+}
+
+void MainWindow::onToggleAlwaysOnTop()
+{
+    m_alwaysOnTop = !m_alwaysOnTop;
+    m_alwaysOnTopAction->setChecked(m_alwaysOnTop);
+    setWindowFlag(Qt::WindowStaysOnTopHint, m_alwaysOnTop);
+    show();
+    Logger::instance().info(QString("Always on top: %1").arg(m_alwaysOnTop ? "ON" : "OFF"));
+}
+
+void MainWindow::onToggleLoopMode()
+{
+    m_loopMode = (m_loopMode + 1) % 3;
+    switch (m_loopMode) {
+    case 0:
+        m_loopModeAction->setText(tr("Loop: &Off"));
+        m_loopModeAction->setChecked(false);
+        Logger::instance().info("Loop mode: OFF");
+        break;
+    case 1:
+        m_loopModeAction->setText(tr("Loop: &Single"));
+        m_loopModeAction->setChecked(true);
+        Logger::instance().info("Loop mode: SINGLE");
+        break;
+    case 2:
+        m_loopModeAction->setText(tr("Loop: &All"));
+        m_loopModeAction->setChecked(true);
+        Logger::instance().info("Loop mode: ALL");
+        break;
+    }
+}
+
+void MainWindow::onTakeScreenshot()
+{
+    // Use screen capture of the video widget area
+    QScreen* screen = windowHandle()->screen();
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+    if (!screen) return;
+
+    // Get the video widget's global position and size
+    QPoint globalPos = m_videoWidget->mapToGlobal(QPoint(0, 0));
+    QSize videoSize = m_videoWidget->size();
+    QRect videoRect(globalPos, videoSize);
+
+    // Capture the screen area where video is displayed
+    QPixmap screenshot = screen->grabWindow(0, videoRect.x(), videoRect.y(), videoRect.width(), videoRect.height());
+
+    if (screenshot.isNull() || screenshot.width() == 0) {
+        m_statusLabel->setText(tr("Failed to capture screenshot"));
+        Logger::instance().error("Screenshot capture failed");
+        return;
+    }
+
+    QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
+    QString fileName = QString("screenshot_%1.png").arg(timestamp);
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    QDir().mkpath(dir);
+    QString fullPath = QString("%1/%2").arg(dir, fileName);
+
+    if (screenshot.save(fullPath, "PNG")) {
+        m_statusLabel->setText(tr("Screenshot saved: %1").arg(fullPath));
+        Logger::instance().info(QString("Screenshot saved: %1").arg(fullPath));
+    } else {
+        m_statusLabel->setText(tr("Failed to save screenshot"));
+        Logger::instance().error("Failed to save screenshot");
+    }
 }
 
 void MainWindow::onAbout()
@@ -273,7 +448,6 @@ void MainWindow::onAbout()
 
 void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    // 双击播放界面：暂停/播放切换
     if (m_engine->state() == PlaybackState::Playing) {
         m_engine->pause();
     } else {

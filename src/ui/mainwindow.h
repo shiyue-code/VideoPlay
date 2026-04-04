@@ -43,6 +43,9 @@ private slots:
     void onPlaylistDoubleClicked(int index);
     void onToggleFullscreen();
     void onAbout();
+    void onToggleAlwaysOnTop();
+    void onToggleLoopMode();
+    void onTakeScreenshot();
 
 private:
     PlayerEngine* m_engine;
@@ -51,12 +54,19 @@ private:
     PlaylistWidget* m_playlistWidget;
     QDockWidget* m_playlistDock;
     QAction* m_fullscreenAction;
+    QAction* m_alwaysOnTopAction;
+    QAction* m_loopModeAction;
     QLabel* m_timeLabel;
     QLabel* m_statusLabel;
     bool m_isFullscreen;
+    bool m_alwaysOnTop;
+    int m_loopMode; // 0: no loop, 1: single, 2: all
 
     void setupUi();
     void setupConnections();
+    void loadSettings();
+    void saveSettings();
+    void updateWindowTitle();
 };
 
 } // namespace VideoPlay
