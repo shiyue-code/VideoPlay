@@ -1,5 +1,5 @@
 #include <QDebug>
-#include "mainwindow.h"
+#include "ui/mainwindow.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -17,9 +17,9 @@
 #include <QFileInfo>
 #include <QMediaPlayer>
 
-#include "playerengine.h"
-#include "controls.h"
-#include "playlistwidget.h"
+#include "core/playerengine.h"
+#include "ui/controls.h"
+#include "ui/playlistwidget.h"
 
 namespace VideoPlay {
 

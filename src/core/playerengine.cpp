@@ -1,4 +1,4 @@
-#include "playerengine.h"
+#include "core/playerengine.h"
 #include <QUrl>
 #include <QDebug>
 #include <QDir>
