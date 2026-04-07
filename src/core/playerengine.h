@@ -3,18 +3,21 @@
 
 #include <QObject>
 #include <QString>
-#include <QMediaPlayer>
-#include <QAudioOutput>
 #include "core/common.h"
 
+// Forward declaration
+class QAudioSink;
+
 namespace VideoPlay {
+
+class FFmpegPlayer;
 
 class PlayerEngine : public QObject {
     Q_OBJECT
 
 public:
     explicit PlayerEngine(QObject* parent = nullptr);
-    ~PlayerEngine();
+    ~PlayerEngine() override;
 
     bool loadFile(const QString& filePath);
     void play();
@@ -33,7 +36,6 @@ public:
     double playbackSpeed() const;
     int volume() const;
     bool isMuted() const;
-    QMediaPlayer* mediaPlayer() const { return m_mediaPlayer; }
 
 signals:
     void stateChanged(PlaybackState state);
@@ -44,23 +46,24 @@ signals:
     void volumeChanged(int volume);
     void muteChanged(bool muted);
     void fileLoaded(const QString& filePath);
+    void videoFrameReady(const QImage& frame);
 
 private slots:
-    void onMediaStatusChanged(QMediaPlayer::MediaStatus status);
     void onPositionChanged(qint64 position);
     void onDurationChanged(qint64 duration);
-    void onErrorOccurred(QMediaPlayer::Error error, const QString& errorString);
-    void onPlaybackStateChanged(QMediaPlayer::PlaybackState state);
+    void onErrorOccurred(const QString& error);
+    void onPlaybackStateChanged(PlaybackState state);
+    void onVideoFrameReady(const QImage& frame, qint64 pts);
 
 private:
-    QMediaPlayer* m_mediaPlayer;
-    QAudioOutput* m_audioOutput;
+    FFmpegPlayer* m_player;
     QString m_filePath;
     PlaybackState m_state;
     double m_playbackSpeed;
     int m_volume;
     bool m_muted;
-    bool m_autoPlayAfterLoad;  // 加载完成后自动播放
+    bool m_autoPlayAfterLoad;
+    void propagateState(PlaybackState state);
 };
 
 } // namespace VideoPlay

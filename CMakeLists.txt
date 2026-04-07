@@ -12,8 +12,8 @@ set(CMAKE_AUTOUIC ON)
 # 添加 Qlementine 本地库
 add_subdirectory(3rdparty/qlementine)
 
-# 查找Qt6 - 必须包含 MultimediaWidgets
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia MultimediaWidgets)
+# 查找Qt6 (QAudioSink 需要 Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui OpenGL OpenGLWidgets Multimedia)
 
 # 查找FFmpeg (通过FIND包或FFmpeg_ROOT)
 find_package(PkgConfig QUIET)
@@ -63,6 +63,7 @@ endif()
 # 源文件
 set(SOURCES
     src/main.cpp
+    src/core/ffmpegplayer.cpp
     src/core/playerengine.cpp
     src/core/settings.cpp
     src/ui/mainwindow.cpp
@@ -75,6 +76,7 @@ set(SOURCES
 )
 
 set(HEADERS
+    src/core/ffmpegplayer.h
     src/core/common.h
     src/core/playerengine.h
     src/core/settings.h
@@ -113,11 +115,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
-    Qt6::Multimedia
+    Qt6::OpenGL
+    Qt6::OpenGLWidgets
 )
 
+# 链接 Qt6::Multimedia (必需，用于 QAudioSink)
+target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Multimedia)
+
 if(TARGET Qt6::MultimediaWidgets)
-    target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::MultimediaWidgets)
+    # Qt MultimediaWidgets no longer used
 endif()
 
 if(FFMPEG_FOUND)
@@ -128,7 +134,7 @@ endif()
 
 # Windows特定设置
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
+    target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi opengl32)
 
     # 添加应用程序图标
     if(EXISTS "${CMAKE_SOURCE_DIR}/resources/icons/app.ico")

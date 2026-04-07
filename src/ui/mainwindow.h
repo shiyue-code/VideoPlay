@@ -2,7 +2,6 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QVideoWidget>
 #include "core/common.h"
 
 class QAction;
@@ -19,6 +18,7 @@ namespace VideoPlay {
 
 class PlayerEngine;
 class Controls;
+class VideoWidget;
 class SubtitleOverlay;
 
 class MainWindow : public QMainWindow {
@@ -55,7 +55,7 @@ private slots:
 
 private:
     PlayerEngine* m_engine;
-    QVideoWidget* m_videoWidget;
+    VideoWidget* m_videoWidget;
     QWidget* m_videoContainer;
     Controls* m_controls;
     PlaylistWidget* m_playlistWidget;
@@ -77,8 +77,7 @@ private:
     void loadSettings();
     void saveSettings();
     void updateWindowTitle();
-    void updateSubtitle(qint64 position);
-    void resizeEvent(QResizeEvent* event) override;
+    void updateSubtitles(qint64 position);
 };
 
 } // namespace VideoPlay

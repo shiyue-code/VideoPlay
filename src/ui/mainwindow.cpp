@@ -1,3 +1,4 @@
+#include <QStackedLayout>
 #include <QScreen>
 #include <QPixmap>
 #include <QDateTime>
@@ -21,13 +22,13 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QFileInfo>
-#include <QMediaPlayer>
-
 #include "core/playerengine.h"
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "ui/controls.h"
+#include "core/common.h"
 #include "ui/playlistwidget.h"
+#include "ui/videowidget.h"
 #include "subtitles/subtitleparser.h"
 #include "subtitles/subtitleoverlay.h"
 
@@ -36,7 +37,6 @@ namespace VideoPlay {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_engine(new PlayerEngine(this))
-    , m_videoWidget(nullptr)
     , m_controls(nullptr)
     , m_playlistWidget(nullptr)
     , m_playlistDock(nullptr)
@@ -64,24 +64,25 @@ MainWindow::~MainWindow() = default;
 
 bool MainWindow::openFile(const QString& filePath)
 {
+    qDebug() << "MainWindow::openFile called with:" << filePath;
     if (filePath.isEmpty() || !QFileInfo::exists(filePath))
         return false;
 
     Logger::instance().info(QString("Opening file: %1").arg(filePath));
 
-    if (m_engine->loadFile(filePath)) {
+    bool result = m_engine->loadFile(filePath);
+    qDebug() << "loadFile result:" << result;
+    if (result) {
         // 检查播放列表中是否已存在，避免重复添加
         for (int i = 0; i < m_playlistWidget->count(); ++i) {
             if (m_playlistWidget->item(i) == filePath) {
                 m_playlistWidget->setCurrentIndex(i);
-                m_engine->play();
                 return true;
             }
         }
         m_playlistWidget->addItem(filePath);
         Settings::instance().addRecentFile(filePath);
         updateWindowTitle();
-        m_engine->play();
         return true;
     }
     return false;
@@ -95,25 +96,18 @@ void MainWindow::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Container for video + subtitle
+    // Container for video + subtitle using stacked layout
     m_videoContainer = new QWidget(central);
     m_videoContainer->setMinimumSize(320, 240);
     m_videoContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    auto* videoLayout = new QVBoxLayout(m_videoContainer);
+    auto* videoLayout = new QStackedLayout(m_videoContainer);
+    videoLayout->setStackingMode(QStackedLayout::StackAll);
     videoLayout->setContentsMargins(0, 0, 0, 0);
-    videoLayout->setSpacing(0);
 
-    m_videoWidget = new QVideoWidget(m_videoContainer);
+    // Video widget (receives QImage frames from FFmpegPlayer)
+    m_videoWidget = new VideoWidget(m_videoContainer);
     m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_engine->mediaPlayer()->setVideoOutput(m_videoWidget);
     videoLayout->addWidget(m_videoWidget);
-
-    // Subtitle overlay as top-level window (because QVideoWidget creates native window on Windows)
-    m_subtitleOverlay = new SubtitleOverlay(nullptr);
-    m_subtitleOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
-    m_subtitleOverlay->setWindowFlags(Qt::FramelessWindowHint | Qt::Tool);
-    m_subtitleOverlay->setAttribute(Qt::WA_ShowWithoutActivating);
-    m_subtitleOverlay->show();
 
     layout->addWidget(m_videoContainer, 1);
 
@@ -186,8 +180,10 @@ void MainWindow::setupConnections()
 {
     connect(m_engine, &PlayerEngine::stateChanged, this, &MainWindow::onStateChanged);
     connect(m_engine, &PlayerEngine::positionChanged, this, &MainWindow::onPositionChanged);
+    connect(m_engine, &PlayerEngine::positionChanged, this, &MainWindow::updateSubtitles);
     connect(m_engine, &PlayerEngine::durationChanged, this, &MainWindow::onDurationChanged);
     connect(m_engine, &PlayerEngine::errorOccurred, this, &MainWindow::onError);
+    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoWidget, &VideoWidget::setFrame);
 
     connect(m_controls, &Controls::playClicked, m_engine, &PlayerEngine::play);
     connect(m_controls, &Controls::pauseClicked, m_engine, &PlayerEngine::pause);
@@ -333,29 +329,15 @@ void MainWindow::onOpenFile()
 
 void MainWindow::onStateChanged(PlaybackState state)
 {
-    switch (state) {
-    case PlaybackState::Stopped: m_statusLabel->setText(tr("Stopped")); break;
-    case PlaybackState::Playing: m_statusLabel->setText(tr("Playing")); break;
-    case PlaybackState::Paused:  m_statusLabel->setText(tr("Paused"));  break;
-    }
+    qDebug() << "onStateChanged:" << static_cast<int>(state);
     m_controls->setPlaybackState(state);
 
-    // Handle loop mode when playback stops
-    if (state == PlaybackState::Stopped && m_loopMode > 0) {
-        if (m_loopMode == 1) {
-            // Single loop
-            m_engine->seek(0);
-            m_engine->play();
-        } else if (m_loopMode == 2) {
-            // Loop all - play next item
-            int current = m_playlistWidget->currentIndex();
-            int next = (current + 1) % m_playlistWidget->count();
-            if (next == 0 && m_playlistWidget->count() > 0) {
-                openFile(m_playlistWidget->item(0));
-            } else if (m_playlistWidget->count() > 0) {
-                openFile(m_playlistWidget->item(next));
-            }
-        }
+    if (state == PlaybackState::Playing) {
+        m_statusLabel->setText(tr("Playing: %1").arg(QFileInfo(m_engine->filePath()).fileName()));
+    } else if (state == PlaybackState::Paused) {
+        m_statusLabel->setText(tr("Paused"));
+    } else {
+        m_statusLabel->setText(tr("Stopped"));
     }
 }
 
@@ -363,7 +345,7 @@ void MainWindow::onPositionChanged(qint64 position)
 {
     m_controls->setPosition(position);
     m_timeLabel->setText(QString("%1 / %2").arg(formatTime(position)).arg(formatTime(m_engine->duration())));
-    updateSubtitle(position);
+    updateSubtitles(position);
 }
 
 void MainWindow::onDurationChanged(qint64 duration)
@@ -440,9 +422,9 @@ void MainWindow::onTakeScreenshot()
     }
     if (!screen) return;
 
-    // Get the video widget's global position and size
-    QPoint globalPos = m_videoWidget->mapToGlobal(QPoint(0, 0));
-    QSize videoSize = m_videoWidget->size();
+    // Get the video container's global position and size
+    QPoint globalPos = m_videoContainer->mapToGlobal(QPoint(0, 0));
+    QSize videoSize = m_videoContainer->size();
     QRect videoRect(globalPos, videoSize);
 
     // Capture the screen area where video is displayed
@@ -485,17 +467,6 @@ void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
     event->accept();
 }
 
-void MainWindow::resizeEvent(QResizeEvent* event)
-{
-    QMainWindow::resizeEvent(event);
-    if (m_videoContainer && m_subtitleOverlay) {
-        QPoint geo = m_videoContainer->mapToGlobal(QPoint(0, 0));
-        QSize sz = m_videoContainer->size();
-        m_subtitleOverlay->setGeometry(geo.x(), geo.y(), sz.width(), sz.height());
-        m_subtitleOverlay->raise();
-    }
-}
-
 void MainWindow::onLoadSubtitle()
 {
     QString path = QFileDialog::getOpenFileName(this, tr("Load Subtitle"), QString(),
@@ -506,6 +477,9 @@ void MainWindow::onLoadSubtitle()
     if (m_subtitleParser->loadFile(path)) {
         m_statusLabel->setText(tr("Subtitle loaded: %1").arg(QFileInfo(path).fileName()));
         Logger::instance().info(QString("Subtitle loaded: %1").arg(path));
+        qDebug() << "Subtitle entries loaded:" << m_subtitleParser->entries().size();
+        // Force update subtitle for current position after loading
+        onPositionChanged(m_engine->position());
     } else {
         m_statusLabel->setText(tr("Failed to load subtitle"));
         Logger::instance().error(QString("Failed to load subtitle: %1").arg(path));
@@ -524,16 +498,21 @@ void MainWindow::onSubtitleDelayMinus()
     m_statusLabel->setText(tr("Subtitle delay: %1ms").arg(m_subtitleDelay));
 }
 
-void MainWindow::updateSubtitle(qint64 position)
+void MainWindow::updateSubtitles(qint64 position)
 {
     if (!m_subtitleParser->isLoaded()) {
-        m_subtitleOverlay->setText(QString());
+        if (m_subtitleOverlay) {
+            m_subtitleOverlay->setText(QString());
+        }
         return;
     }
 
     qint64 adjustedPos = position + m_subtitleDelay;
     QString text = m_subtitleParser->subtitleAt(adjustedPos);
-    m_subtitleOverlay->setText(text);
+
+    if (m_subtitleOverlay) {
+        m_subtitleOverlay->setText(text);
+    }
 }
 
 } // namespace VideoPlay
