@@ -1,45 +1,49 @@
 #include "core/playerengine.h"
-#include <QUrl>
+#include "core/ffmpegplayer.h"
 #include <QDebug>
-#include <QDir>
-#include <QFile>
-#include <QMimeType>
-#include <QMimeDatabase>
+#include <QFileInfo>
 
 namespace VideoPlay {
 
 PlayerEngine::PlayerEngine(QObject* parent)
     : QObject(parent)
-    , m_mediaPlayer(new QMediaPlayer(this))
-    , m_audioOutput(new QAudioOutput(this))
+    , m_player(new FFmpegPlayer(this))
     , m_state(PlaybackState::Stopped)
     , m_playbackSpeed(1.0)
     , m_volume(100)
     , m_muted(false)
     , m_autoPlayAfterLoad(false)
 {
-    m_mediaPlayer->setAudioOutput(m_audioOutput);
-    
-    connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged,
-            this, &PlayerEngine::onMediaStatusChanged);
-    connect(m_mediaPlayer, &QMediaPlayer::positionChanged,
-            this, &PlayerEngine::onPositionChanged);
-    connect(m_mediaPlayer, &QMediaPlayer::durationChanged,
-            this, &PlayerEngine::onDurationChanged);
-    connect(m_mediaPlayer, &QMediaPlayer::errorOccurred,
-            this, &PlayerEngine::onErrorOccurred);
-    connect(m_mediaPlayer, &QMediaPlayer::playbackStateChanged,
+    // Connect FFmpegPlayer signals to our signals
+    connect(m_player, &FFmpegPlayer::stateChanged,
             this, &PlayerEngine::onPlaybackStateChanged);
-    
-    m_audioOutput->setVolume(m_volume / 100.0);
-    
-    qDebug() << "PlayerEngine initialized";
+    connect(m_player, &FFmpegPlayer::positionChanged,
+            this, &PlayerEngine::onPositionChanged);
+    connect(m_player, &FFmpegPlayer::durationChanged,
+            this, &PlayerEngine::onDurationChanged);
+    connect(m_player, &FFmpegPlayer::errorOccurred,
+            this, &PlayerEngine::onErrorOccurred);
+    connect(m_player, &FFmpegPlayer::fileLoaded,
+            this, &PlayerEngine::fileLoaded);
+    connect(m_player, &FFmpegPlayer::playbackSpeedChanged,
+            this, &PlayerEngine::playbackSpeedChanged);
+    connect(m_player, &FFmpegPlayer::volumeChanged,
+            this, &PlayerEngine::volumeChanged);
+    connect(m_player, &FFmpegPlayer::muteChanged,
+            this, &PlayerEngine::muteChanged);
+    connect(m_player, &FFmpegPlayer::videoFrameReady,
+            this, &PlayerEngine::onVideoFrameReady);
+
+    m_player->setVolume(m_volume);
+    m_player->setPlaybackSpeed(m_playbackSpeed);
+
+    qDebug() << "PlayerEngine initialized with FFmpeg backend";
 }
 
 PlayerEngine::~PlayerEngine()
 {
-    if (m_mediaPlayer->playbackState() != QMediaPlayer::StoppedState) {
-        m_mediaPlayer->stop();
+    if (m_player->state() != PlaybackState::Stopped) {
+        m_player->stop();
     }
 }
 
@@ -47,67 +51,40 @@ bool PlayerEngine::loadFile(const QString& filePath)
 {
     QFileInfo fileInfo(filePath);
     QString absolutePath = fileInfo.absoluteFilePath();
-    QString suffix = fileInfo.suffix().toLower();
-    QUrl url = QUrl::fromLocalFile(absolutePath);
-    
-    qDebug() << "File extension:" << suffix;
-    
-    QMimeDatabase mimeDb;
-    QMimeType mimeType = mimeDb.mimeTypeForFile(fileInfo);
-    qDebug() << "MIME type:" << mimeType.name();
-    
-    qDebug() << "Absolute path:" << absolutePath;
-    qDebug() << "URL:" << url;
-    qDebug() << "URL is valid:" << url.isValid();
-    qDebug() << "File exists:" << QFile::exists(absolutePath);
-    
-    if (!url.isValid() || !QFile::exists(absolutePath)) {
-        emit errorOccurred(QString("Invalid file: %1").arg(filePath));
+
+    qDebug() << "Loading file:" << absolutePath;
+
+    if (!fileInfo.exists()) {
+        emit errorOccurred(QString("File not found: %1").arg(filePath));
         return false;
     }
-    
+
     m_filePath = filePath;
-    m_autoPlayAfterLoad = true;
-    
-    m_mediaPlayer->setSource(url);
-    
-    qDebug() << "Source set, media status:" << m_mediaPlayer->mediaStatus();
-    
-    emit fileLoaded(filePath);
-    return true;
+    bool result = m_player->loadFile(absolutePath);
+
+    if (result) {
+        emit fileLoaded(filePath);
+    }
+
+    return result;
 }
 
 void PlayerEngine::play()
 {
-    qDebug() << "play() called, media status:" << m_mediaPlayer->mediaStatus();
-    
-    // 如果媒体还没准备好加载，等待加载完成后再播放
-    if (m_mediaPlayer->mediaStatus() == QMediaPlayer::NoMedia) {
-        qDebug() << "No media, setting auto-play flag";
-        m_autoPlayAfterLoad = true;
-        return;
-    }
-    
-    // 如果媒体正在加载中，也等待加载完成
-    if (m_mediaPlayer->mediaStatus() == QMediaPlayer::LoadingMedia ||
-        m_mediaPlayer->mediaStatus() == QMediaPlayer::StalledMedia) {
-        qDebug() << "Media loading, setting auto-play flag";
-        m_autoPlayAfterLoad = true;
-        return;
-    }
-    
-    // 媒体已准备好，直接播放
-    m_mediaPlayer->play();
+    qDebug() << "PlayerEngine::play() called";
+    m_player->play();
 }
 
 void PlayerEngine::pause()
 {
-    m_mediaPlayer->pause();
+    qDebug() << "PlayerEngine::pause() called";
+    m_player->pause();
 }
 
 void PlayerEngine::stop()
 {
-    m_mediaPlayer->stop();
+    qDebug() << "PlayerEngine::stop() called";
+    m_player->stop();
 }
 
 void PlayerEngine::seek(qint64 position)
@@ -115,34 +92,42 @@ void PlayerEngine::seek(qint64 position)
     if (position < 0) position = 0;
     qint64 dur = duration();
     if (dur > 0 && position > dur) position = dur;
-    m_mediaPlayer->setPosition(position);
+
+    qDebug() << "PlayerEngine::seek() to" << position << "ms";
+    m_player->seek(position);
 }
 
 void PlayerEngine::setPlaybackSpeed(double speed)
 {
     if (speed < 0.25) speed = 0.25;
     if (speed > 4.0) speed = 4.0;
-    
-    m_playbackSpeed = speed;
-    m_mediaPlayer->setPlaybackRate(speed);
-    emit playbackSpeedChanged(speed);
+
+    if (!qFuzzyCompare(m_playbackSpeed, speed)) {
+        m_playbackSpeed = speed;
+        m_player->setPlaybackSpeed(speed);
+        emit playbackSpeedChanged(speed);
+    }
 }
 
 void PlayerEngine::setVolume(int volume)
 {
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
-    
-    m_volume = volume;
-    m_audioOutput->setVolume(volume / 100.0);
-    emit volumeChanged(volume);
+
+    if (m_volume != volume) {
+        m_volume = volume;
+        m_player->setVolume(volume);
+        emit volumeChanged(volume);
+    }
 }
 
 void PlayerEngine::setMuted(bool muted)
 {
-    m_muted = muted;
-    m_audioOutput->setMuted(muted);
-    emit muteChanged(muted);
+    if (m_muted != muted) {
+        m_muted = muted;
+        m_player->setMuted(muted);
+        emit muteChanged(muted);
+    }
 }
 
 PlaybackState PlayerEngine::state() const
@@ -152,12 +137,12 @@ PlaybackState PlayerEngine::state() const
 
 qint64 PlayerEngine::position() const
 {
-    return m_mediaPlayer->position();
+    return m_player->position();
 }
 
 qint64 PlayerEngine::duration() const
 {
-    return m_mediaPlayer->duration();
+    return m_player->duration();
 }
 
 QString PlayerEngine::filePath() const
@@ -180,35 +165,6 @@ bool PlayerEngine::isMuted() const
     return m_muted;
 }
 
-void PlayerEngine::onMediaStatusChanged(QMediaPlayer::MediaStatus status)
-{
-    qDebug() << "Media status changed:" << status;
-    switch (status) {
-        case QMediaPlayer::LoadedMedia:
-        case QMediaPlayer::BufferedMedia:
-            // Media ready, state remains as current playback state
-            qDebug() << "Media loaded/buffered";
-            // 如果设置了自动播放标志，则开始播放
-            if (m_autoPlayAfterLoad) {
-                m_autoPlayAfterLoad = false;
-                qDebug() << "Auto-playing after load";
-                m_mediaPlayer->play();
-            }
-            break;
-        case QMediaPlayer::EndOfMedia:
-            m_state = PlaybackState::Stopped;
-            emit stateChanged(m_state);
-            qDebug() << "End of media";
-            break;
-        case QMediaPlayer::InvalidMedia:
-            emit errorOccurred("Invalid media");
-            qDebug() << "Invalid media";
-            break;
-        default:
-            break;
-    }
-}
-
 void PlayerEngine::onPositionChanged(qint64 position)
 {
     emit positionChanged(position);
@@ -219,33 +175,23 @@ void PlayerEngine::onDurationChanged(qint64 duration)
     emit durationChanged(duration);
 }
 
-void PlayerEngine::onErrorOccurred(QMediaPlayer::Error error, const QString& errorString)
+void PlayerEngine::onErrorOccurred(const QString& error)
 {
-    Q_UNUSED(error)
-    emit errorOccurred(errorString);
+    emit errorOccurred(error);
 }
 
-void PlayerEngine::onPlaybackStateChanged(QMediaPlayer::PlaybackState state)
+void PlayerEngine::onPlaybackStateChanged(PlaybackState state)
 {
-    PlaybackState newState;
-    switch (state) {
-        case QMediaPlayer::PlayingState:
-            newState = PlaybackState::Playing;
-            break;
-        case QMediaPlayer::PausedState:
-            newState = PlaybackState::Paused;
-            break;
-        case QMediaPlayer::StoppedState:
-            newState = PlaybackState::Stopped;
-            break;
-        default:
-            return;
+    if (m_state != state) {
+        m_state = state;
+        emit stateChanged(state);
     }
-    
-    if (m_state != newState) {
-        m_state = newState;
-        emit stateChanged(newState);
-    }
+}
+
+void PlayerEngine::onVideoFrameReady(const QImage& frame, qint64 pts)
+{
+    Q_UNUSED(pts);
+    emit videoFrameReady(frame);
 }
 
 } // namespace VideoPlay

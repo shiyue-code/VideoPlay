@@ -1,183 +1,110 @@
-# VideoPlay Development Guide
+# VideoPlay Agent Development Guide
 
 This file provides essential information for agents working on this codebase.
 
+**Platform**: Windows + MSVC2019 + Qt 6.7.3
+
 ## Build Commands
 
-### Quick Build (Windows with MSVC)
+### Configure
 ```bash
-# Configure
-cmake -B build -G "Visual Studio 16 2019" -A x64 -DCMAKE_PREFIX_PATH="D:/Qt/6.7.3/msvc2019_64;D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared" -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared"
-
-# Build Release
-cmake --build build --config Release
-
-# Build Debug
-cmake --build build --config Debug
+cmake -B build -G "Visual Studio 16 2019" -A x64 \
+  -DCMAKE_PREFIX_PATH="D:/Qt/6.7.3/msvc2019_64;D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared" \
+  -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared"
 ```
 
-### Single File Rebuild
-After editing a source file, rebuild just the affected target:
+### Build
 ```bash
 cmake --build build --config Release --target VideoPlay
 ```
 
-### Clean Build
+### Run
 ```bash
-rm -rf build
-cmake -B build -G "Visual Studio 16 2019" -A x64 ...
-cmake --build build --config Release
+start build/bin/Release/VideoPlay.exe
 ```
 
-### Post-Build DLL Copy (Required for Running)
-After each build, you MUST copy required DLLs manually:
-
-1. **Qt DLLs**:
-```bash
-cp D:/Qt/6.7.3/msvc2019_64/bin/Qt6*.dll build/bin/Release/
+### Post-Build DLL Copy (MANDATORY)
+CMake automatic DLL copying does NOT work reliably with MSVC. After every build:
+```powershell
+# Qt DLLs
+Copy-Item D:/Qt/6.7.3/msvc2019_64/bin/Qt6*.dll build/bin/Release/
+# FFmpeg DLLs (if using)
+Copy-Item D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/*.dll build/bin/Release/
+# Qt Plugins
+New-Item -ItemType Directory -Force build/bin/Release/platforms
+Copy-Item D:/Qt/6.7.3/msvc2019_64/plugins/platforms/qwindows.dll build/bin/Release/platforms/
 ```
 
-2. **FFmpeg DLLs**:
+### Tests
 ```bash
-cp D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/*.dll build/bin/Release/
+cd build
+ctest -C Release --output-on-failure
+```
+**Note**: Tests are currently broken (linkage issues). `tests/CMakeLists.txt` references non-existent `video_core` and `video_plugins` targets. Fix by linking against `VideoPlay` target instead.
+
+## Code Organization
+
+```
+src/
+├── main.cpp                     # Entry point (sets QT_MEDIA_BACKEND=windows)
+├── core/
+│   ├── playerengine.h/cpp       # QMediaPlayer/QAudioOutput wrapper
+│   ├── settings.h/cpp           # Singleton QSettings wrapper
+│   └── common.h                 # Enums, formatTime() helper
+├── ui/
+│   ├── mainwindow.h/cpp         # Main window, menus, drag-drop
+│   ├── controls.h/cpp           # Playback bar (play/pause/seek/volume/speed)
+│   ├── videowidget.h/cpp        # Video rendering (QVideoSink -> QImage)
+│   └── playlistwidget.h/cpp     # Playlist management
+├── subtitles/
+│   ├── subtitleparser.h/cpp     # SRT/ASS/VTT parsing
+│   └── subtitleoverlay.h/cpp    # Subtitle rendering overlay
+└── utils/
+    └── logger.h/cpp             # Singleton file/console logger
 ```
 
-3. **Qt Plugins**:
-```bash
-mkdir -p build/bin/Release/platforms
-cp D:/Qt/6.7.3/msvc2019_64/plugins/platforms/qwindows.dll build/bin/Release/platforms/
+## Code Style
 
-mkdir -p build/bin/Release/multimedia
-cp D:/Qt/6.7.3/msvc2019_64/plugins/multimedia/*.dll build/bin/Release/multimedia/
-```
-
-**Note**: CMake automatic DLL copying doesn't work reliably with MSVC generator on Windows. Manual copy is required after each build.
-
-### Run the Application
-```bash
-cd build/bin/Release
-start VideoPlay.exe
-# or
-cmd.exe /c "start VideoPlay.exe"
-```
-
-## Code Style Guidelines
-
-### General
-- **Language**: C++17 with Qt6
-- **Encoding**: UTF-8
-- **Line endings**: LF (Unix-style)
-
-### Naming Conventions
-- **Classes**: `PascalCase` (e.g., `PlayerEngine`, `MainWindow`)
-- **Methods/Functions**: `camelCase` (e.g., `loadFile()`, `seekToPosition()`)
-- **Variables**: `camelCase` (e.g., `m_mediaPlayer`, `m_volume`)
-- **Member variables**: Prefix with `m_` (e.g., `m_engine`, `m_controls`)
+- **Classes**: `PascalCase` (e.g., `PlayerEngine`)
+- **Methods**: `camelCase` (e.g., `loadFile()`)
+- **Variables**: `camelCase`
+- **Members**: `m_` prefix (e.g., `m_engine`)
 - **Constants**: `kPascalCase` or `SCREAMING_SNAKE_CASE`
-- **Enums**: `PascalCase` with values in `PascalCase` or `SCREAMING_SNAKE_CASE`
+- **Enums**: `PascalCase` values (e.g., `PlaybackState::Playing`)
+- **Indentation**: 4 spaces (no tabs)
+- **Braces**: Allman style (opening brace on new line)
+- **Max line length**: ~100 characters
 
-### File Organization
-- Header files: `.h` extension
-- Implementation files: `.cpp` extension
-- One class per file (unless tightly coupled)
-- Include order:
-  1. Project headers (quotes)
-  2. Qt headers (angle brackets)
-  3. System headers (angle brackets)
-
+### Include Order
 ```cpp
-#include "playerengine.h"
-
-#include <QApplication>
-#include <QMenuBar>
-#include <QDebug>
-
-#include "common.h"
+#include "own_header.h"     // Project headers first
+#include <QtHeader>         // Qt headers (angle brackets)
+#include "other/module.h"   // Other project headers
 ```
 
-### Qt-Specific Guidelines
+### Signal-Slot
+Use new syntax only: `connect(sender, &Sender::signal, receiver, &Receiver::slot);`
 
-#### Signals and Slots
-- Use new Qt5+ syntax (not old `SIGNAL`/`SLOT` macros):
-```cpp
-connect(m_engine, &PlayerEngine::stateChanged, this, &MainWindow::onStateChanged);
-```
+## Critical Gotchas
 
-#### Memory Management
-- Use parent pointers for widget ownership
-- Use smart pointers (`QScopedPointer`, `std::unique_ptr`) for non-parented objects
-- Avoid raw `new`/`delete` when possible
+1. **Media Backend**: `QT_MEDIA_BACKEND=windows` is set in `main.cpp`. Do NOT remove.
+2. **Subtitle Overlay on Windows**: `QVideoWidget` creates a native window (HWND) that always renders on top of Qt child widgets. The `SubtitleOverlay` must be a **separate top-level window** with `Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint` flags, positioned to match the video container via `mapToGlobal()`.
+3. **QStackedLayout StackAll does NOT work** with `QVideoWidget` on Windows due to native window z-order.
+4. **Progress Bar Seek**: Seek only on `sliderReleased`, not during drag. The slider's `sliderPressed`/`sliderReleased` block position updates during drag.
+5. **Path Handling**: Always use `QUrl::fromLocalFile()` for file paths. Use `QFileInfo` for absolute paths.
+6. **Adding new files**: `CMakeLists.txt` explicitly lists all sources (no `file(GLOB)`). You must manually add `.h` and `.cpp` to both `SOURCES` and `HEADERS` lists.
+7. **FFmpeg is optional**: Guard FFmpeg-specific code with `#ifdef HAS_FFMPEG`.
 
-#### Qt Types
-- Use Qt types: `QString`, `qint64`, `QList`, `QVector`, etc.
-- Use `Q_NULLPTR` instead of `NULL`
-- Use `override` specifier for virtual overrides
+## Memory Management
+- Use Qt parent hierarchy: pass `this` as parent to child widgets/objects.
+- No manual `delete` needed for parented objects.
 
-### Error Handling
-- Use `qDebug()` for debug output
-- Use `qWarning()` for warnings
-- Use `qCritical()` for critical errors
-- Use signals for error reporting to UI:
-```cpp
-emit errorOccurred(tr("Failed to load file"));
-```
+## Error Handling
+- Emit signals for errors: `PlayerEngine::errorOccurred(QString)`
+- Log via `Logger::instance().error()`
+- Show `QMessageBox::critical` in `main.cpp` for fatal errors.
 
-### Formatting
-- Indentation: 4 spaces (no tabs)
-- Braces: Allman style (opening brace on new line)
-- Maximum line length: 100 characters
-- Add spaces around operators: `a + b` not `a+b`
-
-### Namespace Usage
-- Core classes in `VideoPlay` namespace
-- UI components may use global namespace
-- Keep namespace usage consistent within files
-
-## Project Structure
-
-```
-VideoPlay/
-├── CMakeLists.txt           # Main build config
-├── src/
-│   ├── main.cpp            # Entry point
-│   ├── mainwindow.h/cpp   # Main window
-│   ├── playerengine.h/cpp # Media player engine
-│   ├── controls.h/cpp     # Playback controls
-│   ├── videowidget.h/cpp  # Video display
-│   ├── playlistwidget.h/cpp # Playlist
-│   ├── subtitleparser.h/cpp # Subtitle parsing
-│   └── common.h            # Common definitions
-├── 3rdparty/
-│   └── qlementine/        # Qlementine style library
-└── build/                  # Build output
-    └── bin/Release/       # Executable
-```
-
-## Common Development Tasks
-
-### Adding New Source Files
-1. Add `.h` and `.cpp` files to `src/`
-2. Add files to `SOURCES` and `HEADERS` in `CMakeLists.txt`
-3. Run CMake configure and build
-
-### Testing
-- Build and run the application
-- Test video playback with various formats
-- Test keyboard shortcuts
-- Check for memory leaks
-
-### Debugging
-```bash
-# Build Debug version
-cmake --build build --config Debug
-
-# Run with output
-cd build/bin/Debug
-VideoPlay.exe
-```
-
-## Notes
-- This project uses Qt6 Multimedia with Windows backend
-- Qlementine style is integrated from `3rdparty/qlementine`
-- FFmpeg DLLs are required at runtime
-- Qt platform plugins must be in `platforms/` subdirectory
+## Debugging
+- Build Debug config for debugging
+- Use `qDebug()` for console output
+- Use `Logger::instance().debug()` for file logs (`%APPDATA%/VideoPlay/logs/`)

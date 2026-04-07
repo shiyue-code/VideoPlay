@@ -1,28 +1,28 @@
 #include "ui/videowidget.h"
+
+#include <QDebug>
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
-#include <QVideoFrame>
+
+namespace VideoPlay {
 
 VideoWidget::VideoWidget(QWidget* parent)
     : QWidget(parent)
-    , m_sink(new QVideoSink(this))
     , m_aspectRatio(Fit)
-    , m_showOverlay(false)
 {
     setAcceptDrops(true);
-    setAttribute(Qt::WA_OpaquePaintEvent);
     setMouseTracking(true);
-
-    connect(m_sink, &QVideoSink::videoFrameChanged, this, &VideoWidget::onVideoFrameChanged);
+    setAttribute(Qt::WA_OpaquePaintEvent);
 }
 
-QVideoSink* VideoWidget::videoSink() const
+void VideoWidget::setFrame(const QImage& frame)
 {
-    return m_sink;
+    m_currentFrame = frame;
+    update();
 }
 
 void VideoWidget::setAspectRatioMode(AspectRatioMode mode)
@@ -36,22 +36,6 @@ void VideoWidget::setAspectRatioMode(AspectRatioMode mode)
 VideoWidget::AspectRatioMode VideoWidget::aspectRatioMode() const
 {
     return m_aspectRatio;
-}
-
-void VideoWidget::onVideoFrameChanged(const QVideoFrame& frame)
-{
-    if (!frame.isValid()) {
-        m_currentFrame = QImage();
-        update();
-        return;
-    }
-
-    QVideoFrame f = frame;
-    if (f.map(QVideoFrame::ReadOnly)) {
-        m_currentFrame = f.toImage().copy();
-        f.unmap();
-    }
-    update();
 }
 
 QRect VideoWidget::calculateTargetRect(const QRect& widgetRect, const QSize& frameSize) const
@@ -113,12 +97,6 @@ void VideoWidget::paintEvent(QPaintEvent* event)
     }
 
     painter.drawImage(target, m_currentFrame);
-
-    if (m_showOverlay) {
-        painter.setPen(Qt::white);
-        painter.setFont(QFont("Arial", 10));
-        painter.drawText(rect().adjusted(10, 10, -10, -10), Qt::AlignTop | Qt::AlignRight, "Hover Info");
-    }
 }
 
 void VideoWidget::mouseDoubleClickEvent(QMouseEvent* event)
@@ -157,3 +135,5 @@ void VideoWidget::dropEvent(QDropEvent* event)
         }
     }
 }
+
+} // namespace VideoPlay
