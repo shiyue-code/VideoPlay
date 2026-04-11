@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QTimer>
+#include <QPropertyAnimation>
 
 #include "core/common.h"
 
@@ -14,6 +15,7 @@ namespace VideoPlay {
 
 class Controls : public QWidget {
     Q_OBJECT
+    Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)
 
 public:
     explicit Controls(QWidget* parent = nullptr);
@@ -24,6 +26,14 @@ public:
     void setVolume(int volume);
     void setMuted(bool muted);
     void setPlaybackSpeed(double speed);
+
+    // 动画控制
+    void fadeIn();
+    void fadeOut();
+    void setFloatingMode(bool floating);
+
+    qreal opacity() const { return m_opacity; }
+    void setOpacity(qreal opacity);
 
 signals:
     void playClicked();
@@ -36,6 +46,7 @@ signals:
     void fullscreenClicked();
 
 protected:
+    void paintEvent(QPaintEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
@@ -52,6 +63,7 @@ private:
     void setupUi();
     void applyStyling();
     void updatePlayPauseIcon();
+    void updateTimeLabel();
 
     QPushButton* m_playBtn;
     QPushButton* m_stopBtn;
@@ -63,10 +75,14 @@ private:
     QLabel* m_speedLabel;
     QPushButton* m_fullscreenBtn;
     QTimer* m_hideTimer;
+    QPropertyAnimation* m_fadeAnimation;
 
     PlaybackState m_state;
     qint64 m_duration;
+    qint64 m_position;
     bool m_sliderPressed;
+    bool m_isFloating;
+    qreal m_opacity;
 };
 
 } // namespace VideoPlay

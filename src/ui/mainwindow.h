@@ -2,11 +2,10 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QTimer>
 #include "core/common.h"
 
 class QAction;
-class QMenu;
-class QToolBar;
 class QLabel;
 class QDockWidget;
 class PlaylistWidget;
@@ -33,6 +32,8 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onOpenFile();
@@ -49,10 +50,21 @@ private slots:
     void onTakeScreenshot();
     void onSubtitleDelayPlus();
     void onSubtitleDelayMinus();
+    void onMouseIdleTimeout();
 
 private:
+    void setupUi();
+    void setupConnections();
+    void loadSettings();
+    void saveSettings();
+    void updateWindowTitle();
+    void updateSubtitles(qint64 position);
+    void enterFullscreen();
+    void exitFullscreen();
+    void updateControlsPosition();
+
     PlayerEngine* m_engine;
-    VideoRenderer* m_videoRenderer;  // 统一的视频+字幕渲染器
+    VideoRenderer* m_videoRenderer;
     Controls* m_controls;
     PlaylistWidget* m_playlistWidget;
     QDockWidget* m_playlistDock;
@@ -62,17 +74,15 @@ private:
     QAction* m_loopModeAction;
     QLabel* m_timeLabel;
     QLabel* m_statusLabel;
+    
+    QTimer* m_mouseIdleTimer;
+    QPoint m_lastMousePos;
+    
     bool m_isFullscreen;
+    bool m_isImmersiveMode;
     bool m_alwaysOnTop;
     int m_loopMode;
     int m_subtitleDelay;
-
-    void setupUi();
-    void setupConnections();
-    void loadSettings();
-    void saveSettings();
-    void updateWindowTitle();
-    void updateSubtitles(qint64 position);
 };
 
 } // namespace VideoPlay

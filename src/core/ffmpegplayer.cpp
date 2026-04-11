@@ -324,19 +324,26 @@ void FFmpegPlayer::play()
     if (m_state == PlaybackState::Playing) return;
 
     if (!m_filePath.isEmpty()) {
-        if (m_state == PlaybackState::Stopped) {
-            if (!m_decodeThread) {
-                m_decodeThread = new DecodeThread(this);
-                m_abortRequest = false;
-                locker.unlock();
-                m_decodeThread->start();
-                locker.relock();
-            }
+        // 如果之前有解码线程在运行，先清理
+        if (m_decodeThread && m_decodeThread->isFinished()) {
+            delete m_decodeThread;
+            m_decodeThread = nullptr;
+        }
+        
+        // 创建新的解码线程
+        if (!m_decodeThread) {
+            m_decodeThread = new DecodeThread(this);
+            m_abortRequest = false;
+            locker.unlock();
+            m_decodeThread->start();
+            locker.relock();
         }
 
         // Start audio playback thread
-        if (m_audioThread && !m_audioThread->isRunning()) {
-            m_audioThread->start();
+        if (m_audioThread) {
+            if (!m_audioThread->isRunning()) {
+                m_audioThread->start();
+            }
         }
         
         m_state = PlaybackState::Playing;
@@ -367,12 +374,17 @@ void FFmpegPlayer::stop()
     locker.unlock();
     emit stateChanged(m_state);
 
-    handleSeek(0); // Seek to beginning
+    // Wake decode thread to check state
+    m_condition.wakeAll();
 
     // Stop audio playback thread
     if (m_audioThread) {
         m_audioThread->stop();
+        m_audioThread->wait(1000);
     }
+
+    // Seek to beginning
+    handleSeek(0);
 }
 
 void FFmpegPlayer::seek(qint64 position)
