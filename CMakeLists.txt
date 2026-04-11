@@ -12,6 +12,13 @@ set(CMAKE_AUTOUIC ON)
 # 添加 Qlementine 本地库
 add_subdirectory(3rdparty/qlementine)
 
+# 添加 ElaWidgetTools
+set(ELAWIDGETTOOLS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QT_SDK_DIR "D:/Qt/6.7.3/msvc2019_64" CACHE PATH "QT SDK DIR" FORCE)
+# 注释掉版本检查（因为我们使用 Qt 6.7.3）
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+add_subdirectory(3rdparty/elawidgettools)
+
 # 查找Qt6 (QAudioSink 需要 Multimedia)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui OpenGL OpenGLWidgets Multimedia)
 
@@ -67,12 +74,11 @@ set(SOURCES
     src/core/audioplaybackthread.cpp
     src/core/playerengine.cpp
     src/core/settings.cpp
-    src/ui/mainwindow.cpp
     src/ui/videorenderer.cpp
-    src/ui/controls.cpp
     src/ui/playlistwidget.cpp
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
+    src/ui/ela/ElaVideoWindow.cpp
 )
 
 set(HEADERS
@@ -81,12 +87,11 @@ set(HEADERS
     src/core/common.h
     src/core/playerengine.h
     src/core/settings.h
-    src/ui/mainwindow.h
     src/ui/videorenderer.h
-    src/ui/controls.h
     src/ui/playlistwidget.h
     src/subtitles/subtitleparser.h
     src/utils/logger.h
+    src/ui/ela/ElaVideoWindow.h
 )
 
 # 资源文件 (如果存在)
@@ -105,10 +110,14 @@ add_executable(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/3rdparty/qlementine/lib/include
+    ${CMAKE_SOURCE_DIR}/3rdparty/elawidgettools/ElaWidgetTools
 )
 
 # Qlementine 链接
 target_link_libraries(${PROJECT_NAME} PRIVATE qlementine)
+
+# ElaWidgetTools 链接
+target_link_libraries(${PROJECT_NAME} PRIVATE ElaWidgetTools)
 
 # 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
