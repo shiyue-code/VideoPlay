@@ -22,6 +22,9 @@ VideoRenderer::VideoRenderer(QWidget* parent)
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
     
+    // 设置黑色背景
+    setStyleSheet("background-color: black;");
+    
     // 默认字幕字体
     m_subtitleFont.setFamily("Microsoft YaHei");
     m_subtitleFont.setPixelSize(24);
