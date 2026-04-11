@@ -1,7 +1,7 @@
 #include <QApplication>
 #include <QMenuBar>
-#include <QToolBar>
 #include <QStatusBar>
+#include <QToolBar>
 #include <QDockWidget>
 #include <QVBoxLayout>
 #include <QFileDialog>
@@ -45,7 +45,10 @@ MainWindow::MainWindow(QWidget* parent)
     , m_loopModeAction(nullptr)
     , m_timeLabel(nullptr)
     , m_statusLabel(nullptr)
+    , m_mouseIdleTimer(new QTimer(this))
+    , m_lastMousePos(-1, -1)
     , m_isFullscreen(false)
+    , m_isImmersiveMode(false)
     , m_alwaysOnTop(false)
     , m_loopMode(0)
     , m_subtitleDelay(0)
@@ -86,18 +89,18 @@ bool MainWindow::openFile(const QString& filePath)
 
 void MainWindow::setupUi()
 {
-    // Central widget
+    // 中央部件
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // 视频渲染器（统一处理视频和字幕）
+    // 视频渲染器
     m_videoRenderer = new VideoRenderer(central);
     m_videoRenderer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     layout->addWidget(m_videoRenderer, 1);
 
-    // 控制栏
+    // 控制栏（默认嵌入式）
     m_controls = new Controls(central);
     layout->addWidget(m_controls);
 
@@ -161,6 +164,10 @@ void MainWindow::setupUi()
     m_timeLabel = new QLabel("00:00 / 00:00", this);
     statusBar()->addWidget(m_statusLabel, 1);
     statusBar()->addPermanentWidget(m_timeLabel);
+
+    // 鼠标空闲检测定时器（用于沉浸式模式）
+    m_mouseIdleTimer->setInterval(100); // 100ms 检测一次
+    connect(m_mouseIdleTimer, &QTimer::timeout, this, &MainWindow::onMouseIdleTimeout);
 }
 
 void MainWindow::setupConnections()
@@ -192,7 +199,7 @@ void MainWindow::setupConnections()
     // 播放列表信号
     connect(m_playlistWidget, &PlaylistWidget::itemDoubleClicked, this, &MainWindow::onPlaylistDoubleClicked);
 
-    // 视频渲染器信号（拖放、点击等）
+    // 视频渲染器信号
     connect(m_videoRenderer, &VideoRenderer::doubleClicked, this, [this]() {
         if (m_engine->state() == PlaybackState::Playing)
             m_engine->pause();
@@ -209,30 +216,24 @@ void MainWindow::loadSettings()
 {
     auto& settings = Settings::instance();
     
-    // 窗口几何
     QRect geo = settings.windowGeometry();
     setGeometry(geo);
 
-    // 音量
     int vol = settings.volume();
     m_engine->setVolume(vol);
     m_controls->setVolume(vol);
 
-    // 静音
     bool muted = settings.isMuted();
     m_engine->setMuted(muted);
     m_controls->setMuted(muted);
 
-    // 播放速度
     double speed = settings.playbackSpeed();
     m_engine->setPlaybackSpeed(speed);
     m_controls->setPlaybackSpeed(speed);
 
-    // 置顶
     m_alwaysOnTop = false;
     m_alwaysOnTopAction->setChecked(false);
 
-    // 循环模式
     m_loopMode = 0;
     m_loopModeAction->setText(tr("Loop: &Off"));
     m_loopModeAction->setChecked(false);
@@ -322,6 +323,127 @@ void MainWindow::closeEvent(QCloseEvent* event)
     event->accept();
 }
 
+void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    Q_UNUSED(event);
+    if (m_engine->state() == PlaybackState::Playing)
+        m_engine->pause();
+    else
+        m_engine->play();
+}
+
+void MainWindow::mouseMoveEvent(QMouseEvent* event)
+{
+    if (m_isImmersiveMode) {
+        // 鼠标移动时显示控制栏
+        if (!m_controls->isVisible() || m_controls->property("opacity").toReal() < 0.5) {
+            m_controls->fadeIn();
+        }
+        m_mouseIdleTimer->start();
+    }
+    m_lastMousePos = event->pos();
+    QMainWindow::mouseMoveEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    if (m_isImmersiveMode) {
+        updateControlsPosition();
+    }
+}
+
+void MainWindow::onMouseIdleTimeout()
+{
+    if (m_isImmersiveMode) {
+        QPoint currentPos = QCursor::pos();
+        QPoint widgetPos = mapFromGlobal(currentPos);
+        
+        // 检查鼠标是否在控制栏区域
+        QRect controlsRect = m_controls->geometry();
+        if (!controlsRect.contains(widgetPos)) {
+            // 鼠标不在控制栏上，开始隐藏
+            m_controls->fadeOut();
+        }
+    }
+}
+
+void MainWindow::enterFullscreen()
+{
+    m_isFullscreen = true;
+    m_isImmersiveMode = true;
+    
+    // 先切换全屏，确保窗口大小正确
+    showFullScreen();
+    
+    // 隐藏其他 UI 元素
+    m_playlistDock->hide();
+    menuBar()->hide();
+    statusBar()->hide();
+    
+    // 切换到悬浮控制栏模式
+    m_controls->setParent(centralWidget());
+    m_controls->setFloatingMode(true);
+    m_controls->setVisible(true);
+    m_controls->raise(); // 确保在最上层
+    updateControlsPosition();
+    
+    // 开始鼠标空闲检测
+    m_mouseIdleTimer->start();
+    setMouseTracking(true);
+    centralWidget()->setMouseTracking(true);
+    m_videoRenderer->setMouseTracking(true);
+}
+
+void MainWindow::exitFullscreen()
+{
+    m_isFullscreen = false;
+    m_isImmersiveMode = false;
+    
+    // 恢复 UI 元素
+    menuBar()->show();
+    statusBar()->show();
+    m_playlistDock->show();
+    
+    // 恢复嵌入式控制栏
+    m_mouseIdleTimer->stop();
+    m_controls->setFloatingMode(false);
+    
+    auto* layout = qobject_cast<QVBoxLayout*>(centralWidget()->layout());
+    if (layout) {
+        layout->addWidget(m_controls);
+    }
+    
+    setMouseTracking(false);
+    centralWidget()->setMouseTracking(false);
+    m_videoRenderer->setMouseTracking(false);
+    
+    showNormal();
+}
+
+void MainWindow::updateControlsPosition()
+{
+    if (!m_isImmersiveMode) return;
+    
+    // 控制栏悬浮在底部，宽度占满，有边距
+    int margin = 20;
+    int height = 70;
+    int width = centralWidget()->width() - 2 * margin;
+    int x = margin;
+    int y = centralWidget()->height() - height - margin;
+    
+    m_controls->setGeometry(x, y, width, height);
+}
+
+void MainWindow::onToggleFullscreen()
+{
+    if (!m_isFullscreen) {
+        enterFullscreen();
+    } else {
+        exitFullscreen();
+    }
+}
+
 void MainWindow::onOpenFile()
 {
     QString path = QFileDialog::getOpenFileName(this, tr("Open Video"), QString(),
@@ -340,7 +462,7 @@ void MainWindow::onStateChanged(PlaybackState state)
         m_statusLabel->setText(tr("Paused"));
     } else {
         m_statusLabel->setText(tr("Stopped"));
-        m_videoRenderer->setSubtitleText(QString()); // 清空字幕
+        m_videoRenderer->setSubtitleText(QString());
     }
 }
 
@@ -368,22 +490,6 @@ void MainWindow::onPlaylistDoubleClicked(int index)
     QString path = m_playlistWidget->item(index);
     if (!path.isEmpty())
         openFile(path);
-}
-
-void MainWindow::onToggleFullscreen()
-{
-    m_isFullscreen = !m_isFullscreen;
-    if (m_isFullscreen) {
-        menuBar()->hide();
-        statusBar()->hide();
-        m_playlistDock->hide();
-        showFullScreen();
-    } else {
-        menuBar()->show();
-        statusBar()->show();
-        m_playlistDock->show();
-        showNormal();
-    }
 }
 
 void MainWindow::onToggleAlwaysOnTop()
@@ -419,18 +525,15 @@ void MainWindow::onToggleLoopMode()
 
 void MainWindow::onTakeScreenshot()
 {
-    // 直接从 VideoRenderer 获取当前画面
     QScreen* screen = windowHandle()->screen();
     if (!screen) {
         screen = QGuiApplication::primaryScreen();
     }
     if (!screen) return;
 
-    // 获取视频渲染器的全局位置
     QPoint globalPos = m_videoRenderer->mapToGlobal(QPoint(0, 0));
     QSize videoSize = m_videoRenderer->size();
 
-    // 截取屏幕区域
     QPixmap screenshot = screen->grabWindow(0, globalPos.x(), globalPos.y(), 
                                             videoSize.width(), videoSize.height());
 
@@ -471,7 +574,6 @@ void MainWindow::onLoadSubtitle()
     if (m_subtitleParser->loadFile(path)) {
         m_statusLabel->setText(tr("Subtitle loaded: %1").arg(QFileInfo(path).fileName()));
         Logger::instance().info(QString("Subtitle loaded: %1").arg(path));
-        // 强制更新当前位置的字幕
         updateSubtitles(m_engine->position());
     } else {
         m_statusLabel->setText(tr("Failed to load subtitle"));
@@ -503,15 +605,6 @@ void MainWindow::updateSubtitles(qint64 position)
     qint64 adjustedPos = position + m_subtitleDelay;
     QString text = m_subtitleParser->subtitleAt(adjustedPos);
     m_videoRenderer->setSubtitleText(text);
-}
-
-void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
-{
-    Q_UNUSED(event);
-    if (m_engine->state() == PlaybackState::Playing)
-        m_engine->pause();
-    else
-        m_engine->play();
 }
 
 } // namespace VideoPlay

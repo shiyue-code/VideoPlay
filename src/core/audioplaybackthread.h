@@ -36,8 +36,6 @@ protected:
 
 private:
     QAudioFormat m_format;
-    QAudioSink* m_audioSink;
-    QIODevice* m_audioDevice;
 
     QQueue<QByteArray> m_queue;
     mutable QMutex m_mutex;

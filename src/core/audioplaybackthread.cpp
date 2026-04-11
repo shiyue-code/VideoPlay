@@ -6,8 +6,6 @@ namespace VideoPlay {
 AudioPlaybackThread::AudioPlaybackThread(const QAudioFormat& format, QObject* parent)
     : QThread(parent)
     , m_format(format)
-    , m_audioSink(nullptr)
-    , m_audioDevice(nullptr)
     , m_stopRequested(false)
     , m_started(false)
 {
@@ -63,27 +61,25 @@ void AudioPlaybackThread::run()
     m_started = true;
     qDebug() << "AudioPlaybackThread started";
 
-    // Create audio sink in this thread
-    m_audioSink = new QAudioSink(m_format, this);
+    // Create audio sink in this thread (no parent to avoid cross-thread parenting issue)
+    QAudioSink* audioSink = new QAudioSink(m_format, nullptr);
     // Increase buffer size for smoother playback (about 1 second of audio)
     int bufferSize = qMax(384000, m_format.sampleRate() * m_format.channelCount() * 2);
-    m_audioSink->setBufferSize(bufferSize);
+    audioSink->setBufferSize(bufferSize);
     qDebug() << "Audio buffer size set to:" << bufferSize;
     
     // Start audio device
-    m_audioDevice = m_audioSink->start();
-    if (!m_audioDevice) {
+    QIODevice* audioDevice = audioSink->start();
+    if (!audioDevice) {
         qDebug() << "Failed to start audio device in AudioPlaybackThread";
         emit errorOccurred("Failed to start audio device");
+        delete audioSink;
         m_started = false;
         return;
     }
     
     qDebug() << "Audio device started in playback thread";
 
-    // Pre-buffer: wait until we have some data before starting playback
-    bool preBuffered = false;
-    
     // Main playback loop
     while (!m_stopRequested) {
         QByteArray data;
@@ -104,11 +100,11 @@ void AudioPlaybackThread::run()
             }
         }
 
-        if (!data.isEmpty() && m_audioDevice && m_audioDevice->isOpen()) {
+        if (!data.isEmpty() && audioDevice && audioDevice->isOpen()) {
             qint64 bytesWritten = 0;
             // Write all data (handle partial writes)
             while (bytesWritten < data.size() && !m_stopRequested) {
-                qint64 written = m_audioDevice->write(data.constData() + bytesWritten, 
+                qint64 written = audioDevice->write(data.constData() + bytesWritten, 
                                                        data.size() - bytesWritten);
                 if (written < 0) {
                     qDebug() << "Audio write error in playback thread";
@@ -123,10 +119,9 @@ void AudioPlaybackThread::run()
         }
     }
 
-    // Cleanup
-    if (m_audioSink) {
-        m_audioSink->stop();
-    }
+    // Cleanup (local variables, no cross-thread issues)
+    audioSink->stop();
+    delete audioSink;
     
     qDebug() << "AudioPlaybackThread stopped";
     m_started = false;
