@@ -33,7 +33,9 @@ VideoRenderer::VideoRenderer(QWidget* parent)
 
 void VideoRenderer::setFrame(const QImage& frame)
 {
-    m_currentFrame = frame;
+    QMutexLocker locker(&m_frameMutex);
+    m_currentFrame = frame.copy(); // 深拷贝避免线程问题
+    locker.unlock();
     update();
 }
 
@@ -232,15 +234,22 @@ void VideoRenderer::paintEvent(QPaintEvent* event)
     // 绘制黑色背景
     painter.fillRect(rect(), Qt::black);
 
+    // 获取当前帧（线程安全）
+    QImage frameToDraw;
+    {
+        QMutexLocker locker(&m_frameMutex);
+        frameToDraw = m_currentFrame;
+    }
+
     // 计算视频绘制区域
-    QRect videoRect = calculateVideoRect(rect(), m_currentFrame.size());
+    QRect videoRect = calculateVideoRect(rect(), frameToDraw.size());
 
     // 绘制视频帧
-    if (!m_currentFrame.isNull()) {
+    if (!frameToDraw.isNull()) {
         if (m_aspectRatio == Crop) {
             painter.setClipRect(rect());
         }
-        painter.drawImage(videoRect, m_currentFrame);
+        painter.drawImage(videoRect, frameToDraw);
         painter.setClipping(false);
     }
 
