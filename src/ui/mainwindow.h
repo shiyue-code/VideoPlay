@@ -9,8 +9,6 @@ class QMenu;
 class QToolBar;
 class QLabel;
 class QDockWidget;
-class QVBoxLayout;
-class QStackedWidget;
 class PlaylistWidget;
 class SubtitleParser;
 
@@ -18,8 +16,7 @@ namespace VideoPlay {
 
 class PlayerEngine;
 class Controls;
-class VideoWidget;
-class SubtitleOverlay;
+class VideoRenderer;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -55,13 +52,11 @@ private slots:
 
 private:
     PlayerEngine* m_engine;
-    VideoWidget* m_videoWidget;
-    QWidget* m_videoContainer;
+    VideoRenderer* m_videoRenderer;  // 统一的视频+字幕渲染器
     Controls* m_controls;
     PlaylistWidget* m_playlistWidget;
     QDockWidget* m_playlistDock;
     SubtitleParser* m_subtitleParser;
-    SubtitleOverlay* m_subtitleOverlay;
     QAction* m_fullscreenAction;
     QAction* m_alwaysOnTopAction;
     QAction* m_loopModeAction;

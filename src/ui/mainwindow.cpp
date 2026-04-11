@@ -1,13 +1,3 @@
-#include <QStackedLayout>
-#include <QScreen>
-#include <QPixmap>
-#include <QDateTime>
-#include <QStandardPaths>
-#include <QGuiApplication>
-#include <QPainter>
-#include <QWindow>
-#include "ui/mainwindow.h"
-
 #include <QApplication>
 #include <QMenuBar>
 #include <QToolBar>
@@ -22,26 +12,34 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QFileInfo>
+#include <QScreen>
+#include <QWindow>
+#include <QPixmap>
+#include <QDateTime>
+#include <QStandardPaths>
+#include <QGuiApplication>
+#include <QPainter>
+#include "ui/mainwindow.h"
+
 #include "core/playerengine.h"
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "ui/controls.h"
-#include "core/common.h"
 #include "ui/playlistwidget.h"
-#include "ui/videowidget.h"
+#include "ui/videorenderer.h"
 #include "subtitles/subtitleparser.h"
-#include "subtitles/subtitleoverlay.h"
+#include "core/common.h"
 
 namespace VideoPlay {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_engine(new PlayerEngine(this))
+    , m_videoRenderer(nullptr)
     , m_controls(nullptr)
     , m_playlistWidget(nullptr)
     , m_playlistDock(nullptr)
     , m_subtitleParser(new SubtitleParser(this))
-    , m_subtitleOverlay(nullptr)
     , m_fullscreenAction(nullptr)
     , m_alwaysOnTopAction(nullptr)
     , m_loopModeAction(nullptr)
@@ -64,14 +62,12 @@ MainWindow::~MainWindow() = default;
 
 bool MainWindow::openFile(const QString& filePath)
 {
-    qDebug() << "MainWindow::openFile called with:" << filePath;
     if (filePath.isEmpty() || !QFileInfo::exists(filePath))
         return false;
 
     Logger::instance().info(QString("Opening file: %1").arg(filePath));
 
     bool result = m_engine->loadFile(filePath);
-    qDebug() << "loadFile result:" << result;
     if (result) {
         // 检查播放列表中是否已存在，避免重复添加
         for (int i = 0; i < m_playlistWidget->count(); ++i) {
@@ -96,33 +92,24 @@ void MainWindow::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Container for video + subtitle using stacked layout
-    m_videoContainer = new QWidget(central);
-    m_videoContainer->setMinimumSize(320, 240);
-    m_videoContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    auto* videoLayout = new QStackedLayout(m_videoContainer);
-    videoLayout->setStackingMode(QStackedLayout::StackAll);
-    videoLayout->setContentsMargins(0, 0, 0, 0);
+    // 视频渲染器（统一处理视频和字幕）
+    m_videoRenderer = new VideoRenderer(central);
+    m_videoRenderer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    layout->addWidget(m_videoRenderer, 1);
 
-    // Video widget (receives QImage frames from FFmpegPlayer)
-    m_videoWidget = new VideoWidget(m_videoContainer);
-    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    videoLayout->addWidget(m_videoWidget);
-
-    layout->addWidget(m_videoContainer, 1);
-
+    // 控制栏
     m_controls = new Controls(central);
     layout->addWidget(m_controls);
 
     setCentralWidget(central);
 
-    // Playlist dock
+    // 播放列表 dock
     m_playlistWidget = new PlaylistWidget(this);
     m_playlistDock = new QDockWidget(tr("Playlist"), this);
     m_playlistDock->setWidget(m_playlistWidget);
     addDockWidget(Qt::RightDockWidgetArea, m_playlistDock);
 
-    // Menu bar
+    // 菜单栏
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(tr("&Open..."), this, &MainWindow::onOpenFile, QKeySequence::Open);
     fileMenu->addSeparator();
@@ -162,14 +149,14 @@ void MainWindow::setupUi()
 
     menuBar()->addMenu(tr("&Help"))->addAction(tr("&About"), this, &MainWindow::onAbout);
 
-    // Toolbar
+    // 工具栏
     QToolBar* toolbar = addToolBar(tr("Main"));
     toolbar->addAction(fileMenu->actions().first());
     toolbar->addSeparator();
     toolbar->addAction(playbackMenu->actions().at(0));
     toolbar->addAction(playbackMenu->actions().at(1));
 
-    // Status bar
+    // 状态栏
     m_statusLabel = new QLabel(tr("Ready"), this);
     m_timeLabel = new QLabel("00:00 / 00:00", this);
     statusBar()->addWidget(m_statusLabel, 1);
@@ -178,13 +165,15 @@ void MainWindow::setupUi()
 
 void MainWindow::setupConnections()
 {
+    // 引擎信号
     connect(m_engine, &PlayerEngine::stateChanged, this, &MainWindow::onStateChanged);
     connect(m_engine, &PlayerEngine::positionChanged, this, &MainWindow::onPositionChanged);
     connect(m_engine, &PlayerEngine::positionChanged, this, &MainWindow::updateSubtitles);
     connect(m_engine, &PlayerEngine::durationChanged, this, &MainWindow::onDurationChanged);
     connect(m_engine, &PlayerEngine::errorOccurred, this, &MainWindow::onError);
-    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoWidget, &VideoWidget::setFrame);
+    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoRenderer, &VideoRenderer::setFrame);
 
+    // 控制栏信号
     connect(m_controls, &Controls::playClicked, m_engine, &PlayerEngine::play);
     connect(m_controls, &Controls::pauseClicked, m_engine, &PlayerEngine::pause);
     connect(m_controls, &Controls::stopClicked, m_engine, &PlayerEngine::stop);
@@ -200,42 +189,56 @@ void MainWindow::setupConnections()
     });
     connect(m_controls, &Controls::fullscreenClicked, this, &MainWindow::onToggleFullscreen);
 
+    // 播放列表信号
     connect(m_playlistWidget, &PlaylistWidget::itemDoubleClicked, this, &MainWindow::onPlaylistDoubleClicked);
+
+    // 视频渲染器信号（拖放、点击等）
+    connect(m_videoRenderer, &VideoRenderer::doubleClicked, this, [this]() {
+        if (m_engine->state() == PlaybackState::Playing)
+            m_engine->pause();
+        else
+            m_engine->play();
+    });
+    connect(m_videoRenderer, &VideoRenderer::fileDropped, this, &MainWindow::openFile);
+    connect(m_videoRenderer, &VideoRenderer::volumeChangedByWheel, this, [this](int delta) {
+        m_engine->setVolume(qBound(0, m_engine->volume() + delta, 100));
+    });
 }
 
 void MainWindow::loadSettings()
 {
     auto& settings = Settings::instance();
     
-    // Window geometry
+    // 窗口几何
     QRect geo = settings.windowGeometry();
     setGeometry(geo);
 
-    // Volume
+    // 音量
     int vol = settings.volume();
     m_engine->setVolume(vol);
     m_controls->setVolume(vol);
 
-    // Muted
+    // 静音
     bool muted = settings.isMuted();
     m_engine->setMuted(muted);
     m_controls->setMuted(muted);
 
-    // Playback speed
+    // 播放速度
     double speed = settings.playbackSpeed();
     m_engine->setPlaybackSpeed(speed);
     m_controls->setPlaybackSpeed(speed);
 
-    // Always on top
+    // 置顶
     m_alwaysOnTop = false;
     m_alwaysOnTopAction->setChecked(false);
 
-    // Loop mode
+    // 循环模式
     m_loopMode = 0;
     m_loopModeAction->setText(tr("Loop: &Off"));
     m_loopModeAction->setChecked(false);
 
-    Logger::instance().info(QString("Settings loaded: volume=%1, speed=%2, muted=%3").arg(vol).arg(speed).arg(muted ? "true" : "false"));
+    Logger::instance().info(QString("Settings loaded: volume=%1, speed=%2, muted=%3")
+                            .arg(vol).arg(speed).arg(muted ? "true" : "false"));
 }
 
 void MainWindow::saveSettings()
@@ -329,7 +332,6 @@ void MainWindow::onOpenFile()
 
 void MainWindow::onStateChanged(PlaybackState state)
 {
-    qDebug() << "onStateChanged:" << static_cast<int>(state);
     m_controls->setPlaybackState(state);
 
     if (state == PlaybackState::Playing) {
@@ -338,14 +340,16 @@ void MainWindow::onStateChanged(PlaybackState state)
         m_statusLabel->setText(tr("Paused"));
     } else {
         m_statusLabel->setText(tr("Stopped"));
+        m_videoRenderer->setSubtitleText(QString()); // 清空字幕
     }
 }
 
 void MainWindow::onPositionChanged(qint64 position)
 {
     m_controls->setPosition(position);
-    m_timeLabel->setText(QString("%1 / %2").arg(formatTime(position)).arg(formatTime(m_engine->duration())));
-    updateSubtitles(position);
+    m_timeLabel->setText(QString("%1 / %2")
+                         .arg(formatTime(position))
+                         .arg(formatTime(m_engine->duration())));
 }
 
 void MainWindow::onDurationChanged(qint64 duration)
@@ -415,20 +419,20 @@ void MainWindow::onToggleLoopMode()
 
 void MainWindow::onTakeScreenshot()
 {
-    // Use screen capture of the video widget area
+    // 直接从 VideoRenderer 获取当前画面
     QScreen* screen = windowHandle()->screen();
     if (!screen) {
         screen = QGuiApplication::primaryScreen();
     }
     if (!screen) return;
 
-    // Get the video container's global position and size
-    QPoint globalPos = m_videoContainer->mapToGlobal(QPoint(0, 0));
-    QSize videoSize = m_videoContainer->size();
-    QRect videoRect(globalPos, videoSize);
+    // 获取视频渲染器的全局位置
+    QPoint globalPos = m_videoRenderer->mapToGlobal(QPoint(0, 0));
+    QSize videoSize = m_videoRenderer->size();
 
-    // Capture the screen area where video is displayed
-    QPixmap screenshot = screen->grabWindow(0, videoRect.x(), videoRect.y(), videoRect.width(), videoRect.height());
+    // 截取屏幕区域
+    QPixmap screenshot = screen->grabWindow(0, globalPos.x(), globalPos.y(), 
+                                            videoSize.width(), videoSize.height());
 
     if (screenshot.isNull() || screenshot.width() == 0) {
         m_statusLabel->setText(tr("Failed to capture screenshot"));
@@ -457,16 +461,6 @@ void MainWindow::onAbout()
         tr("<h3>VideoPlay 1.0</h3><p>A modern video player built with Qt6.</p>"));
 }
 
-void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
-{
-    if (m_engine->state() == PlaybackState::Playing) {
-        m_engine->pause();
-    } else {
-        m_engine->play();
-    }
-    event->accept();
-}
-
 void MainWindow::onLoadSubtitle()
 {
     QString path = QFileDialog::getOpenFileName(this, tr("Load Subtitle"), QString(),
@@ -477,9 +471,8 @@ void MainWindow::onLoadSubtitle()
     if (m_subtitleParser->loadFile(path)) {
         m_statusLabel->setText(tr("Subtitle loaded: %1").arg(QFileInfo(path).fileName()));
         Logger::instance().info(QString("Subtitle loaded: %1").arg(path));
-        qDebug() << "Subtitle entries loaded:" << m_subtitleParser->entries().size();
-        // Force update subtitle for current position after loading
-        onPositionChanged(m_engine->position());
+        // 强制更新当前位置的字幕
+        updateSubtitles(m_engine->position());
     } else {
         m_statusLabel->setText(tr("Failed to load subtitle"));
         Logger::instance().error(QString("Failed to load subtitle: %1").arg(path));
@@ -490,29 +483,35 @@ void MainWindow::onSubtitleDelayPlus()
 {
     m_subtitleDelay += 100;
     m_statusLabel->setText(tr("Subtitle delay: +%1ms").arg(m_subtitleDelay));
+    updateSubtitles(m_engine->position());
 }
 
 void MainWindow::onSubtitleDelayMinus()
 {
     m_subtitleDelay -= 100;
     m_statusLabel->setText(tr("Subtitle delay: %1ms").arg(m_subtitleDelay));
+    updateSubtitles(m_engine->position());
 }
 
 void MainWindow::updateSubtitles(qint64 position)
 {
     if (!m_subtitleParser->isLoaded()) {
-        if (m_subtitleOverlay) {
-            m_subtitleOverlay->setText(QString());
-        }
+        m_videoRenderer->setSubtitleText(QString());
         return;
     }
 
     qint64 adjustedPos = position + m_subtitleDelay;
     QString text = m_subtitleParser->subtitleAt(adjustedPos);
+    m_videoRenderer->setSubtitleText(text);
+}
 
-    if (m_subtitleOverlay) {
-        m_subtitleOverlay->setText(text);
-    }
+void MainWindow::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    Q_UNUSED(event);
+    if (m_engine->state() == PlaybackState::Playing)
+        m_engine->pause();
+    else
+        m_engine->play();
 }
 
 } // namespace VideoPlay

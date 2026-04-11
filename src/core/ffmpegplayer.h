@@ -13,6 +13,7 @@
 #include <QImage>
 
 #include "core/common.h"
+#include "core/audioplaybackthread.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -62,11 +63,9 @@ signals:
     void fileLoaded(const QString& filePath);
     void videoFrameReady(const QImage& frame, qint64 pts);
     void audioDataReady(const QVector<char>& data, qint64 pts);
-    void writeAudioData(const QByteArray& data);
 
 private slots:
     void onAudioSinkStateChanged(QAudio::State state);
-    void onWriteAudioData(const QByteArray& data);
 
 private:
     struct VideoStreamData {
@@ -75,6 +74,10 @@ private:
         SwsContext* swsContext = nullptr;
         int64_t startTime = 0;
         bool isKeyframeRequired = false;
+        // Cached format parameters to avoid unnecessary context recreation
+        int lastWidth = 0;
+        int lastHeight = 0;
+        AVPixelFormat lastFormat = AV_PIX_FMT_NONE;
     };
 
     struct AudioStreamData {
@@ -131,15 +134,17 @@ private:
     qint64 m_seekPosition;
     bool m_abortRequest;
 
-    QAudioSink* m_audioSink;
-    QIODevice* m_audioDevice;
-    QVector<char> m_audioBuffer;
+    AudioPlaybackThread* m_audioThread;
 
     double m_baseTime; // Reference clock base
     double m_clock;    // Master clock (usually audio clock)
     double m_audioClock;
     qint64 m_lastVideoPts;
     qint64 m_startTime;
+    
+    // Video sync timing
+    double m_videoStartTime;  // Video playback start time
+    double m_frameTimer;      // Time when next frame should be displayed
 };
 
 } // namespace VideoPlay
