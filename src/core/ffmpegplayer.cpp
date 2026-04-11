@@ -324,14 +324,12 @@ void FFmpegPlayer::play()
     if (m_state == PlaybackState::Playing) return;
 
     if (!m_filePath.isEmpty()) {
-        // 如果之前有解码线程在运行，先清理
-        if (m_decodeThread && m_decodeThread->isFinished()) {
-            delete m_decodeThread;
-            m_decodeThread = nullptr;
-        }
-        
-        // 创建新的解码线程
-        if (!m_decodeThread) {
+        // 如果解码线程已结束或不存在，创建新的
+        if (!m_decodeThread || m_decodeThread->isFinished()) {
+            if (m_decodeThread) {
+                delete m_decodeThread;
+                m_decodeThread = nullptr;
+            }
             m_decodeThread = new DecodeThread(this);
             m_abortRequest = false;
             locker.unlock();
@@ -383,8 +381,15 @@ void FFmpegPlayer::stop()
         m_audioThread->wait(1000);
     }
 
-    // Seek to beginning
-    handleSeek(0);
+    // Wait for decode thread to finish
+    if (m_decodeThread && m_decodeThread->isRunning()) {
+        m_decodeThread->wait(1000);
+    }
+
+    // Seek to beginning for next play
+    QTimer::singleShot(0, this, [this]() {
+        handleSeek(0);
+    });
 }
 
 void FFmpegPlayer::seek(qint64 position)
@@ -537,6 +542,15 @@ void FFmpegPlayer::decodeLoop()
             if (ret < 0) {
                 av_packet_free(&pkt);
                 if (ret == AVERROR_EOF) {
+                    // Flush remaining frames
+                    if (m_videoStream.codecContext) {
+                        avcodec_send_packet(m_videoStream.codecContext, nullptr);
+                    }
+                    if (m_audioStream.codecContext) {
+                        avcodec_send_packet(m_audioStream.codecContext, nullptr);
+                    }
+                    // Wait a bit for audio to finish
+                    QThread::msleep(100);
                     {
                         QMutexLocker locker(&m_mutex);
                         m_state = PlaybackState::Stopped;
