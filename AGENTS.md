@@ -15,7 +15,7 @@ VideoPlay 是一个基于 C++17、Qt6 和 FFmpeg 的现代化视频播放器，�
 - 变速播放支持 (0.25x - 4.0x)
 - 字幕解析和显示 (SRT/ASS/VTT 格式)
 - 播放列表管理
-- Qlementine 现代化 UI 样式
+- ElaWidgetTools Fluent UI 样式
 - 全屏模式、窗口置顶、截图功能
 - 音量控制和静音
 - 最近文件记录
@@ -28,7 +28,7 @@ VideoPlay 是一个基于 C++17、Qt6 和 FFmpeg 的现代化视频播放器，�
 | CMake | 3.16+ | 构建系统 |
 | Qt | 6.7.3 | GUI 框架 (Core, Widgets, Gui, OpenGL, OpenGLWidgets, Multimedia) |
 | FFmpeg | 6.0+ | 视频/音频解码 (avcodec, avformat, avutil, swscale, swresample) |
-| Qlementine | Latest | 第三方 Qt 样式库 (位于 `3rdparty/qlementine/`) |
+| ElaWidgetTools | Latest | Fluent UI 组件库 (位于 `3rdparty/elawidgettools/`) |
 
 ## Build Commands
 
@@ -89,12 +89,7 @@ src/
 └── utils/                       # 工具类
     └── logger.h/cpp             # 单例文件/控制台日志系统
 
-3rdparty/qlementine/             # 第三方 Qt 样式库
-├── lib/include/oclero/qlementine/
-│   ├── style/QlementineStyle.hpp
-│   └── widgets/                 # 自定义组件
-└── lib/src/                     # 样式实现
-
+3rdparty/elawidgettools/         # Fluent UI 组件库
 cmake/
 ├── FindFFmpeg.cmake             # FFmpeg 查找模块
 └── VideoPlayConfig.cmake.in     # 配置模板
@@ -185,7 +180,7 @@ connect(sender, &Sender::signal, receiver, &Receiver::slot);
 
 7. **FFmpeg is optional**: 使用 `#ifdef HAS_FFMPEG` 保护 FFmpeg 特定代码。
 
-8. **Qlementine Style**: 应用使用 Qlementine 样式 (`oclero::qlementine::QlementineStyle`)。包含头文件使用 `<oclero/qlementine.hpp>`。
+8. **ElaWidgetTools Style**: 应用使用 ElaWidgetTools 样式 (`ElaWindow`, `ElaIconButton` 等 Fluent UI 组件)。包含头文件使用 `<ElaWidgetTools.h>`。
 
 9. **Audio Output**: 使用 `QAudioSink` (Qt6) 而非已弃用的 `QAudioOutput`。
 

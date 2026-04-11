@@ -9,9 +9,6 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-# 添加 Qlementine 本地库
-add_subdirectory(3rdparty/qlementine)
-
 # 添加 ElaWidgetTools
 set(ELAWIDGETTOOLS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(QT_SDK_DIR "D:/Qt/6.7.3/msvc2019_64" CACHE PATH "QT SDK DIR" FORCE)
@@ -109,12 +106,8 @@ add_executable(${PROJECT_NAME}
 # 包含目录
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/3rdparty/qlementine/lib/include
     ${CMAKE_SOURCE_DIR}/3rdparty/elawidgettools/ElaWidgetTools
 )
-
-# Qlementine 链接
-target_link_libraries(${PROJECT_NAME} PRIVATE qlementine)
 
 # ElaWidgetTools 链接
 target_link_libraries(${PROJECT_NAME} PRIVATE ElaWidgetTools)
