@@ -64,28 +64,28 @@ endif()
 set(SOURCES
     src/main.cpp
     src/core/ffmpegplayer.cpp
+    src/core/audioplaybackthread.cpp
     src/core/playerengine.cpp
     src/core/settings.cpp
     src/ui/mainwindow.cpp
-    src/ui/videowidget.cpp
+    src/ui/videorenderer.cpp
     src/ui/controls.cpp
     src/ui/playlistwidget.cpp
     src/subtitles/subtitleparser.cpp
-    src/subtitles/subtitleoverlay.cpp
     src/utils/logger.cpp
 )
 
 set(HEADERS
     src/core/ffmpegplayer.h
+    src/core/audioplaybackthread.h
     src/core/common.h
     src/core/playerengine.h
     src/core/settings.h
     src/ui/mainwindow.h
-    src/ui/videowidget.h
+    src/ui/videorenderer.h
     src/ui/controls.h
     src/ui/playlistwidget.h
     src/subtitles/subtitleparser.h
-    src/subtitles/subtitleoverlay.h
     src/utils/logger.h
 )
 

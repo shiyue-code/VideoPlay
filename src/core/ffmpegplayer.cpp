@@ -18,6 +18,7 @@ namespace {
     const int AUDIO_BUFFER_SIZE = 4096;
     const int VIDEO_BUFFER_SIZE = 1024;
     const double CLOCK_SYNC_THRESHOLD = 0.01; // 10ms
+    const double VIDEO_FRAME_TOLERANCE = 0.005; // 5ms tolerance for frame timing
 
     static inline uint64_t getDefaultChannelLayout(int channels) {
         // Simple channel mask: bit 0 = front left, bit 1 = front right, etc.
@@ -40,13 +41,14 @@ FFmpegPlayer::FFmpegPlayer(QObject* parent)
     , m_seekRequested(false)
     , m_seekPosition(0)
     , m_abortRequest(false)
-    , m_audioSink(nullptr)
-    , m_audioDevice(nullptr)
+    , m_audioThread(nullptr)
     , m_baseTime(0.0)
     , m_clock(0.0)
     , m_audioClock(0.0)
     , m_lastVideoPts(0)
     , m_startTime(0)
+    , m_videoStartTime(0.0)
+    , m_frameTimer(0.0)
 {
     initialize();
 }
@@ -57,6 +59,46 @@ FFmpegPlayer::~FFmpegPlayer()
     cleanup();
 }
 
+void FFmpegPlayer::cleanup()
+{
+    {
+        QMutexLocker locker(&m_mutex);
+        m_abortRequest = true;
+    }
+    m_condition.wakeAll();
+
+    if (m_decodeThread && m_decodeThread->isRunning()) {
+        m_decodeThread->wait(1000);
+        delete m_decodeThread;
+        m_decodeThread = nullptr;
+    }
+
+    if (m_audioThread) {
+        m_audioThread->stop();
+        m_audioThread->wait(2000);
+        delete m_audioThread;
+        m_audioThread = nullptr;
+    }
+
+    if (m_formatContext) {
+        avformat_close_input(&m_formatContext);
+        m_formatContext = nullptr;
+    }
+
+    m_filePath.clear();
+    m_duration = 0;
+    m_position = 0;
+    m_playbackSpeed = 1.0;
+    m_volume = 100;
+    m_muted = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        m_state = PlaybackState::Stopped;
+        m_clock = 0.0;
+        m_baseTime = 0.0;
+    }
+}
+
 void FFmpegPlayer::initialize()
 {
     // av_register_all() is deprecated in newer FFmpeg versions
@@ -64,17 +106,6 @@ void FFmpegPlayer::initialize()
     avformat_network_init();
 
     Logger::instance().debug("FFmpegPlayer initialized");
-}
-
-void FFmpegPlayer::cleanup()
-{
-    closeFile();
-
-    if (m_audioSink) {
-        m_audioSink->stop();
-        delete m_audioSink;
-        m_audioSink = nullptr;
-    }
 }
 
 bool FFmpegPlayer::loadFile(const QString& filePath)
@@ -199,26 +230,24 @@ void FFmpegPlayer::openFile(const QString& filePath)
                 continue;
             }
 
-            // Create audio sink
-            if (m_audioSink) {
-                delete m_audioSink;
-                m_audioSink = nullptr;
+            // Prepare audio format - use actual stream parameters for better quality
+            QAudioFormat audioFormat = m_audioStream.audioFormat;
+            // Ensure we have valid format settings
+            if (audioFormat.sampleRate() <= 0) {
+                audioFormat.setSampleRate(48000);
             }
-            m_audioSink = new QAudioSink(m_audioStream.audioFormat, this);
-            // Set initial volume
-            m_audioSink->setVolume(m_muted ? 0.0 : m_volume / 100.0);
-    connect(m_audioSink, &QAudioSink::stateChanged,
-            this, &FFmpegPlayer::onAudioSinkStateChanged);
-    connect(this, &FFmpegPlayer::writeAudioData,
-            this, &FFmpegPlayer::onWriteAudioData, Qt::QueuedConnection);
+            if (audioFormat.channelCount() <= 0) {
+                audioFormat.setChannelCount(2);
+            }
+            // Use Float format for best compatibility
+            audioFormat.setSampleFormat(QAudioFormat::Float);
+            m_audioStream.audioFormat = audioFormat;
 
-            // Start audio output device
-            m_audioDevice = m_audioSink->start();
-            if (!m_audioDevice) {
-                Logger::instance().error("Failed to start audio device");
-            } else {
-                Logger::instance().info("Audio device started");
+            // Create audio playback thread (will be started when playback begins)
+            if (m_audioThread) {
+                delete m_audioThread;
             }
+            m_audioThread = new AudioPlaybackThread(audioFormat, this);
 
             m_audioStream.startTime = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : 0;
         }
@@ -267,7 +296,14 @@ void FFmpegPlayer::closeFile()
         m_formatContext = nullptr;
     }
 
-    m_audioBuffer.clear();
+    // Clean up audio thread
+    if (m_audioThread) {
+        m_audioThread->stop();
+        m_audioThread->wait(2000);
+        delete m_audioThread;
+        m_audioThread = nullptr;
+    }
+
     m_filePath.clear();
     m_duration = 0;
     m_position = 0;
@@ -298,9 +334,11 @@ void FFmpegPlayer::play()
             }
         }
 
-        if (m_audioSink) {
-            m_audioSink->resume();
+        // Start audio playback thread
+        if (m_audioThread && !m_audioThread->isRunning()) {
+            m_audioThread->start();
         }
+        
         m_state = PlaybackState::Playing;
         m_condition.wakeAll();
         locker.unlock();
@@ -317,10 +355,6 @@ void FFmpegPlayer::pause()
     locker.unlock();
     emit stateChanged(m_state);
 
-    if (m_audioSink) {
-        m_audioSink->suspend();
-    }
-
     m_condition.wakeAll(); // Wake decode thread to check state
 }
 
@@ -335,8 +369,9 @@ void FFmpegPlayer::stop()
 
     handleSeek(0); // Seek to beginning
 
-    if (m_audioSink) {
-        m_audioSink->stop();
+    // Stop audio playback thread
+    if (m_audioThread) {
+        m_audioThread->stop();
     }
 }
 
@@ -418,10 +453,7 @@ void FFmpegPlayer::setVolume(int volume)
 
     m_volume = volume;
     locker.unlock();
-    // QAudioSink volume is 0.0 to 1.0
-    if (m_audioSink) {
-        m_audioSink->setVolume(m_muted ? 0.0 : m_volume / 100.0);
-    }
+    // Volume is now handled by audio thread
     emit volumeChanged(m_volume);
 }
 
@@ -432,46 +464,23 @@ void FFmpegPlayer::setMuted(bool muted)
 
     m_muted = muted;
     locker.unlock();
-    if (m_audioSink) {
-        m_audioSink->setVolume(m_muted ? 0.0 : m_volume / 100.0);
-    }
+    // Volume is now handled by audio thread
     emit muteChanged(m_muted);
 }
 
 void FFmpegPlayer::onAudioSinkStateChanged(QAudio::State state)
 {
-    qDebug() << "AudioSink state:" << state;
-    if (state == QAudio::IdleState) {
-        // Buffer underrun, may need to feed more data
-    }
-}
-
-void FFmpegPlayer::onWriteAudioData(const QByteArray& data)
-{
-    if (!m_audioDevice || data.isEmpty()) {
-        if (!m_audioDevice) {
-            Logger::instance().warning("Audio device is null in onWriteAudioData");
-        }
-        return;
-    }
-    
-    // Check if device is writable
-    if (!m_audioDevice->isWritable()) {
-        Logger::instance().warning("Audio device is not writable");
-        return;
-    }
-    
-    qint64 written = m_audioDevice->write(data);
-    if (written < 0) {
-        Logger::instance().error(QString("Audio write error: %1").arg(m_audioDevice->errorString()));
-    } else if (written < data.size()) {
-        Logger::instance().warning(QString("Partial audio write: %1/%2 bytes").arg(written).arg(data.size()));
-    }
+    qDebug() << "AudioSink state (main thread):" << state;
+    // Audio playback is now handled in the separate thread
 }
 
 void FFmpegPlayer::decodeLoop()
 {
     Logger::instance().debug("Decode thread started");
+    
+    // Initialize frame timer for video sync
+    m_frameTimer = av_gettime() / 1000000.0;
+    m_videoStartTime = m_frameTimer;
 
     try {
         while (true) {
@@ -495,6 +504,9 @@ void FFmpegPlayer::decodeLoop()
                     m_mutex.unlock();
                     try {
                         handleSeek(m_seekPosition);
+                        // Reset frame timer after seek
+                        m_frameTimer = av_gettime() / 1000000.0;
+                        m_videoStartTime = m_frameTimer;
                     } catch (...) {
                         Logger::instance().error("Exception during seek");
                     }
@@ -547,12 +559,16 @@ void FFmpegPlayer::decodeLoop()
                         break;
                     }
 
-                    // Convert to QImage
+                    // Convert to QImage with frame timing control
                     try {
                         QImage image = convertVideoFrame(frame, m_videoStream);
                         if (!image.isNull()) {
                             // Calculate PTS
                             int64_t pts = frame->pts;
+                            if (pts == AV_NOPTS_VALUE && frame->best_effort_timestamp != AV_NOPTS_VALUE) {
+                                pts = frame->best_effort_timestamp;
+                            }
+                            
                             if (pts != AV_NOPTS_VALUE) {
                                 qint64 pts_ms = av_rescale_q(pts, m_videoStream.stream->time_base, {1, 1000});
                                 {
@@ -561,7 +577,41 @@ void FFmpegPlayer::decodeLoop()
                                     m_lastVideoPts = pts_ms;
                                 }
                                 emit positionChanged(pts_ms);
+                                
+                                // Calculate when this frame should be displayed
+                                double pts_seconds = pts_ms / 1000.0;
+                                double frameDelay = pts_seconds - (m_videoStartTime > 0 ? 0 : 0);
+                                
+                                // Get current time
+                                double currentTime = av_gettime() / 1000000.0;
+                                
+                                // Calculate time to wait before displaying this frame
+                                // If using audio clock for sync, compare with audio clock
+                                double targetTime = m_frameTimer;
+                                double actualDelay = targetTime - currentTime;
+                                
+                                // Only sleep if we need to wait (avoid negative delays)
+                                if (actualDelay > VIDEO_FRAME_TOLERANCE) {
+                                    // Cap maximum delay to avoid long freezes
+                                    if (actualDelay > 0.1) {
+                                        actualDelay = 0.1; // Max 100ms wait
+                                    }
+                                    QThread::usleep(static_cast<unsigned long>(actualDelay * 1000000));
+                                }
+                                
+                                // Update frame timer for next frame
+                                // Estimate next frame delay based on frame rate or previous interval
+                                double nextFrameDuration = 0.04; // Default 25fps
+                                if (m_videoStream.stream->avg_frame_rate.den > 0 && 
+                                    m_videoStream.stream->avg_frame_rate.num > 0) {
+                                    nextFrameDuration = av_q2d(m_videoStream.stream->avg_frame_rate);
+                                    if (nextFrameDuration > 0) {
+                                        nextFrameDuration = 1.0 / nextFrameDuration;
+                                    }
+                                }
+                                m_frameTimer = av_gettime() / 1000000.0 + nextFrameDuration / m_playbackSpeed;
                             }
+                            
                             emit videoFrameReady(image, m_position);
                         }
                     } catch (...) {
@@ -596,7 +646,7 @@ void FFmpegPlayer::decodeLoop()
                         break;
                     }
 
-                    // Resample audio and send to QAudioSink
+                    // Resample audio and send to audio thread
                     try {
                         int numSamples = 0;
                         QVector<char> audioData = resampleAudio(frame, m_audioStream, numSamples);
@@ -610,9 +660,11 @@ void FFmpegPlayer::decodeLoop()
                             m_audioClock = frame_pts + frame_duration;
                             m_clock = m_audioClock;
 
-                            // Emit signal to write audio data on main thread
+                            // Send to audio playback thread
                             QByteArray data(audioData.constData(), audioData.size());
-                            emit writeAudioData(data);
+                            if (m_audioThread) {
+                                m_audioThread->enqueue(data);
+                            }
                         }
                     } catch (...) {
                         Logger::instance().error("Exception processing audio frame");
@@ -637,7 +689,7 @@ void FFmpegPlayer::decodeLoop()
 
 QImage FFmpegPlayer::convertVideoFrame(AVFrame* frame, VideoStreamData& vsd)
 {
-    if (!frame->data[0]) return QImage();
+    if (!frame || !frame->data[0]) return QImage();
 
     // Get frame dimensions
     int width = frame->width;
@@ -647,12 +699,21 @@ QImage FFmpegPlayer::convertVideoFrame(AVFrame* frame, VideoStreamData& vsd)
     // If the frame is already in RGB format, we can use it directly
     const AVPixelFormat targetFormat = AV_PIX_FMT_RGB32;
 
-    // Create or update conversion context
-    if (!vsd.swsContext || !frame->data[0]) {
+    // Create or update conversion context only if format or dimensions changed
+    if (!vsd.swsContext || vsd.lastWidth != width || vsd.lastHeight != height || vsd.lastFormat != srcFormat) {
+        if (vsd.swsContext) {
+            sws_freeContext(vsd.swsContext);
+            vsd.swsContext = nullptr;
+        }
         vsd.swsContext = sws_getContext(width, height, srcFormat,
                                          width, height, targetFormat,
-                                         SWS_BILINEAR, nullptr, nullptr, nullptr);
+                                         SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
         if (!vsd.swsContext) return QImage();
+        
+        // Cache the format parameters
+        vsd.lastWidth = width;
+        vsd.lastHeight = height;
+        vsd.lastFormat = srcFormat;
     }
 
     // Allocate buffer for RGB32 image
@@ -660,7 +721,7 @@ QImage FFmpegPlayer::convertVideoFrame(AVFrame* frame, VideoStreamData& vsd)
     if (img.isNull()) return QImage();
 
     uint8_t* dstData[4] = { reinterpret_cast<uint8_t*>(img.bits()), nullptr, nullptr, nullptr };
-    int dstLinesize[4] = { img.bytesPerLine(), 0, 0, 0 };
+    int dstLinesize[4] = { static_cast<int>(img.bytesPerLine()), 0, 0, 0 };
 
     // Convert
     int h = sws_scale(vsd.swsContext,
