@@ -168,3 +168,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
+
+# Windows: 复制 ElaWidgetTools DLL 到输出目录
+if(WIN32)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/3rdparty/elawidgettools/ElaWidgetTools/Release/ElaWidgetTools.dll"
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMENT "Copying ElaWidgetTools.dll to output directory"
+    )
+endif()
