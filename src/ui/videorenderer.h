@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QFont>
 #include <QColor>
+#include <QMutex>
 
 namespace VideoPlay {
 
@@ -71,6 +72,7 @@ private:
     
     // 视频相关
     QImage m_currentFrame;
+    QMutex m_frameMutex;
     AspectRatioMode m_aspectRatio;
     
     // 字幕相关

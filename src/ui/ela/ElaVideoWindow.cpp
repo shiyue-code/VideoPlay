@@ -251,12 +251,8 @@ void ElaVideoWindow::setupConnections()
     connect(m_engine, &PlayerEngine::durationChanged, this, &ElaVideoWindow::onDurationChanged);
     connect(m_engine, &PlayerEngine::errorOccurred, this, &ElaVideoWindow::onError);
     
-    // 视频帧信号 - 使用Qt::QueuedConnection确保在主线程更新UI
-    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoRenderer, [this](const QImage& frame) {
-        if (!frame.isNull()) {
-            m_videoRenderer->setFrame(frame);
-        }
-    }, Qt::QueuedConnection);
+    // 视频帧信号 - 直接连接，QImage会自动复制
+    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoRenderer, &VideoRenderer::setFrame);
     
     // 播放控制
     connect(m_playPauseBtn, &ElaIconButton::clicked, this, &ElaVideoWindow::onPlayPauseClicked);
