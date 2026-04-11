@@ -63,6 +63,9 @@ ElaVideoWindow::ElaVideoWindow(QWidget* parent)
     resize(1280, 720);
     setMinimumSize(800, 600);
     
+    // 禁用 ElaWindow 的导航按钮，防止点击退出
+    setWindowButtonFlags(ElaAppBarType::CloseButtonHint | ElaAppBarType::MinimizeButtonHint | ElaAppBarType::MaximizeButtonHint);
+    
     setupUi();
     setupConnections();
     loadSettings();
@@ -247,7 +250,13 @@ void ElaVideoWindow::setupConnections()
     connect(m_engine, &PlayerEngine::positionChanged, this, &ElaVideoWindow::onPositionChanged);
     connect(m_engine, &PlayerEngine::durationChanged, this, &ElaVideoWindow::onDurationChanged);
     connect(m_engine, &PlayerEngine::errorOccurred, this, &ElaVideoWindow::onError);
-    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoRenderer, &VideoRenderer::setFrame);
+    
+    // 视频帧信号 - 使用Qt::QueuedConnection确保在主线程更新UI
+    connect(m_engine, &PlayerEngine::videoFrameReady, m_videoRenderer, [this](const QImage& frame) {
+        if (!frame.isNull()) {
+            m_videoRenderer->setFrame(frame);
+        }
+    }, Qt::QueuedConnection);
     
     // 播放控制
     connect(m_playPauseBtn, &ElaIconButton::clicked, this, &ElaVideoWindow::onPlayPauseClicked);
