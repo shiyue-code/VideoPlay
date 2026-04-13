@@ -1,29 +1,39 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#include <QSettings>
-#include <QVariant>
-#include <QString>
-#include <QPoint>
-#include <QSize>
-#include <QRect>
-#include <QStringList>
+#include <string>
+#include <vector>
+#include <mutex>
+#include <nlohmann/json.hpp>
 
 namespace VideoPlay {
 
-class Settings : public QObject {
-    Q_OBJECT
+struct WindowConfig {
+    int x = 100;
+    int y = 100;
+    int width = 1280;
+    int height = 720;
+    bool maximized = false;
+};
 
+struct SubtitleStyle {
+    std::string fontFamily = "Microsoft YaHei";
+    int fontSize = 24;
+    std::string fontColor = "#FFFFFF";
+    bool hasOutline = true;
+    std::string outlineColor = "#000000";
+    int outlineWidth = 2;
+};
+
+class Settings {
 public:
     static Settings& instance();
 
-    // Window
-    void setWindowGeometry(const QRect& geometry);
-    QRect windowGeometry() const;
-    void setWindowState(int state);
-    int windowState() const;
+    // 窗口配置
+    void setWindowConfig(const WindowConfig& config);
+    WindowConfig windowConfig() const;
 
-    // Playback
+    // 播放设置
     void setVolume(int volume);
     int volume() const;
     void setMuted(bool muted);
@@ -31,35 +41,38 @@ public:
     void setPlaybackSpeed(double speed);
     double playbackSpeed() const;
 
-    // Recent files
-    void addRecentFile(const QString& path);
-    QStringList recentFiles() const;
+    // 最近文件
+    void addRecentFile(const std::string& path);
+    std::vector<std::string> recentFiles() const;
     void clearRecentFiles();
 
-    // Subtitles
-    void setSubtitleFontFamily(const QString& family);
-    QString subtitleFontFamily() const;
-    void setSubtitleFontSize(int size);
-    int subtitleFontSize() const;
-    void setSubtitleFontColor(const QString& color);
-    QString subtitleFontColor() const;
+    // 字幕样式
+    void setSubtitleStyle(const SubtitleStyle& style);
+    SubtitleStyle subtitleStyle() const;
 
-    // General
+    // 播放位置记忆
     void setRememberPosition(bool remember);
     bool rememberPosition() const;
-    void setLastPosition(const QString& filePath, qint64 position);
-    qint64 lastPosition(const QString& filePath) const;
+    void setLastPosition(const std::string& filePath, int64_t position);
+    int64_t lastPosition(const std::string& filePath) const;
 
-    // Reset
+    // 保存和加载
+    void save();
+    void load();
     void reset();
 
 private:
-    explicit Settings(QObject* parent = nullptr);
+    Settings();
     ~Settings();
     Settings(const Settings&) = delete;
     Settings& operator=(const Settings&) = delete;
 
-    QSettings* m_settings;
+    std::string getConfigPath() const;
+    void ensureDirectoryExists() const;
+
+    mutable std::mutex m_mutex;
+    nlohmann::json m_config;
+    std::string m_configPath;
 };
 
 } // namespace VideoPlay

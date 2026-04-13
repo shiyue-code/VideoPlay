@@ -1,34 +1,42 @@
 #ifndef SUBTITLEPARSER_H
 #define SUBTITLEPARSER_H
 
-#include <QObject>
-#include <QString>
-#include <QList>
+#include <string>
+#include <vector>
+#include <cstdint>
+
+namespace VideoPlay {
 
 struct SubtitleEntry {
-    qint64 startTime;  // milliseconds
-    qint64 endTime;    // milliseconds
-    QString text;
+    int64_t startTime = 0;  // 毫秒
+    int64_t endTime = 0;    // 毫秒
+    std::string text;
 };
 
-class SubtitleParser : public QObject {
-    Q_OBJECT
+class SubtitleParser {
 public:
-    explicit SubtitleParser(QObject* parent = nullptr);
-    bool loadFile(const QString& filePath);
-    QString subtitleAt(qint64 ms) const;
-    QList<SubtitleEntry> entries() const;
+    SubtitleParser();
+    ~SubtitleParser();
+
+    bool loadFile(const std::string& filePath);
+    std::string subtitleAt(int64_t ms) const;
+    std::vector<SubtitleEntry> entries() const;
     void clear();
     bool isLoaded() const;
 
 private:
-    bool parseSRT(const QString& content);
-    bool parseASS(const QString& content);
-    bool parseVTT(const QString& content);
-    qint64 parseTimecode(const QString& timecode);
+    bool parseSRT(const std::string& content);
+    bool parseASS(const std::string& content);
+    bool parseVTT(const std::string& content);
+    int64_t parseTimecode(const std::string& timecode);
+    std::string removeFormatting(const std::string& text);
+    std::string trim(const std::string& str);
 
-    QList<SubtitleEntry> m_entries;
-    QString m_filePath;
+    std::vector<SubtitleEntry> m_entries;
+    std::string m_filePath;
+    bool m_loaded;
 };
+
+} // namespace VideoPlay
 
 #endif // SUBTITLEPARSER_H

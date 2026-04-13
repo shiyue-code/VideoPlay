@@ -1,18 +1,24 @@
-#ifndef COMMON_H
-#define COMMON_H
+#pragma once
 
-#include <QString>
-#include <QStringList>
-#include <QList>
-#include <QUrl>
-#include <QMetaType>
+#include <string>
+#include <cstdint>
+#include <functional>
+#include <vector>
 
 namespace VideoPlay {
 
+// VideoFrame definition (shared across the project)
+struct VideoFrame {
+    std::vector<uint8_t> data;
+    int width = 0;
+    int height = 0;
+    int64_t pts = 0;
+};
+
 enum class PlaybackState {
-    Stopped,
-    Playing,
-    Paused
+    Stopped = 0,
+    Playing = 1,
+    Paused = 2
 };
 
 enum class PlaybackSpeed {
@@ -51,24 +57,28 @@ inline PlaybackSpeed doubleToPlaybackSpeed(double rate) {
     return PlaybackSpeed::Speed_4_0;
 }
 
-inline QString formatTime(qint64 ms) {
-    qint64 seconds = ms / 1000;
-    qint64 minutes = seconds / 60;
-    qint64 hours = minutes / 60;
+inline std::string formatTime(int64_t ms) {
+    int64_t seconds = ms / 1000;
+    int64_t minutes = seconds / 60;
+    int64_t hours = minutes / 60;
     seconds %= 60;
     minutes %= 60;
 
+    char buffer[16];
     if (hours > 0) {
-        return QString("%1:%2:%3")
-            .arg(hours)
-            .arg(minutes, 2, 10, QChar('0'))
-            .arg(seconds, 2, 10, QChar('0'));
+        snprintf(buffer, sizeof(buffer), "%lld:%02lld:%02lld", 
+                 static_cast<long long>(hours),
+                 static_cast<long long>(minutes), 
+                 static_cast<long long>(seconds));
+    } else {
+        snprintf(buffer, sizeof(buffer), "%lld:%02lld",
+                 static_cast<long long>(minutes),
+                 static_cast<long long>(seconds));
     }
-    return QString("%1:%2")
-        .arg(minutes)
-        .arg(seconds, 2, 10, QChar('0'));
+    return std::string(buffer);
 }
 
-} // namespace VideoPlay
+template<typename... Args>
+using Callback = std::function<void(Args...)>;
 
-#endif // COMMON_H
+} // namespace VideoPlay

@@ -1,159 +1,268 @@
 #include "core/settings.h"
+#include "utils/logger.h"
+#include <filesystem>
+#include <fstream>
 
-#include <QCoreApplication>
-#include <QDir>
-#include <QDebug>
+// 单头文件 JSON 库
+#include <nlohmann/json.hpp>
 
 namespace VideoPlay {
 
-Settings::Settings(QObject* parent)
-    : QObject(parent)
-{
-    // 使用 INI 格式，确保跨平台兼容
-    QString configPath = QCoreApplication::applicationDirPath() + "/settings.ini";
-    m_settings = new QSettings(configPath, QSettings::IniFormat, this);
-    qDebug() << "Settings file:" << configPath;
-}
-
-Settings::~Settings() = default;
-
-Settings& Settings::instance()
-{
+Settings& Settings::instance() {
     static Settings instance;
     return instance;
 }
 
-void Settings::setWindowGeometry(const QRect& geometry)
-{
-    m_settings->setValue("window/x", geometry.x());
-    m_settings->setValue("window/y", geometry.y());
-    m_settings->setValue("window/width", geometry.width());
-    m_settings->setValue("window/height", geometry.height());
-    m_settings->sync();
+Settings::Settings() {
+    m_configPath = getConfigPath();
+    ensureDirectoryExists();
+    load();
 }
 
-QRect Settings::windowGeometry() const
-{
-    int x = m_settings->value("window/x", 100).toInt();
-    int y = m_settings->value("window/y", 100).toInt();
-    int w = m_settings->value("window/width", 960).toInt();
-    int h = m_settings->value("window/height", 640).toInt();
-    return QRect(x, y, w, h);
+Settings::~Settings() {
+    save();
 }
 
-void Settings::setWindowState(int state)
-{
-    m_settings->setValue("window/state", state);
+std::string Settings::getConfigPath() const {
+#ifdef _WIN32
+    const char* appData = getenv("APPDATA");
+    if (appData) {
+        return std::string(appData) + "/VideoPlay/VideoPlay.json";
+    }
+#else
+    const char* home = getenv("HOME");
+    if (home) {
+        return std::string(home) + "/.config/VideoPlay/VideoPlay.json";
+    }
+#endif
+    return "./VideoPlay.json";
 }
 
-int Settings::windowState() const
-{
-    return m_settings->value("window/state", 0).toInt();
+void Settings::ensureDirectoryExists() const {
+    std::filesystem::path path(m_configPath);
+    std::filesystem::create_directories(path.parent_path());
 }
 
-void Settings::setVolume(int volume)
-{
-    m_settings->setValue("playback/volume", volume);
+void Settings::load() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    if (!std::filesystem::exists(m_configPath)) {
+        // 使用默认配置
+        m_config = {
+            {"window", {
+                {"x", 100},
+                {"y", 100},
+                {"width", 1280},
+                {"height", 720},
+                {"maximized", false}
+            }},
+            {"playback", {
+                {"volume", 100},
+                {"muted", false},
+                {"speed", 1.0}
+            }},
+            {"recentFiles", nlohmann::json::array()},
+            {"subtitle", {
+                {"fontFamily", "Microsoft YaHei"},
+                {"fontSize", 24},
+                {"fontColor", "#FFFFFF"},
+                {"hasOutline", true},
+                {"outlineColor", "#000000"},
+                {"outlineWidth", 2}
+            }},
+            {"rememberPosition", true},
+            {"positions", nlohmann::json::object()}
+        };
+        return;
+    }
+
+    try {
+        std::ifstream file(m_configPath);
+        if (file.is_open()) {
+            file >> m_config;
+        }
+    } catch (const std::exception& e) {
+        Logger::instance().error("Failed to load settings: " + std::string(e.what()));
+        // 使用默认配置
+        m_config = nlohmann::json::object();
+    }
 }
 
-int Settings::volume() const
-{
-    return m_settings->value("playback/volume", 75).toInt();
+void Settings::save() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    try {
+        std::ofstream file(m_configPath);
+        if (file.is_open()) {
+            file << m_config.dump(4);
+        }
+    } catch (const std::exception& e) {
+        Logger::instance().error("Failed to save settings: " + std::string(e.what()));
+    }
 }
 
-void Settings::setMuted(bool muted)
-{
-    m_settings->setValue("playback/muted", muted);
+void Settings::reset() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config = nlohmann::json::object();
+    save();
 }
 
-bool Settings::isMuted() const
-{
-    return m_settings->value("playback/muted", false).toBool();
+// 窗口配置
+void Settings::setWindowConfig(const WindowConfig& config) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["window"] = {
+        {"x", config.x},
+        {"y", config.y},
+        {"width", config.width},
+        {"height", config.height},
+        {"maximized", config.maximized}
+    };
 }
 
-void Settings::setPlaybackSpeed(double speed)
-{
-    m_settings->setValue("playback/speed", speed);
+WindowConfig Settings::windowConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    WindowConfig config;
+    if (m_config.contains("window")) {
+        auto& w = m_config["window"];
+        config.x = w.value("x", 100);
+        config.y = w.value("y", 100);
+        config.width = w.value("width", 1280);
+        config.height = w.value("height", 720);
+        config.maximized = w.value("maximized", false);
+    }
+    return config;
 }
 
-double Settings::playbackSpeed() const
-{
-    return m_settings->value("playback/speed", 1.0).toDouble();
+// 播放设置
+void Settings::setVolume(int volume) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["volume"] = std::clamp(volume, 0, 100);
 }
 
-void Settings::addRecentFile(const QString& path)
-{
-    QStringList files = recentFiles();
-    files.removeAll(path);
-    files.prepend(path);
-    while (files.size() > 10)
-        files.removeLast();
-    m_settings->setValue("recent/files", files);
+int Settings::volume() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("volume", 100);
+    }
+    return 100;
 }
 
-QStringList Settings::recentFiles() const
-{
-    return m_settings->value("recent/files").toStringList();
+void Settings::setMuted(bool muted) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["muted"] = muted;
 }
 
-void Settings::clearRecentFiles()
-{
-    m_settings->remove("recent/files");
+bool Settings::isMuted() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("muted", false);
+    }
+    return false;
 }
 
-void Settings::setSubtitleFontFamily(const QString& family)
-{
-    m_settings->setValue("subtitles/fontFamily", family);
+void Settings::setPlaybackSpeed(double speed) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["speed"] = std::clamp(speed, 0.25, 4.0);
 }
 
-QString Settings::subtitleFontFamily() const
-{
-    return m_settings->value("subtitles/fontFamily", "Arial").toString();
+double Settings::playbackSpeed() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("speed", 1.0);
+    }
+    return 1.0;
 }
 
-void Settings::setSubtitleFontSize(int size)
-{
-    m_settings->setValue("subtitles/fontSize", size);
+// 最近文件
+void Settings::addRecentFile(const std::string& path) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    if (!m_config.contains("recentFiles")) {
+        m_config["recentFiles"] = nlohmann::json::array();
+    }
+    
+    auto& recent = m_config["recentFiles"];
+    // 移除已存在的相同路径
+    recent.erase(std::remove(recent.begin(), recent.end(), path), recent.end());
+    // 添加到开头
+    recent.insert(recent.begin(), path);
+    // 限制数量
+    if (recent.size() > 10) {
+        while (recent.size() > 10) recent.erase(recent.end() - 1);
+    }
 }
 
-int Settings::subtitleFontSize() const
-{
-    return m_settings->value("subtitles/fontSize", 24).toInt();
+std::vector<std::string> Settings::recentFiles() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::string> result;
+    if (m_config.contains("recentFiles") && m_config["recentFiles"].is_array()) {
+        for (const auto& item : m_config["recentFiles"]) {
+            if (item.is_string()) {
+                result.push_back(item.get<std::string>());
+            }
+        }
+    }
+    return result;
 }
 
-void Settings::setSubtitleFontColor(const QString& color)
-{
-    m_settings->setValue("subtitles/fontColor", color);
+void Settings::clearRecentFiles() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["recentFiles"] = nlohmann::json::array();
 }
 
-QString Settings::subtitleFontColor() const
-{
-    return m_settings->value("subtitles/fontColor", "#FFFFFF").toString();
+// 字幕样式
+void Settings::setSubtitleStyle(const SubtitleStyle& style) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["subtitle"] = {
+        {"fontFamily", style.fontFamily},
+        {"fontSize", style.fontSize},
+        {"fontColor", style.fontColor},
+        {"hasOutline", style.hasOutline},
+        {"outlineColor", style.outlineColor},
+        {"outlineWidth", style.outlineWidth}
+    };
 }
 
-void Settings::setRememberPosition(bool remember)
-{
-    m_settings->setValue("general/rememberPosition", remember);
+SubtitleStyle Settings::subtitleStyle() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    SubtitleStyle style;
+    if (m_config.contains("subtitle")) {
+        auto& s = m_config["subtitle"];
+        style.fontFamily = s.value("fontFamily", "Microsoft YaHei");
+        style.fontSize = s.value("fontSize", 24);
+        style.fontColor = s.value("fontColor", "#FFFFFF");
+        style.hasOutline = s.value("hasOutline", true);
+        style.outlineColor = s.value("outlineColor", "#000000");
+        style.outlineWidth = s.value("outlineWidth", 2);
+    }
+    return style;
 }
 
-bool Settings::rememberPosition() const
-{
-    return m_settings->value("general/rememberPosition", true).toBool();
+// 播放位置记忆
+void Settings::setRememberPosition(bool remember) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["rememberPosition"] = remember;
 }
 
-void Settings::setLastPosition(const QString& filePath, qint64 position)
-{
-    m_settings->setValue(QString("positions/%1").arg(filePath), position);
+bool Settings::rememberPosition() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_config.value("rememberPosition", true);
 }
 
-qint64 Settings::lastPosition(const QString& filePath) const
-{
-    return m_settings->value(QString("positions/%1").arg(filePath), 0).toLongLong();
+void Settings::setLastPosition(const std::string& filePath, int64_t position) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_config.contains("positions")) {
+        m_config["positions"] = nlohmann::json::object();
+    }
+    m_config["positions"][filePath] = position;
 }
 
-void Settings::reset()
-{
-    m_settings->clear();
+int64_t Settings::lastPosition(const std::string& filePath) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("positions") && m_config["positions"].contains(filePath)) {
+        return m_config["positions"][filePath].get<int64_t>();
+    }
+    return 0;
 }
 
 } // namespace VideoPlay

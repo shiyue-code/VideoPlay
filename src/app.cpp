@@ -1,0 +1,620 @@
+#include "app.h"
+#include "subtitles/subtitleparser.h"
+#include "utils/logger.h"
+
+#include <SDL.h>
+#include <filesystem>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+
+namespace {
+    using Clock = std::chrono::high_resolution_clock;
+    inline double elapsedMs(Clock::time_point start) {
+        return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    }
+}
+
+namespace VideoPlay {
+
+namespace {
+    const char* APP_TITLE = "VideoPlay - FFmpeg + SDL";
+    const int DEFAULT_WIDTH = 1280;
+    const int DEFAULT_HEIGHT = 720;
+    const int MIN_VOLUME = 0;
+    const int MAX_VOLUME = 100;
+}
+
+VideoPlayerApp::VideoPlayerApp() = default;
+
+VideoPlayerApp::~VideoPlayerApp() {
+    shutdown();
+}
+
+bool VideoPlayerApp::initialize() {
+    Logger::instance().info("Initializing VideoPlayerApp...");
+
+    // 创建渲染器
+    m_renderer = std::make_unique<SDLRenderer>();
+    if (!m_renderer->initialize(APP_TITLE, DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+        Logger::instance().error("Failed to initialize SDL renderer");
+        return false;
+    }
+
+    // 创建播放器
+    m_player = std::make_unique<FFmpegPlayer>();
+    
+    // 设置回调
+    m_player->setPositionCallback([this](int64_t pos) {
+        onPositionChanged(pos);
+    });
+    m_player->setDurationCallback([this](int64_t dur) {
+        onDurationChanged(dur);
+    });
+    m_player->setStateCallback([this](PlaybackState state) {
+        onStateChanged(state);
+    });
+    m_player->setErrorCallback([this](const std::string& err) {
+        onError(err);
+    });
+
+    // 设置渲染器回调
+    m_renderer->setFileDropCallback([this](const std::string& path) {
+        openFile(path);
+    });
+    m_renderer->setFileOpenCallback([this]() {
+        openFileDialog();
+    });
+    m_renderer->setPlayPauseCallback([this]() {
+        togglePlayPause();
+    });
+    m_renderer->setStopCallback([this]() {
+        stop();
+    });
+    m_renderer->setPrevCallback([this]() {
+        playPrevious();
+    });
+    m_renderer->setNextCallback([this]() {
+        playNext();
+    });
+    m_renderer->setSeekCallback([this](double pos) {
+        // pos < 1000 表示相对跳转（秒），否则是绝对位置
+        if (pos < 1000) {
+            seek(pos * 1000); // 转换为毫秒
+        } else {
+            seekTo((pos - 1000) / 1000); // 绝对位置
+        }
+    });
+    m_renderer->setVolumeCallback([this](int delta) {
+        setVolume(delta);
+    });
+    m_renderer->setSpeedCallback([this](double speed) {
+        if (speed == 0) {
+            cycleSpeed();
+        } else {
+            setSpeed(speed);
+        }
+    });
+    m_renderer->setFullscreenCallback([this]() {
+        // 全屏切换由渲染器处理
+    });
+    m_renderer->setMenuCallback([this](int menuId) {
+        handleMenu(menuId);
+    });
+    m_renderer->setKeyCallback([this](int key, bool pressed) {
+        if (!pressed) return;
+        
+        switch (key) {
+            case SDLK_o:
+                if (SDL_GetModState() & KMOD_CTRL) {
+                    openFileDialog();
+                }
+                break;
+            case SDLK_n:
+                playNext();
+                break;
+            case SDLK_p:
+                playPrevious();
+                break;
+            case SDLK_m:
+                toggleMute();
+                break;
+            case SDLK_PERIOD:
+                cycleSpeed();
+                break;
+            case SDLK_F1:
+                showHelp();
+                break;
+        }
+    });
+
+    // 创建字幕解析器
+    m_subtitleParser = std::make_unique<SubtitleParser>();
+
+    Logger::instance().info("VideoPlayerApp initialized successfully");
+    return true;
+}
+
+void VideoPlayerApp::shutdown() {
+    Logger::instance().info("Shutting down VideoPlayerApp...");
+
+    if (m_player) {
+        m_player->stop();
+    }
+
+    m_renderer.reset();
+    m_player.reset();
+    m_subtitleParser.reset();
+
+    Logger::instance().info("VideoPlayerApp shutdown complete");
+}
+
+int VideoPlayerApp::run(int argc, char* argv[]) {
+    if (!initialize()) {
+        return 1;
+    }
+
+    m_running = true;
+
+    // 处理命令行参数
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (std::filesystem::exists(arg)) {
+            addToPlaylist(arg);
+        }
+    }
+
+    // 自动播放第一个文件
+    if (!m_playlist.empty()) {
+        playFromPlaylist(0);
+    }
+
+    // 运行主循环
+    runMainLoop();
+
+    shutdown();
+    return 0;
+}
+
+void VideoPlayerApp::runMainLoop() {
+    Logger::instance().info("Entering main loop");
+
+    using Clock = std::chrono::high_resolution_clock;
+    auto frameStart = Clock::now();
+
+    while (m_running) {
+        // 处理事件
+        if (!m_renderer->processEvents()) {
+            m_running = false;
+            break;
+        }
+
+        // 渲染
+        render();
+
+        // 控制帧率 (~60 FPS)，仅在提前完成时补延迟
+        auto frameEnd = Clock::now();
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
+        if (elapsedMs < 16) {
+            SDL_Delay(static_cast<Uint32>(16 - elapsedMs));
+        }
+        frameStart = Clock::now();
+    }
+}
+
+void VideoPlayerApp::render() {
+    auto t0 = Clock::now();
+    // 用音频播放进度作为当前显示时间和 UI 时间（考虑倍速）
+    if (m_player) {
+        int64_t audioPos = m_player->audioPositionMs();
+        if (audioPos >= 0) {
+            m_position = audioPos;
+        }
+    }
+    double dtPos = elapsedMs(t0);
+
+    // 根据当前播放时间从队列获取对应视频帧
+    VideoFrame frame;
+    bool gotFrame = false;
+    if (m_player) {
+        gotFrame = m_player->getVideoFrame(m_position, frame);
+    }
+    if (gotFrame) {
+        m_displayFrame = std::move(frame);
+    } else if (m_displayFrame.data.empty() && m_player) {
+        // 启动时如果严格同步拿不到帧（音频时间还没到第一帧 pts），
+        // fallback 取最早的一帧，避免黑屏
+        if (m_player->getVideoFrame(-1, frame)) {
+            m_displayFrame = std::move(frame);
+        }
+    }
+    double dtGet = elapsedMs(t0);
+
+    auto t1 = Clock::now();
+    // 开始渲染
+    m_renderer->clear();
+    double dtClear = elapsedMs(t1);
+
+    auto t2 = Clock::now();
+    // 渲染视频帧
+    if (!m_displayFrame.data.empty()) {
+        m_renderer->renderFrame(m_displayFrame);
+    }
+    double dtRenderFrame = elapsedMs(t2);
+
+    auto t3 = Clock::now();
+    // 计算音视频同步调试信息
+    int64_t audioPts = m_position;
+    int64_t videoPts = m_displayFrame.pts;
+    double avDiff = 0.0;
+    if (videoPts > 0 && audioPts > 0) {
+        avDiff = (audioPts - videoPts) / 1000.0;
+    }
+    
+    // 渲染 UI
+    m_renderer->renderUI(
+        m_position,
+        m_duration,
+        m_volume,
+        m_isMuted,
+        m_isPlaying,
+        m_speed,
+        m_currentFile,
+        audioPts,
+        videoPts,
+        avDiff
+    );
+    double dtRenderUI = elapsedMs(t3);
+
+    auto t4 = Clock::now();
+    // 呈现
+    m_renderer->present();
+    double dtPresent = elapsedMs(t4);
+
+    double total = dtGet + dtClear + dtRenderFrame + dtRenderUI + dtPresent;
+    if (total > 10.0) {
+        Logger::instance().debug("[PERF] render get=" + std::to_string(dtGet) +
+            "(pos=" + std::to_string(dtPos) +
+            ",vframe=" + std::to_string(dtGet - dtPos) + ")" +
+            " clear=" + std::to_string(dtClear) +
+            " frame=" + std::to_string(dtRenderFrame) +
+            " ui=" + std::to_string(dtRenderUI) +
+            " present=" + std::to_string(dtPresent) +
+            " total=" + std::to_string(total) + "ms");
+    }
+    
+    static auto reportStart = Clock::now();
+    static int renderCount = 0;
+    renderCount++;
+    if (elapsedMs(reportStart) >= 1000.0) {
+        Logger::instance().debug("[PERF] render fps=" + std::to_string(renderCount));
+        renderCount = 0;
+        reportStart = Clock::now();
+    }
+}
+
+void VideoPlayerApp::openFile(const std::string& path) {
+    if (!std::filesystem::exists(path)) {
+        Logger::instance().error("File not found: " + path);
+        return;
+    }
+
+    Logger::instance().info("Opening file: " + path);
+
+    // 停止当前播放
+    stop();
+
+    // 添加到播放列表
+    addToPlaylist(path);
+
+    // 加载文件
+    if (m_player->loadFile(path)) {
+        m_currentFile = path;
+        
+        // 更新窗口标题
+        std::string title = std::filesystem::path(path).filename().string() + " - " + APP_TITLE;
+        m_renderer->setWindowTitle(title);
+
+        // 尝试加载同名字幕
+        loadSubtitle(path);
+
+        // 开始播放
+        play();
+    } else {
+        Logger::instance().error("Failed to load file: " + path);
+    }
+}
+
+void VideoPlayerApp::openFileDialog() {
+    if (!m_renderer) return;
+    
+    Logger::instance().info("Opening file dialog...");
+    
+    std::string filePath = m_renderer->openFileDialog();
+    
+    if (!filePath.empty()) {
+        Logger::instance().info("Selected file: " + filePath);
+        openFile(filePath);
+    } else {
+        Logger::instance().info("File dialog cancelled");
+    }
+}
+
+void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
+    std::filesystem::path video(videoPath);
+    std::filesystem::path srtPath = video.parent_path() / (video.stem().string() + ".srt");
+    std::filesystem::path assPath = video.parent_path() / (video.stem().string() + ".ass");
+    std::filesystem::path vttPath = video.parent_path() / (video.stem().string() + ".vtt");
+
+    if (std::filesystem::exists(srtPath)) {
+        m_currentSubtitle = srtPath.string();
+    } else if (std::filesystem::exists(assPath)) {
+        m_currentSubtitle = assPath.string();
+    } else if (std::filesystem::exists(vttPath)) {
+        m_currentSubtitle = vttPath.string();
+    } else {
+        m_currentSubtitle.clear();
+        return;
+    }
+
+    Logger::instance().info("Loading subtitle: " + m_currentSubtitle);
+    // 字幕加载逻辑由 SubtitleParser 处理
+}
+
+void VideoPlayerApp::play() {
+    if (!m_player) return;
+
+    Logger::instance().info("Playing");
+    m_player->play();
+    m_isPlaying = true;
+}
+
+void VideoPlayerApp::pause() {
+    if (!m_player) return;
+
+    Logger::instance().info("Pausing");
+    m_player->pause();
+    m_isPlaying = false;
+}
+
+void VideoPlayerApp::togglePlayPause() {
+    if (m_isPlaying) {
+        pause();
+    } else {
+        play();
+    }
+}
+
+void VideoPlayerApp::stop() {
+    if (!m_player) return;
+
+    Logger::instance().info("Stopping");
+    m_player->stop();
+    m_isPlaying = false;
+    m_position = 0;
+
+    // 清空当前帧
+    m_displayFrame = VideoFrame();
+}
+
+void VideoPlayerApp::seek(double deltaMs) {
+    if (!m_player || m_duration <= 0) return;
+
+    int64_t targetPos = m_position + static_cast<int64_t>(deltaMs);
+    targetPos = std::max(0LL, std::min(targetPos, m_duration));
+    
+    Logger::instance().info("Seeking to: " + std::to_string(targetPos) + "ms");
+    m_player->seek(targetPos);
+}
+
+void VideoPlayerApp::seekTo(double position) {
+    if (!m_player || m_duration <= 0) return;
+
+    position = std::max(0.0, std::min(1.0, position));
+    int64_t targetPos = static_cast<int64_t>(position * m_duration);
+    
+    Logger::instance().info("Seeking to position: " + std::to_string(position));
+    m_player->seek(targetPos);
+}
+
+void VideoPlayerApp::setVolume(int delta) {
+    m_volume += delta;
+    m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
+    
+    if (m_player) {
+        m_player->setVolume(m_volume);
+    }
+    
+    Logger::instance().info("Volume set to: " + std::to_string(m_volume));
+}
+
+void VideoPlayerApp::toggleMute() {
+    m_isMuted = !m_isMuted;
+    
+    if (m_player) {
+        m_player->setMuted(m_isMuted);
+    }
+    
+    Logger::instance().info(m_isMuted ? "Muted" : "Unmuted");
+}
+
+void VideoPlayerApp::setSpeed(double speed) {
+    m_speed = std::max(0.25, std::min(4.0, speed));
+    
+    if (m_player) {
+        m_player->setPlaybackSpeed(m_speed);
+    }
+    
+    Logger::instance().info("Playback speed set to: " + std::to_string(m_speed) + "x");
+}
+
+void VideoPlayerApp::cycleSpeed() {
+    const double speeds[] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+    const int count = sizeof(speeds) / sizeof(speeds[0]);
+    
+    // 找到下一个速度
+    for (int i = 0; i < count; i++) {
+        if (speeds[i] > m_speed) {
+            setSpeed(speeds[i]);
+            return;
+        }
+    }
+    
+    // 回到第一个
+    setSpeed(speeds[0]);
+}
+
+void VideoPlayerApp::addToPlaylist(const std::string& path) {
+    // 检查是否已存在
+    auto it = std::find(m_playlist.begin(), m_playlist.end(), path);
+    if (it == m_playlist.end()) {
+        m_playlist.push_back(path);
+        Logger::instance().info("Added to playlist: " + path);
+    }
+}
+
+void VideoPlayerApp::playNext() {
+    if (m_playlist.empty()) return;
+
+    m_currentIndex++;
+    if (m_currentIndex >= m_playlist.size()) {
+        m_currentIndex = 0;  // 循环
+    }
+
+    playFromPlaylist(m_currentIndex);
+}
+
+void VideoPlayerApp::playPrevious() {
+    if (m_playlist.empty()) return;
+
+    if (m_currentIndex == 0) {
+        m_currentIndex = m_playlist.size() - 1;
+    } else {
+        m_currentIndex--;
+    }
+
+    playFromPlaylist(m_currentIndex);
+}
+
+void VideoPlayerApp::playFromPlaylist(size_t index) {
+    if (index >= m_playlist.size()) return;
+
+    m_currentIndex = index;
+    openFile(m_playlist[index]);
+}
+
+void VideoPlayerApp::onPositionChanged(int64_t position) {
+    // 忽略视频解码驱动的位置更新，UI 时间由 render() 中的音频播放时间统一驱动
+    (void)position;
+}
+
+void VideoPlayerApp::onDurationChanged(int64_t duration) {
+    m_duration = duration;
+    Logger::instance().info("Duration: " + std::to_string(duration) + "ms");
+}
+
+void VideoPlayerApp::onStateChanged(PlaybackState state) {
+    switch (state) {
+        case PlaybackState::Playing:
+            m_isPlaying = true;
+            Logger::instance().info("State changed: Playing");
+            break;
+        case PlaybackState::Paused:
+            m_isPlaying = false;
+            Logger::instance().info("State changed: Paused");
+            break;
+        case PlaybackState::Stopped:
+            m_isPlaying = false;
+            Logger::instance().info("State changed: Stopped");
+            break;
+    }
+}
+
+void VideoPlayerApp::onError(const std::string& error) {
+    Logger::instance().error("Player error: " + error);
+}
+
+void VideoPlayerApp::handleMenu(int menuId) {
+    switch (menuId) {
+        case 1: // 打开文件
+            openFileDialog();
+            break;
+        case 2: // 打开文件夹
+            // TODO: 实现文件夹打开
+            break;
+        case 3: // 退出
+            m_running = false;
+            break;
+        case 10: // 播放/暂停
+            togglePlayPause();
+            break;
+        case 11: // 停止
+            stop();
+            break;
+        case 12: // 上一个
+            playPrevious();
+            break;
+        case 13: // 下一个
+            playNext();
+            break;
+        case 14: // 增加速度
+            setSpeed(m_speed * 1.25);
+            break;
+        case 15: // 降低速度
+            setSpeed(m_speed * 0.8);
+            break;
+        case 16: // 全屏
+            // 由渲染器处理
+            break;
+        case 20: // 快捷键
+            showHelp();
+            break;
+        case 21: // 关于
+            showAbout();
+            break;
+    }
+}
+
+void VideoPlayerApp::showHelp() {
+    const char* helpText = 
+        "快捷键列表：\n\n"
+        "空格          - 播放/暂停\n"
+        "S             - 停止\n"
+        "← / →         - 后退/前进 5秒\n"
+"↑ / ↓         - 音量增加/减少\n"
+        "M             - 静音切换\n"
+        ".             - 切换播放速度\n"
+        "F             - 全屏切换\n"
+        "N             - 下一个文件\n"
+        "P             - 上一个文件\n"
+        "Ctrl+O        - 打开文件\n"
+        "F1            - 显示帮助\n"
+        "Esc           - 退出全屏/关闭菜单\n\n"
+        "鼠标操作：\n"
+        "左键点击控制栏按钮\n"
+        "拖动进度条跳转\n"
+        "滚轮调节音量\n"
+        "拖放文件到窗口播放";
+    
+    if (m_renderer) {
+        m_renderer->showMessageBox("帮助", helpText, false);
+    }
+}
+
+void VideoPlayerApp::showAbout() {
+    const char* aboutText = 
+        "VideoPlay v" APP_VERSION "\n\n"
+        "基于 FFmpeg + SDL2 的视频播放器\n\n"
+        "功能特性：\n"
+        "- 支持多种视频格式\n"
+        "- 变速播放 (0.25x - 4x)\n"
+        "- 字幕支持 (SRT/ASS/VTT)\n"
+        "- 播放列表管理\n\n"
+        "License: GPLv3";
+    
+    if (m_renderer) {
+        m_renderer->showMessageBox("关于", aboutText, false);
+    }
+}
+
+} // namespace VideoPlay

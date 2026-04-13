@@ -1,25 +1,33 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include <QString>
-#include <QDateTime>
-#include <QFile>
-#include <QTextStream>
-#include <QMutex>
+#include <string>
+#include <mutex>
+#include <fstream>
+#include <chrono>
+#include <iostream>
 
 namespace VideoPlay {
+
+enum class LogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error
+};
 
 class Logger {
 public:
     static Logger& instance();
 
-    void info(const QString& message);
-    void warning(const QString& message);
-    void error(const QString& message);
-    void debug(const QString& message);
+    void info(const std::string& message);
+    void warning(const std::string& message);
+    void error(const std::string& message);
+    void debug(const std::string& message);
 
-    void setLogFile(const QString& path);
+    void setLogFile(const std::string& path);
     void setEnabled(bool enabled);
+    void setConsoleOutput(bool enabled);
     bool isEnabled() const;
 
 private:
@@ -28,12 +36,15 @@ private:
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
-    void write(const QString& level, const QString& message);
+    void write(LogLevel level, const std::string& message);
+    std::string getCurrentTimestamp();
+    std::string levelToString(LogLevel level);
 
-    QFile* m_file;
-    QTextStream m_stream;
-    QMutex m_mutex;
+    std::ofstream m_file;
+    std::mutex m_mutex;
     bool m_enabled;
+    bool m_consoleOutput;
+    std::string m_logFilePath;
 };
 
 } // namespace VideoPlay
