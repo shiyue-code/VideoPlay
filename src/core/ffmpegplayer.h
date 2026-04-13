@@ -117,6 +117,7 @@ private:
     
     mutable std::mutex m_mutex;
     std::condition_variable m_condition;
+    std::condition_variable m_decodeCondition;
     
     std::string m_filePath;
     int64_t m_duration = 0;

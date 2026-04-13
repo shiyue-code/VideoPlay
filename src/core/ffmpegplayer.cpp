@@ -182,6 +182,7 @@ void FFmpegPlayer::closeFile() {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
     }
+    m_decodeCondition.notify_all();
 }
 
 std::string FFmpegPlayer::filePath() const {
@@ -266,6 +267,7 @@ void FFmpegPlayer::stop() {
     }
     
     m_condition.notify_all();
+    m_decodeCondition.notify_all();
     
     if (m_decodeThread.joinable()) {
         m_decodeThread.join();
@@ -374,16 +376,12 @@ void FFmpegPlayer::decodeLoop() {
         lock.unlock();
         
         // Pacing: don't decode too far ahead of playback time
-        bool queueFull = false;
         {
-            std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
-            if (m_videoFrameQueue.size() >= kMaxVideoQueueSize) {
-                queueFull = true;
-            }
-        }
-        if (queueFull) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            continue;
+            std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
+            m_decodeCondition.wait(vqLock, [this] {
+                return m_abortRequest.load() || m_videoFrameQueue.size() < kMaxVideoQueueSize;
+            });
+            if (m_abortRequest.load()) break;
         }
         
         pktCount++;
@@ -846,6 +844,7 @@ bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     if (targetPtsMs < 0) {
         frame = std::move(m_videoFrameQueue.front());
         m_videoFrameQueue.pop_front();
+        m_decodeCondition.notify_one();
         return true;
     }
     
@@ -866,6 +865,7 @@ bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     
     frame = std::move(m_videoFrameQueue[index]);
     m_videoFrameQueue.erase(m_videoFrameQueue.begin(), m_videoFrameQueue.begin() + index + 1);
+    m_decodeCondition.notify_one();
     return true;
 }
 
