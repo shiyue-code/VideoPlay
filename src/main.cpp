@@ -1,23 +1,16 @@
-#include <QApplication>
-#include <ElaApplication.h>
+#include "app.h"
+#include "utils/logger.h"
+#include <iostream>
 
-#include "ui/ela/ElaVideoWindow.h"
-
-int main(int argc, char *argv[])
-{
-    QApplication app(argc, argv);
+int main(int argc, char* argv[]) {
+    VideoPlay::Logger::instance().info("VideoPlay v" APP_VERSION " starting...");
     
-    // 初始化 ElaWidgetTools
-    eApp->init();
-    
-    // 设置应用信息
-    app.setApplicationName("VideoPlay");
-    app.setApplicationVersion("1.1.0");
-    app.setOrganizationName("VideoPlay");
-    
-    // 创建主窗口
-    VideoPlay::ElaVideoWindow window;
-    window.show();
-    
-    return app.exec();
+    try {
+        VideoPlay::VideoPlayerApp app;
+        return app.run(argc, argv);
+    } catch (const std::exception& e) {
+        VideoPlay::Logger::instance().error("Fatal error: " + std::string(e.what()));
+        std::cerr << "Fatal error: " << e.what() << std::endl;
+        return 1;
+    }
 }

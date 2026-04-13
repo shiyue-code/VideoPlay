@@ -1,87 +1,126 @@
 #include "utils/logger.h"
-
-#include <QCoreApplication>
-#include <QDir>
-#include <QDebug>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <filesystem>
 
 namespace VideoPlay {
 
-Logger::Logger()
-    : m_file(nullptr)
-    , m_enabled(true)
-{
-}
-
-Logger::~Logger()
-{
-    if (m_file && m_file->isOpen()) {
-        m_file->close();
-    }
-    delete m_file;
-}
-
-Logger& Logger::instance()
-{
+Logger& Logger::instance() {
     static Logger instance;
     return instance;
 }
 
-void Logger::info(const QString& message)
-{
-    write("INFO", message);
-}
-
-void Logger::warning(const QString& message)
-{
-    write("WARN", message);
-}
-
-void Logger::error(const QString& message)
-{
-    write("ERROR", message);
-}
-
-void Logger::debug(const QString& message)
-{
-    write("DEBUG", message);
-}
-
-void Logger::setLogFile(const QString& path)
-{
-    QMutexLocker locker(&m_mutex);
-    if (m_file && m_file->isOpen()) {
-        m_file->close();
+Logger::Logger()
+    : m_enabled(true)
+    , m_consoleOutput(true) {
+    std::string logDir;
+    
+#ifdef _WIN32
+    const char* appData = getenv("APPDATA");
+    if (appData) {
+        logDir = std::string(appData) + "/VideoPlay/logs";
+    } else {
+        logDir = "./logs";
     }
-    delete m_file;
-    m_file = new QFile(path);
-    if (m_file->open(QIODevice::Append | QIODevice::Text)) {
-        m_stream.setDevice(m_file);
+#else
+    const char* home = getenv("HOME");
+    if (home) {
+        logDir = std::string(home) + "/.local/share/VideoPlay/logs";
+    } else {
+        logDir = "./logs";
+    }
+#endif
+
+    std::filesystem::create_directories(logDir);
+    setLogFile(logDir + "/videoplay.log");
+}
+
+Logger::~Logger() {
+    if (m_file.is_open()) {
+        m_file.close();
     }
 }
 
-void Logger::setEnabled(bool enabled)
-{
+void Logger::setLogFile(const std::string& path) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_file.is_open()) {
+        m_file.close();
+    }
+    m_logFilePath = path;
+    m_file.open(path, std::ios::out | std::ios::app);
+}
+
+void Logger::setEnabled(bool enabled) {
     m_enabled = enabled;
 }
 
-bool Logger::isEnabled() const
-{
+void Logger::setConsoleOutput(bool enabled) {
+    m_consoleOutput = enabled;
+}
+
+bool Logger::isEnabled() const {
     return m_enabled;
 }
 
-void Logger::write(const QString& level, const QString& message)
-{
+void Logger::info(const std::string& message) {
+    write(LogLevel::Info, message);
+}
+
+void Logger::warning(const std::string& message) {
+    write(LogLevel::Warning, message);
+}
+
+void Logger::error(const std::string& message) {
+    write(LogLevel::Error, message);
+}
+
+void Logger::debug(const std::string& message) {
+    write(LogLevel::Debug, message);
+}
+
+std::string Logger::getCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d %H:%M:%S");
+    ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
+    return ss.str();
+}
+
+std::string Logger::levelToString(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug:   return "DEBUG";
+        case LogLevel::Info:    return "INFO";
+        case LogLevel::Warning: return "WARN";
+        case LogLevel::Error:   return "ERROR";
+        default:                return "UNKNOWN";
+    }
+}
+
+void Logger::write(LogLevel level, const std::string& message) {
     if (!m_enabled) return;
 
-    QMutexLocker locker(&m_mutex);
-    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    QString logLine = QString("[%1] [%2] %3").arg(timestamp, level, message);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::string timestamp = getCurrentTimestamp();
+    std::string levelStr = levelToString(level);
+    std::string formatted = "[" + timestamp + "] [" + levelStr + "] " + message;
 
-    qDebug().noquote() << logLine;
+    if (m_file.is_open()) {
+        m_file << formatted << std::endl;
+        m_file.flush();
+    }
 
-    if (m_file && m_file->isOpen()) {
-        m_stream << logLine << Qt::endl;
-        m_file->flush();
+    if (m_consoleOutput) {
+        if (level == LogLevel::Error) {
+            std::cerr << formatted << std::endl;
+        } else {
+            std::cout << formatted << std::endl;
+        }
     }
 }
 

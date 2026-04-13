@@ -1,19 +1,16 @@
-#ifndef FFMPEGPLAYER_H
-#define FFMPEGPLAYER_H
-
-#include <QObject>
-#include <QThread>
-#include <QMutex>
-#include <QWaitCondition>
-#include <QTimer>
-#include <QAudioSink>
-#include <QAudioFormat>
-#include <QIODevice>
-#include <QVector>
-#include <QImage>
+#pragma once
 
 #include "core/common.h"
-#include "core/audioplaybackthread.h"
+#include "core/audioplayer.h"
+
+#include <string>
+#include <memory>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <vector>
+#include <deque>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -27,126 +24,131 @@ extern "C" {
 
 namespace VideoPlay {
 
-class FFmpegPlayer : public QObject {
-    Q_OBJECT
+// VideoFrame is defined in common.h
 
+using StateCallback = std::function<void(PlaybackState)>;
+using PositionCallback = std::function<void(int64_t)>;
+using DurationCallback = std::function<void(int64_t)>;
+using ErrorCallback = std::function<void(const std::string&)>;
+using SpeedCallback = std::function<void(double)>;
+using VolumeCallback = std::function<void(int)>;
+using MuteCallback = std::function<void(bool)>;
+using VideoFrameCallback = std::function<void(VideoFrame)>;
+
+class FFmpegPlayer {
 public:
-    explicit FFmpegPlayer(QObject* parent = nullptr);
-    ~FFmpegPlayer() override;
+    FFmpegPlayer();
+    ~FFmpegPlayer();
 
-    bool loadFile(const QString& filePath);
+    FFmpegPlayer(const FFmpegPlayer&) = delete;
+    FFmpegPlayer& operator=(const FFmpegPlayer&) = delete;
+
+    bool loadFile(const std::string& filePath);
+    void closeFile();
+    std::string filePath() const;
+
     void play();
     void pause();
     void stop();
-    void seek(qint64 position); // position in milliseconds
+    void seek(int64_t positionMs);
 
     PlaybackState state() const;
-    qint64 position() const; // current position in milliseconds
-    qint64 duration() const; // total duration in milliseconds
-    QString filePath() const;
-    double playbackSpeed() const;
-    int volume() const;
-    bool isMuted() const;
+    int64_t position() const;
+    int64_t duration() const;
+    int64_t audioPositionMs() const;
 
     void setPlaybackSpeed(double speed);
+    double playbackSpeed() const;
     void setVolume(int volume);
+    int volume() const;
     void setMuted(bool muted);
+    bool isMuted() const;
 
-signals:
-    void stateChanged(PlaybackState state);
-    void positionChanged(qint64 position);
-    void durationChanged(qint64 duration);
-    void errorOccurred(const QString& error);
-    void playbackSpeedChanged(double speed);
-    void volumeChanged(int volume);
-    void muteChanged(bool muted);
-    void fileLoaded(const QString& filePath);
-    void videoFrameReady(const QImage& frame, qint64 pts);
-    void audioDataReady(const QVector<char>& data, qint64 pts);
+    void setStateCallback(StateCallback callback);
+    void setPositionCallback(PositionCallback callback);
+    void setDurationCallback(DurationCallback callback);
+    void setErrorCallback(ErrorCallback callback);
+    void setSpeedCallback(SpeedCallback callback);
+    void setVolumeCallback(VolumeCallback callback);
+    void setMuteCallback(MuteCallback callback);
+    void setVideoFrameCallback(VideoFrameCallback callback);
 
-private slots:
-    void onAudioSinkStateChanged(QAudio::State state);
+    bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
 private:
-    struct VideoStreamData {
+    struct StreamContext {
         AVStream* stream = nullptr;
         AVCodecContext* codecContext = nullptr;
-        SwsContext* swsContext = nullptr;
         int64_t startTime = 0;
-        bool isKeyframeRequired = false;
-        // Cached format parameters to avoid unnecessary context recreation
+    };
+
+    struct VideoContext : StreamContext {
+        SwsContext* swsContext = nullptr;
         int lastWidth = 0;
         int lastHeight = 0;
         AVPixelFormat lastFormat = AV_PIX_FMT_NONE;
+        int lastColorSpace = SWS_CS_DEFAULT;
+        int lastSrcRange = 0;
+        std::vector<uint8_t> swsBuffer;
+        int swsStride = 0;
     };
 
-    struct AudioStreamData {
-        AVStream* stream = nullptr;
-        AVCodecContext* codecContext = nullptr;
-        SwrContext* resampleContext = nullptr;
-        int64_t startTime = 0;
-        QAudioFormat audioFormat;
-    };
-
-    struct DecodeThread : public QThread {
-        FFmpegPlayer* player;
-        DecodeThread(FFmpegPlayer* p) : player(p) {}
-        void run() override;
+    struct AudioContext : StreamContext {
+        SwrContext* swrContext = nullptr;
+        AudioFormat format;
     };
 
     void initialize();
     void cleanup();
-    void openFile(const QString& filePath);
-    void closeFile();
     void decodeLoop();
-    bool initializeVideoStream(VideoStreamData& vsd);
-    bool initializeAudioStream(AudioStreamData& asd);
-    QImage convertVideoFrame(AVFrame* frame, VideoStreamData& vsd);
-    QAudioFormat getAudioFormatFromCodec(AVCodecContext* codecCtx);
-    QVector<char> resampleAudio(AVFrame* frame, AudioStreamData& asd, int& numSamples);
-    void managePlaybackSpeed(double speed);
-    void handleSeek(qint64 position);
-    void broadcastPosition();
+    bool initializeVideoContext();
+    bool initializeAudioContext();
+    VideoFrame convertVideoFrame(AVFrame* frame);
+    std::vector<float> resampleAudioFrame(AVFrame* frame);
+    void handleSeek(int64_t positionMs);
+    void synchronizeVideo(double pts);
 
-    // Clock synchronization
-    double getAudioClock() const;
-    double getVideoClock() const;
-    double getExternalClock() const;
-    void synchronizeClocks();
-
-    AVFormatContext* m_formatContext;
-    DecodeThread* m_decodeThread;
-    QMutex m_mutex;
-    QWaitCondition m_condition;
-
-    VideoStreamData m_videoStream;
-    AudioStreamData m_audioStream;
-
-    QString m_filePath;
-    qint64 m_duration;
-    qint64 m_position;
-    double m_playbackSpeed;
-    int m_volume;
-    bool m_muted;
-    PlaybackState m_state;
-    bool m_autoPlayAfterLoad;
-    bool m_seekRequested;
-    qint64 m_seekPosition;
-    bool m_abortRequest;
-
-    AudioPlaybackThread* m_audioThread;
-
-    double m_baseTime; // Reference clock base
-    double m_clock;    // Master clock (usually audio clock)
-    double m_audioClock;
-    qint64 m_lastVideoPts;
-    qint64 m_startTime;
+    AVFormatContext* m_formatContext = nullptr;
+    VideoContext m_videoCtx;
+    AudioContext m_audioCtx;
     
-    // Video sync timing
-    double m_videoStartTime;  // Video playback start time
-    double m_frameTimer;      // Time when next frame should be displayed
+    std::unique_ptr<AudioPlayer> m_audioPlayer;
+    std::thread m_decodeThread;
+    
+    mutable std::mutex m_mutex;
+    std::condition_variable m_condition;
+    
+    std::string m_filePath;
+    int64_t m_duration = 0;
+    std::atomic<int64_t> m_position{0};
+    std::atomic<double> m_playbackSpeed{1.0};
+    std::atomic<int> m_volume{100};
+    std::atomic<bool> m_muted{false};
+    std::atomic<PlaybackState> m_state{PlaybackState::Stopped};
+    
+    std::atomic<bool> m_abortRequest{false};
+    std::atomic<bool> m_seekRequested{false};
+    std::atomic<int64_t> m_seekPosition{0};
+    std::atomic<int64_t> m_audioBaseMs{0};
+    
+    double m_audioClock = 0.0;
+    double m_videoClock = 0.0;
+    double m_frameTimer = 0.0;
+
+    // Video frame queue with PTS ordering
+    std::deque<VideoFrame> m_videoFrameQueue;
+    std::mutex m_videoQueueMutex;
+    static constexpr size_t kMaxVideoQueueSize = 10;
+    void pushVideoFrame(VideoFrame&& frame);
+
+    StateCallback m_stateCallback;
+    PositionCallback m_positionCallback;
+    DurationCallback m_durationCallback;
+    ErrorCallback m_errorCallback;
+    SpeedCallback m_speedCallback;
+    VolumeCallback m_volumeCallback;
+    MuteCallback m_muteCallback;
+    VideoFrameCallback m_videoFrameCallback;
 };
 
 } // namespace VideoPlay
-
-#endif // FFMPEGPLAYER_H
