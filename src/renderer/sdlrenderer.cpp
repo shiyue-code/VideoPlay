@@ -16,6 +16,26 @@
 #include <condition_variable>
 #include <chrono>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "utils/stb_image.h"
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
+namespace {
+    std::string getExecutableDir() {
+#ifdef _WIN32
+        char path[MAX_PATH];
+        GetModuleFileNameA(nullptr, path, MAX_PATH);
+        return std::filesystem::path(path).parent_path().string();
+#else
+        return std::filesystem::current_path().string();
+#endif
+    }
+}
+
 namespace VideoPlay {
 
 namespace {
@@ -139,6 +159,9 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 初始化菜单
     initMenus();
 
+    // 加载 PNG 图标
+    loadIconTextures();
+
     m_initialized = true;
     Logger::instance().info("SDLRenderer initialized: " + std::to_string(width) + "x" + std::to_string(height));
     
@@ -147,6 +170,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 
 void SDLRenderer::shutdown() {
     clearTextCache();
+    clearIconTextures();
     closeFont();
     
     if (m_videoTexture) {
@@ -932,17 +956,17 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
 bool SDLRenderer::loadFont(const std::string& fontPath, int fontSize) {
 #ifdef HAS_SDL_TTF
     closeFont();
-    
+
     m_font = TTF_OpenFont(fontPath.c_str(), fontSize);
     if (!m_font) {
         Logger::instance().error("Failed to load font: " + std::string(SDL_GetError()));
         return false;
     }
-    
+
     m_fontSmall = TTF_OpenFont(fontPath.c_str(), fontSize - 2);
     m_fontLarge = TTF_OpenFont(fontPath.c_str(), fontSize + 4);
     m_fontPath = fontPath;
-    
+
     return true;
 #else
     return false;
@@ -969,7 +993,7 @@ void SDLRenderer::closeFont() {
 void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize) {
 #ifdef HAS_SDL_TTF
     if (!m_font || !m_renderer || text.empty()) return;
-    
+
     std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
     auto it = m_textCache.find(cacheKey);
     if (it != m_textCache.end()) {
@@ -977,29 +1001,29 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
         SDL_RenderTexture(m_renderer, it->second.texture, nullptr, &dstRect);
         return;
     }
-    
+
     TTF_Font* font = m_font;
     if (fontSize > 0) {
         if (fontSize <= 10 && m_fontSmall) font = m_fontSmall;
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
-    
+
     SDL_Color color = { r, g, b, 255 };
     SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), 0, color);
     if (!surface) return;
-    
+
     SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
     if (texture) {
         SDL_FRect dstRect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(surface->w), static_cast<float>(surface->h) };
         SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
-        
+
         TextCacheEntry entry;
         entry.texture = texture;
         entry.width = surface->w;
         entry.height = surface->h;
         m_textCache[cacheKey] = entry;
     }
-    
+
     SDL_DestroySurface(surface);
 #endif
 }
@@ -1075,19 +1099,101 @@ void SDLRenderer::drawButton(int x, int y, int w, int h, const std::string& icon
     drawIcon(x + w/2, y + h/2, iconType, hovered);
 }
 
+SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
+    auto it = m_iconTextures.find(type);
+    if (it != m_iconTextures.end()) {
+        return it->second;
+    }
+
+    if (!m_renderer) {
+        Logger::instance().debug("getIconTexture: renderer not ready for " + type);
+        return nullptr;
+    }
+
+    std::string exeDir = getExecutableDir();
+    std::vector<std::string> searchPaths = {
+        exeDir + "/icons/" + type + ".png",
+        exeDir + "\\icons\\" + type + ".png",
+        "icons/" + type + ".png",
+        "resources/icons/" + type + ".png"
+    };
+    Logger::instance().debug("getIconTexture: cwd=" + std::filesystem::current_path().string() + " exe=" + exeDir);
+
+    for (const auto& path : searchPaths) {
+        bool exists = std::filesystem::exists(path);
+        Logger::instance().debug("getIconTexture: checking " + path + " exists=" + (exists ? "true" : "false"));
+        if (!exists) continue;
+
+        int w = 0, h = 0, channels = 0;
+        unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
+        if (!data) {
+            Logger::instance().warning("getIconTexture: stbi_load failed for " + path);
+            continue;
+        }
+
+        SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, data, w * 4);
+        if (!surface) {
+            Logger::instance().warning("getIconTexture: SDL_CreateSurfaceFrom failed for " + path + ": " + SDL_GetError());
+            stbi_image_free(data);
+            continue;
+        }
+
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+        SDL_DestroySurface(surface);
+        stbi_image_free(data);
+
+        if (texture) {
+            Logger::instance().info("getIconTexture: loaded " + path + " " + std::to_string(w) + "x" + std::to_string(h));
+            m_iconTextures[type] = texture;
+            return texture;
+        } else {
+            Logger::instance().warning("getIconTexture: SDL_CreateTextureFromSurface failed for " + path);
+        }
+    }
+
+    Logger::instance().debug("getIconTexture: no PNG found for " + type);
+    return nullptr;
+}
+
+void SDLRenderer::loadIconTextures() {
+    const std::vector<std::string> iconNames = {
+        "play", "pause", "stop", "prev", "next", "volume", "mute"
+    };
+    for (const auto& name : iconNames) {
+        getIconTexture(name);
+    }
+}
+
+void SDLRenderer::clearIconTextures() {
+    for (auto& pair : m_iconTextures) {
+        if (pair.second) {
+            SDL_DestroyTexture(pair.second);
+        }
+    }
+    m_iconTextures.clear();
+}
+
 void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered) {
     const uint8_t* color = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
-    int size = 24;  // 图标整体大小
-    int r = size / 3;  // 图标半径/半宽
-    
+
+    SDL_Texture* texture = getIconTexture(type);
+    if (texture) {
+        float w = 0.0f, h = 0.0f;
+        SDL_GetTextureSize(texture, &w, &h);
+        SDL_FRect dstRect = { static_cast<float>(cx - static_cast<int>(w) / 2), static_cast<float>(cy - static_cast<int>(h) / 2), w, h };
+        SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
+        return;
+    }
+
+    // Fallback: primitive drawing when PNG icon unavailable
+    int size = 24;
+    int r = size / 3;
     SDL_SetRenderDrawColor(m_renderer, color[0], color[1], color[2], color[3]);
-    
+
     if (type == "play") {
-        // 播放三角形 - 填充
         for (int row = -r; row <= r; row++) {
             int y = cy + row;
-            // 计算这一行的宽度
-            float progress = (row + r) / (float)(2 * r);  // 0.0 到 1.0
+            float progress = (row + r) / (float)(2 * r);
             int lineWidth = static_cast<int>(progress * r * 1.5);
             int xStart = cx - r/2;
             for (int i = 0; i < lineWidth; i++) {
@@ -1095,20 +1201,15 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             }
         }
     } else if (type == "pause") {
-        // 暂停 - 两条竖线
         int barWidth = r / 2;
         int gap = r / 2;
         fillRect(cx - gap - barWidth, cy - r, barWidth, r * 2, color[0], color[1], color[2], color[3]);
         fillRect(cx + gap, cy - r, barWidth, r * 2, color[0], color[1], color[2], color[3]);
     } else if (type == "stop") {
-        // 停止 - 正方形
         int s = r * 3 / 2;
         fillRect(cx - s/2, cy - s/2, s, s, color[0], color[1], color[2], color[3]);
     } else if (type == "prev") {
-        // 上一首 - 左箭头 + 竖线
-        // 竖线
         fillRect(cx - r, cy - r, r/3, r * 2, color[0], color[1], color[2], color[3]);
-        // 三角形
         for (int row = -r; row <= r; row++) {
             int y = cy + row;
             float progress = 1.0f - (row + r) / (float)(2 * r);
@@ -1119,10 +1220,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             }
         }
     } else if (type == "next") {
-        // 下一首 - 右箭头 + 竖线
-        // 竖线
         fillRect(cx + r - r/3, cy - r, r/3, r * 2, color[0], color[1], color[2], color[3]);
-        // 三角形
         for (int row = -r; row <= r; row++) {
             int y = cy + row;
             float progress = (row + r) / (float)(2 * r);
@@ -1133,10 +1231,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             }
         }
     } else if (type == "volume") {
-        // 音量 - 喇叭形状
-        // 喇叭主体
         fillRect(cx - r, cy - r/2, r/2, r, color[0], color[1], color[2], color[3]);
-        // 喇叭口
         for (int row = -r; row <= r; row++) {
             int y = cy + row;
             int distFromCenter = abs(row);
@@ -1147,10 +1242,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             }
         }
     } else if (type == "mute") {
-        // 静音 - 喇叭 + 叉
-        // 喇叭主体（灰色）
         fillRect(cx - r, cy - r/2, r/2, r, 150, 150, 150, 255);
-        // 喇叭口（灰色）
         for (int row = -r; row <= r; row++) {
             int y = cy + row;
             int distFromCenter = abs(row);
@@ -1160,7 +1252,6 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
                 SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
-        // 叉
         SDL_SetRenderDrawColor(m_renderer, 255, 100, 100, 255);
         SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy - r/2), static_cast<float>(cx + r/2), static_cast<float>(cy + r/2));
         SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy + r/2), static_cast<float>(cx + r/2), static_cast<float>(cy - r/2));
