@@ -6,14 +6,14 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 // SDL forward declarations
 struct SDL_Window;
 struct SDL_Renderer;
 struct SDL_Texture;
 union SDL_Event;
-struct _TTF_Font;  // SDL_ttf font structure
-typedef struct _TTF_Font TTF_Font;
+typedef struct TTF_Font TTF_Font;
 
 namespace VideoPlay {
 
@@ -110,8 +110,8 @@ public:
                   bool isPlaying, double speed, const std::string& filename,
                   int64_t audioPts = 0, int64_t videoPts = 0, double avDiff = 0.0);
 
-    // 打开文件对话框
-    std::string openFileDialog(const std::vector<std::string>& filters = {});
+    // 打开文件对话框（异步回调）
+    void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
 
     // 获取窗口尺寸
     int windowWidth() const { return m_windowWidth; }
@@ -227,9 +227,9 @@ private:
     bool m_mouseDown = false;
     ControlType m_hoveredControl = ControlType::None;
     ControlType m_pressedControl = ControlType::None;
-    uint32_t m_lastMouseMove = 0;
+    uint64_t m_lastMouseMove = 0;
     std::string m_tooltip;
-    uint32_t m_tooltipTime = 0;
+    uint64_t m_tooltipTime = 0;
 
     // 回调
     FileDropCallback m_fileDropCallback;
@@ -245,6 +245,12 @@ private:
     NextCallback m_nextCallback;
     FullscreenCallback m_fullscreenCallback;
     MenuCallback m_menuCallback;
+
+    // 异步对话框结果（跨线程安全）
+    std::mutex m_dialogMutex;
+    std::string m_pendingDialogResult;
+    bool m_dialogResultReady = false;
+    std::function<void(const std::string&)> m_dialogCallback;
 };
 
 } // namespace VideoPlay

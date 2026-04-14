@@ -2,7 +2,7 @@
 #include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <filesystem>
 #include <algorithm>
 #include <chrono>
@@ -105,18 +105,18 @@ bool VideoPlayerApp::initialize() {
         if (!pressed) return;
         
         switch (key) {
-            case SDLK_o:
-                if (SDL_GetModState() & KMOD_CTRL) {
+            case SDLK_O:
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
                     openFileDialog();
                 }
                 break;
-            case SDLK_n:
+            case SDLK_N:
                 playNext();
                 break;
-            case SDLK_p:
+            case SDLK_P:
                 playPrevious();
                 break;
-            case SDLK_m:
+            case SDLK_M:
                 toggleMute();
                 break;
             case SDLK_PERIOD:
@@ -327,17 +327,17 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
 void VideoPlayerApp::openFileDialog() {
     if (!m_renderer) return;
-    
+
     Logger::instance().info("Opening file dialog...");
-    
-    std::string filePath = m_renderer->openFileDialog();
-    
-    if (!filePath.empty()) {
-        Logger::instance().info("Selected file: " + filePath);
-        openFile(filePath);
-    } else {
-        Logger::instance().info("File dialog cancelled");
-    }
+
+    m_renderer->openFileDialog([this](const std::string& filePath) {
+        if (!filePath.empty()) {
+            Logger::instance().info("Selected file: " + filePath);
+            openFile(filePath);
+        } else {
+            Logger::instance().info("File dialog cancelled");
+        }
+    });
 }
 
 void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
@@ -604,7 +604,7 @@ void VideoPlayerApp::showHelp() {
 void VideoPlayerApp::showAbout() {
     const char* aboutText = 
         "VideoPlay v" APP_VERSION "\n\n"
-        "基于 FFmpeg + SDL2 的视频播放器\n\n"
+        "基于 FFmpeg + SDL3 的视频播放器\n\n"
         "功能特性：\n"
         "- 支持多种视频格式\n"
         "- 变速播放 (0.25x - 4x)\n"
