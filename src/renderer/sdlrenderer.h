@@ -161,6 +161,11 @@ private:
     int getTextWidth(const std::string& text, int fontSize = 0);
     int getFontHeight(int fontSize = 0);
 
+    // 图标纹理
+    void loadIconTextures();
+    void clearIconTextures();
+    SDL_Texture* getIconTexture(const std::string& type);
+
     // 绘制辅助函数
     void drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
@@ -177,6 +182,9 @@ private:
     TTF_Font* m_fontSmall = nullptr;
     TTF_Font* m_fontLarge = nullptr;
     std::string m_fontPath;
+
+    // 图标纹理
+    std::unordered_map<std::string, SDL_Texture*> m_iconTextures;
     
     // 文字纹理缓存
     struct TextCacheEntry {
