@@ -1,9 +1,9 @@
 #include "renderer/sdlrenderer.h"
 #include "utils/logger.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #ifdef HAS_SDL_TTF
-#include <SDL_ttf.h>
+#include <SDL3_ttf/SDL_ttf.h>
 #endif
 #include <algorithm>
 #include <cmath>
@@ -12,11 +12,9 @@
 #include <cstring>
 #include <filesystem>
 #include <unordered_map>
-
-// tinyfiledialogs for file dialogs
-extern "C" {
-#include "tinyfiledialogs/tinyfiledialogs.h"
-}
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 
 namespace VideoPlay {
 
@@ -73,15 +71,15 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     m_windowHeight = height;
 
     // 初始化 SDL
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         Logger::instance().error("SDL_Init failed: " + std::string(SDL_GetError()));
         return false;
     }
 
 #ifdef HAS_SDL_TTF
     // 初始化 SDL_ttf
-    if (TTF_Init() < 0) {
-        Logger::instance().error("TTF_Init failed: " + std::string(TTF_GetError()));
+    if (!TTF_Init()) {
+        Logger::instance().error("TTF_Init failed: " + std::string(SDL_GetError()));
         // 继续运行，只是没有文字
     } else {
         // 加载字体
@@ -110,11 +108,9 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 创建窗口
     m_window = SDL_CreateWindow(
         title.c_str(),
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
         width,
         height,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_RESIZABLE
     );
 
     if (!m_window) {
@@ -126,8 +122,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 创建渲染器
     m_renderer = SDL_CreateRenderer(
         m_window,
-        -1,
-        SDL_RENDERER_ACCELERATED
+        NULL
     );
 
     if (!m_renderer) {
@@ -139,7 +134,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     }
 
     // 启用文件拖放
-    SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+    SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
 
     // 初始化菜单
     initMenus();
@@ -238,7 +233,7 @@ void SDLRenderer::toggleFullscreen() {
     if (!m_window) return;
 
     m_fullscreen = !m_fullscreen;
-    SDL_SetWindowFullscreen(m_window, m_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    SDL_SetWindowFullscreen(m_window, m_fullscreen);
     
     if (m_fullscreenCallback) {
         m_fullscreenCallback();
@@ -298,7 +293,7 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
     float windowAspect = static_cast<float>(m_windowWidth) / availableHeight;
     float videoAspect = static_cast<float>(frame.width) / frame.height;
 
-    SDL_Rect dstRect;
+    SDL_FRect dstRect;
     if (windowAspect > videoAspect) {
         // 窗口更宽，以高度为基准
         dstRect.h = availableHeight;
@@ -314,7 +309,7 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
     }
 
     // 渲染视频
-    SDL_RenderCopy(m_renderer, m_videoTexture, nullptr, &dstRect);
+    SDL_RenderTexture(m_renderer, m_videoTexture, nullptr, &dstRect);
 }
 
 void SDLRenderer::clear() {
@@ -335,51 +330,63 @@ bool SDLRenderer::processEvents() {
     while (SDL_PollEvent(&event)) {
         handleEvent(event);
     }
+
+    // 处理异步对话框结果（确保在主线程回调）
+    {
+        std::lock_guard<std::mutex> lock(m_dialogMutex);
+        if (m_dialogResultReady) {
+            if (m_dialogCallback) {
+                m_dialogCallback(m_pendingDialogResult);
+            }
+            m_dialogResultReady = false;
+            m_pendingDialogResult.clear();
+            m_dialogCallback = nullptr;
+        }
+    }
+
     return m_initialized;
 }
 
 void SDLRenderer::handleEvent(const SDL_Event& event) {
     switch (event.type) {
-        case SDL_QUIT:
+        case SDL_EVENT_QUIT:
             m_initialized = false;
             break;
 
-        case SDL_DROPFILE: {
-            char* droppedFile = event.drop.file;
+        case SDL_EVENT_DROP_FILE: {
+            const char* droppedFile = event.drop.data;
             if (droppedFile && m_fileDropCallback) {
                 m_fileDropCallback(droppedFile);
             }
-            SDL_free(droppedFile);
             break;
         }
 
-        case SDL_WINDOWEVENT:
-            if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                m_windowWidth = event.window.data1;
-                m_windowHeight = event.window.data2;
-            }
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            m_windowWidth = event.window.data1;
+            m_windowHeight = event.window.data2;
             break;
 
-        case SDL_KEYDOWN:
-        case SDL_KEYUP: {
-            bool pressed = (event.type == SDL_KEYDOWN);
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP: {
+            bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
             
             // 菜单快捷键处理
             if (pressed) {
                 // Ctrl+O 打开文件
-                if (event.key.keysym.sym == SDLK_o && (event.key.keysym.mod & KMOD_CTRL)) {
+                if (event.key.key == SDLK_O && (event.key.mod & SDL_KMOD_CTRL)) {
                     if (m_fileOpenCallback) m_fileOpenCallback();
                     break;
                 }
             }
             
             if (m_keyCallback) {
-                m_keyCallback(event.key.keysym.sym, pressed);
+                m_keyCallback(event.key.key, pressed);
             }
 
             // 内置快捷键
             if (pressed) {
-                switch (event.key.keysym.sym) {
+                switch (event.key.key) {
                     case SDLK_SPACE:
                         if (m_playPauseCallback) m_playPauseCallback();
                         break;
@@ -387,10 +394,10 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_fullscreen) toggleFullscreen();
                         closeAllMenus();
                         break;
-                    case SDLK_f:
+                    case SDLK_F:
                         toggleFullscreen();
                         break;
-                    case SDLK_s:
+                    case SDLK_S:
                         if (m_stopCallback) m_stopCallback();
                         break;
                     case SDLK_LEFT:
@@ -405,13 +412,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_DOWN:
                         if (m_volumeCallback) m_volumeCallback(-5);
                         break;
-                    case SDLK_m:
+                    case SDLK_M:
                         // 静音切换
                         break;
-                    case SDLK_n:
+                    case SDLK_N:
                         if (m_nextCallback) m_nextCallback();
                         break;
-                    case SDLK_p:
+                    case SDLK_P:
                         if (m_prevCallback) m_prevCallback();
                         break;
                     case SDLK_PERIOD:
@@ -422,17 +429,17 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             break;
         }
 
-        case SDL_MOUSEMOTION:
-            m_mouseX = event.motion.x;
-            m_mouseY = event.motion.y;
+        case SDL_EVENT_MOUSE_MOTION:
+            m_mouseX = static_cast<int>(event.motion.x);
+            m_mouseY = static_cast<int>(event.motion.y);
             m_lastMouseMove = SDL_GetTicks();
             m_showControls = true;
             handleMouseMotion(m_mouseX, m_mouseY);
             break;
 
-        case SDL_MOUSEBUTTONDOWN:
-            m_mouseX = event.button.x;
-            m_mouseY = event.button.y;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            m_mouseX = static_cast<int>(event.button.x);
+            m_mouseY = static_cast<int>(event.button.y);
             if (event.button.button == SDL_BUTTON_LEFT) {
                 m_mouseDown = true;
                 handleMouseButtonDown(m_mouseX, m_mouseY);
@@ -441,18 +448,18 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             }
             break;
 
-        case SDL_MOUSEBUTTONUP:
-            m_mouseX = event.button.x;
-            m_mouseY = event.button.y;
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            m_mouseX = static_cast<int>(event.button.x);
+            m_mouseY = static_cast<int>(event.button.y);
             if (event.button.button == SDL_BUTTON_LEFT) {
                 m_mouseDown = false;
                 handleMouseButtonUp(m_mouseX, m_mouseY);
             }
             break;
 
-        case SDL_MOUSEWHEEL:
+        case SDL_EVENT_MOUSE_WHEEL:
             if (m_volumeCallback) {
-                m_volumeCallback(event.wheel.y > 0 ? 5 : -5);
+                m_volumeCallback(event.wheel.y > 0.0f ? 5 : -5);
             }
             break;
     }
@@ -928,7 +935,7 @@ bool SDLRenderer::loadFont(const std::string& fontPath, int fontSize) {
     
     m_font = TTF_OpenFont(fontPath.c_str(), fontSize);
     if (!m_font) {
-        Logger::instance().error("Failed to load font: " + std::string(TTF_GetError()));
+        Logger::instance().error("Failed to load font: " + std::string(SDL_GetError()));
         return false;
     }
     
@@ -966,8 +973,8 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
     std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
     auto it = m_textCache.find(cacheKey);
     if (it != m_textCache.end()) {
-        SDL_Rect dstRect = { x, y, it->second.width, it->second.height };
-        SDL_RenderCopy(m_renderer, it->second.texture, nullptr, &dstRect);
+        SDL_FRect dstRect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(it->second.width), static_cast<float>(it->second.height) };
+        SDL_RenderTexture(m_renderer, it->second.texture, nullptr, &dstRect);
         return;
     }
     
@@ -978,13 +985,13 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
     }
     
     SDL_Color color = { r, g, b, 255 };
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), 0, color);
     if (!surface) return;
     
     SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
     if (texture) {
-        SDL_Rect dstRect = { x, y, surface->w, surface->h };
-        SDL_RenderCopy(m_renderer, texture, nullptr, &dstRect);
+        SDL_FRect dstRect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(surface->w), static_cast<float>(surface->h) };
+        SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
         
         TextCacheEntry entry;
         entry.texture = texture;
@@ -993,7 +1000,7 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
         m_textCache[cacheKey] = entry;
     }
     
-    SDL_FreeSurface(surface);
+    SDL_DestroySurface(surface);
 #endif
 }
 
@@ -1017,7 +1024,7 @@ int SDLRenderer::getTextWidth(const std::string& text, int fontSize) {
     }
     
     int w, h;
-    if (TTF_SizeUTF8(font, text.c_str(), &w, &h) == 0) {
+    if (TTF_GetStringSize(font, text.c_str(), 0, &w, &h)) {
         return w;
     }
 #endif
@@ -1034,7 +1041,7 @@ int SDLRenderer::getFontHeight(int fontSize) {
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
     
-    return TTF_FontHeight(font);
+    return TTF_GetFontHeight(font);
 #else
     return 14;
 #endif
@@ -1043,14 +1050,14 @@ int SDLRenderer::getFontHeight(int fontSize) {
 void SDLRenderer::drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (!m_renderer) return;
     SDL_SetRenderDrawColor(m_renderer, r, g, b, a);
-    SDL_Rect rect = { x, y, w, h };
-    SDL_RenderDrawRect(m_renderer, &rect);
+    SDL_FRect rect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h) };
+    SDL_RenderRect(m_renderer, &rect);
 }
 
 void SDLRenderer::fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (!m_renderer) return;
     SDL_SetRenderDrawColor(m_renderer, r, g, b, a);
-    SDL_Rect rect = { x, y, w, h };
+    SDL_FRect rect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h) };
     SDL_RenderFillRect(m_renderer, &rect);
 }
 
@@ -1084,7 +1091,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             int lineWidth = static_cast<int>(progress * r * 1.5);
             int xStart = cx - r/2;
             for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderDrawPoint(m_renderer, xStart + i, y);
+                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
     } else if (type == "pause") {
@@ -1108,7 +1115,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             int lineWidth = static_cast<int>(progress * r);
             int xStart = cx - r/3;
             for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderDrawPoint(m_renderer, xStart + i, y);
+                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
     } else if (type == "next") {
@@ -1122,7 +1129,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             int lineWidth = static_cast<int>(progress * r);
             int xStart = cx - r/3 - lineWidth;
             for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderDrawPoint(m_renderer, xStart + i, y);
+                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
     } else if (type == "volume") {
@@ -1136,7 +1143,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             int lineWidth = r - distFromCenter / 2;
             int xStart = cx - r/2;
             for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderDrawPoint(m_renderer, xStart + i, y);
+                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
     } else if (type == "mute") {
@@ -1150,43 +1157,46 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             int lineWidth = r - distFromCenter / 2;
             int xStart = cx - r/2;
             for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderDrawPoint(m_renderer, xStart + i, y);
+                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
             }
         }
         // 叉
         SDL_SetRenderDrawColor(m_renderer, 255, 100, 100, 255);
-        SDL_RenderDrawLine(m_renderer, cx, cy - r/2, cx + r/2, cy + r/2);
-        SDL_RenderDrawLine(m_renderer, cx, cy + r/2, cx + r/2, cy - r/2);
+        SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy - r/2), static_cast<float>(cx + r/2), static_cast<float>(cy + r/2));
+        SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy + r/2), static_cast<float>(cx + r/2), static_cast<float>(cy - r/2));
     }
 }
 
-std::string SDLRenderer::openFileDialog(const std::vector<std::string>& filters) {
-    const char* filterPatterns[] = {
-        "*.mp4", "*.mkv", "*.avi", "*.mov", "*.wmv", "*.flv", "*.webm",
-        "*.mp3", "*.aac", "*.wav", "*.flac", "*.ogg",
-        "*.srt", "*.ass", "*.vtt"
+void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& /*filters*/) {
+    {
+        std::lock_guard<std::mutex> lock(m_dialogMutex);
+        m_dialogResultReady = false;
+        m_pendingDialogResult.clear();
+        m_dialogCallback = std::move(callback);
+    }
+
+    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
+        auto* renderer = static_cast<SDLRenderer*>(userdata);
+        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
+        if (filelist && filelist[0]) {
+            renderer->m_pendingDialogResult = filelist[0];
+        }
+        renderer->m_dialogResultReady = true;
     };
-    int numFilters = sizeof(filterPatterns) / sizeof(filterPatterns[0]);
-    
-    const char* result = tinyfd_openFileDialog(
-        "选择视频文件",
-        "",
-        numFilters,
-        filterPatterns,
-        "媒体文件",
-        0  // 单选
-    );
-    
-    return result ? std::string(result) : "";
+
+    SDL_DialogFileFilter sdlFilters[] = {
+        { "媒体文件", "mp4;mkv;avi;mov;wmv;flv;webm;mp3;aac;wav;flac;ogg;srt;ass;vtt" }
+    };
+
+    SDL_ShowOpenFileDialog(sdlCallback, this, m_window, sdlFilters, 1, nullptr, false);
 }
 
 void SDLRenderer::showMessageBox(const std::string& title, const std::string& message, bool isError) {
-    tinyfd_messageBox(
+    SDL_ShowSimpleMessageBox(
+        isError ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION,
         title.c_str(),
         message.c_str(),
-        "ok",
-        isError ? "error" : "info",
-        1
+        m_window
     );
 }
 

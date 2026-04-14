@@ -1,13 +1,13 @@
-# VideoPlay - FFmpeg + SDL2 视频播放器
+# VideoPlay - FFmpeg + SDL3 视频播放器
 
-基于 FFmpeg 和 SDL2 开发的跨平台视频播放器，支持变速播放、字幕显示和播放列表管理。
+基于 FFmpeg 和 SDL3 开发的跨平台视频播放器，支持变速播放、字幕显示和播放列表管理。
 
 ## 技术栈
 
 | 组件 | 用途 |
 |-----|------|
 | **FFmpeg 6.0+** | 视频/音频解码、解封装 |
-| **SDL2 2.28+** | 窗口管理、视频渲染、事件处理 |
+| **SDL3 3.4+** | 窗口管理、视频渲染、事件处理 |
 | **miniaudio** | 音频播放 |
 | **OpenGL** | 硬件加速渲染 (可选) |
 
@@ -45,19 +45,23 @@
 - Visual Studio 2019 或更高版本
 - CMake 3.16+
 - FFmpeg Windows 构建版
-- SDL2 开发库
+- Git (用于拉取 SDL3 submodule)
 
 ### macOS
 
 ```bash
-brew install cmake ffmpeg sdl2
+brew install cmake ffmpeg
+# 然后拉取 SDL3 submodule
+git submodule update --init --recursive
 ```
 
 ### Linux (Ubuntu/Debian)
 
 ```bash
 sudo apt-get install cmake ffmpeg libavcodec-dev libavformat-dev \
-    libavutil-dev libswscale-dev libswresample-dev libsdl2-dev
+    libavutil-dev libswscale-dev libswresample-dev
+# 然后拉取 SDL3 submodule
+git submodule update --init --recursive
 ```
 
 ## 构建步骤
@@ -66,12 +70,13 @@ sudo apt-get install cmake ffmpeg libavcodec-dev libavformat-dev \
 
 ```bash
 # Windows (PowerShell)
+git submodule update --init --recursive
 cmake -B build -G "Visual Studio 16 2019" -A x64 `
-    -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared" `
-    -DSDL2_ROOT="D:/SDL2"
+    -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared"
 
 # macOS/Linux
-cmake -B build -DFFmpeg_ROOT=/path/to/ffmpeg -DSDL2_ROOT=/path/to/sdl2
+git submodule update --init --recursive
+cmake -B build -DFFmpeg_ROOT=/path/to/ffmpeg
 ```
 
 ### 2. 编译
@@ -105,7 +110,9 @@ VideoPlay/
 │   └── utils/
 │       └── logger.h/cpp         # 日志系统
 ├── 3rdparty/
-│   └── miniaudio/            # miniaudio 音频库
+│   ├── miniaudio/            # miniaudio 音频库
+│   ├── SDL3/                 # SDL3 (submodule)
+│   └── SDL3_ttf/             # SDL3_ttf (submodule)
 ├── CMakeLists.txt
 └── README.md
 ```
@@ -123,14 +130,14 @@ VideoPlay/
           │                 │
           ▼                 ▼
 ┌─────────────────┐  ┌─────────────────┐
-│     SDL2        │  │     FFmpeg      │
+│     SDL3        │  │     FFmpeg      │
 │  Window/Render  │  │  Decode/Resample│
 └─────────────────┘  └─────────────────┘
 ```
 
 ## 注意事项
 
-1. **DLL 依赖**: Windows 运行时需要 FFmpeg 和 SDL2 的 DLL 文件
+1. **DLL 依赖**: Windows 运行时需要 FFmpeg 和 SDL3 的 DLL 文件
 2. **字幕支持**: 自动加载同名字幕文件 (`.srt`, `.ass`, `.vtt`)
 3. **文件拖放**: 支持直接拖放视频文件到窗口播放
 
