@@ -23,7 +23,8 @@ using FileOpenCallback = std::function<void()>;
 using KeyCallback = std::function<void(int, bool)>;  // keycode, pressed
 using MouseCallback = std::function<void(int, int, int)>;  // x, y, button
 using SeekCallback = std::function<void(double)>;  // position (0-1)
-using VolumeCallback = std::function<void(int)>;   // volume delta
+using VolumeCallback = std::function<void(int)>;   // volume delta (>=1000 means absolute: value-1000)
+using UIMuteCallback = std::function<void()>;
 using PlayPauseCallback = std::function<void()>;
 using StopCallback = std::function<void()>;
 using SpeedCallback = std::function<void(double)>; // speed multiplier
@@ -41,6 +42,7 @@ enum class ControlType {
     NextButton,
     ProgressBar,
     VolumeButton,
+    VolumeBar,
     SpeedButton,
     MenuBar,
     MenuItem
@@ -97,6 +99,7 @@ public:
     void setMouseCallback(MouseCallback callback);
     void setSeekCallback(SeekCallback callback);
     void setVolumeCallback(VolumeCallback callback);
+    void setMuteCallback(UIMuteCallback callback);
     void setPlayPauseCallback(PlayPauseCallback callback);
     void setStopCallback(StopCallback callback);
     void setSpeedCallback(SpeedCallback callback);
@@ -246,6 +249,7 @@ private:
     MouseCallback m_mouseCallback;
     SeekCallback m_seekCallback;
     VolumeCallback m_volumeCallback;
+    UIMuteCallback m_muteCallback;
     PlayPauseCallback m_playPauseCallback;
     StopCallback m_stopCallback;
     SpeedCallback m_speedCallback;

@@ -86,7 +86,19 @@ bool VideoPlayerApp::initialize() {
         }
     });
     m_renderer->setVolumeCallback([this](int delta) {
-        setVolume(delta);
+        if (delta >= 1000) {
+            m_volume = delta - 1000;
+        } else {
+            m_volume += delta;
+        }
+        m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
+        if (m_player) {
+            m_player->setVolume(m_volume);
+        }
+        Logger::instance().info("Volume set to: " + std::to_string(m_volume));
+    });
+    m_renderer->setMuteCallback([this]() {
+        toggleMute();
     });
     m_renderer->setSpeedCallback([this](double speed) {
         if (speed == 0) {

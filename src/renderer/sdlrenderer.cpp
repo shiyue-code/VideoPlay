@@ -510,7 +510,14 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     
     // 处理音量拖动
     if (m_draggingVolume && m_volumeCallback) {
-        // 简化处理
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::VolumeBar) {
+                float ratio = static_cast<float>(x - rect.x) / rect.w;
+                ratio = std::max(0.0f, std::min(1.0f, ratio));
+                m_volumeCallback(static_cast<int>(ratio * 100) + 1000);
+                break;
+            }
+        }
     }
 }
 
@@ -580,7 +587,19 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             }
             break;
         case ControlType::VolumeButton:
+            if (m_muteCallback) m_muteCallback();
+            break;
+        case ControlType::VolumeBar:
             m_draggingVolume = true;
+            // 立即设置音量
+            for (const auto& rect : m_controlRects) {
+                if (rect.type == ControlType::VolumeBar) {
+                    float ratio = static_cast<float>(x - rect.x) / rect.w;
+                    ratio = std::max(0.0f, std::min(1.0f, ratio));
+                    if (m_volumeCallback) m_volumeCallback(static_cast<int>(ratio * 100) + 1000);
+                    break;
+                }
+            }
             break;
         case ControlType::SpeedButton:
             if (m_speedCallback) m_speedCallback(0);
@@ -877,6 +896,9 @@ void SDLRenderer::renderVolumeControl(int volume, bool isMuted) {
         fillRect(x, volBarY, static_cast<int>(volBarWidth * vol), volBarHeight,
                  COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], COLOR_PROGRESS_FILL[3]);
     }
+
+    // 记录控件位置
+    m_controlRects.push_back({x, volBarY, volBarWidth, volBarHeight, ControlType::VolumeBar, 0});
 }
 
 void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration) {
@@ -1313,6 +1335,10 @@ void SDLRenderer::setSeekCallback(SeekCallback callback) {
 
 void SDLRenderer::setVolumeCallback(VolumeCallback callback) {
     m_volumeCallback = callback;
+}
+
+void SDLRenderer::setMuteCallback(UIMuteCallback callback) {
+    m_muteCallback = callback;
 }
 
 void SDLRenderer::setPlayPauseCallback(PlayPauseCallback callback) {
