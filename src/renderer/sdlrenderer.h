@@ -115,11 +115,13 @@ public:
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
                   bool isPlaying, double speed, const std::string& filename,
+                  const std::string& subtitle = {},
                   const std::vector<std::string>& playlist = {}, size_t currentPlaylistIndex = 0,
                   int64_t audioPts = 0, int64_t videoPts = 0, double avDiff = 0.0);
 
     // 打开文件对话框（异步回调）
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
+    void openSubtitleDialog(std::function<void(const std::string&)> callback);
 
     // 获取窗口尺寸
     int windowWidth() const { return m_windowWidth; }
@@ -156,6 +158,7 @@ private:
     void renderSpeedButton(double speed, int controlY);
     void renderTimeDisplay(int64_t position, int64_t duration, int controlY);
     void renderFilename(const std::string& filename);
+    void renderSubtitle(const std::string& subtitle);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff);
     void renderTooltip();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);

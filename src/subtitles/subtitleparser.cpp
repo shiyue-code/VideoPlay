@@ -54,11 +54,16 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
         // 尝试自动检测格式
         if (content.find("WEBVTT") != std::string::npos) {
             success = parseVTT(content);
-        } else if (content.find("[Script Info]") != std::string::npos) {
+        } else if (content.find("[Script Info]") != std::string::npos ||
+                   content.find("[Events]") != std::string::npos) {
             success = parseASS(content);
         } else {
             success = parseSRT(content);
         }
+    }
+
+    if (!success) {
+        Logger::instance().warning("All subtitle parsers failed for: " + filePath);
     }
     
     if (success) {
@@ -133,24 +138,37 @@ std::string SubtitleParser::removeFormatting(const std::string& text) {
 }
 
 int64_t SubtitleParser::parseTimecode(const std::string& timecode) {
-    // 支持格式: HH:MM:SS,mmm 或 HH:MM:SS.mmm
+    // 支持格式: HH:MM:SS,mmm / HH:MM:SS.mmm / HH:MM:SS.cc (ASS 百分之一秒)
     int hours = 0, minutes = 0, seconds = 0, millis = 0;
-    
+
     std::string tc = trim(timecode);
-    
+
     // 替换点号为逗号以统一处理
     std::replace(tc.begin(), tc.end(), '.', ',');
-    
+
     // 解析 HH:MM:SS,mmm
     if (sscanf(tc.c_str(), "%d:%d:%d,%d", &hours, &minutes, &seconds, &millis) == 4) {
+        // 根据小数位数调整毫秒（ASS 使用 2 位百分之一秒）
+        size_t commaPos = tc.find(',');
+        if (commaPos != std::string::npos && commaPos + 1 < tc.size()) {
+            int fracDigits = static_cast<int>(tc.size() - commaPos - 1);
+            if (fracDigits == 2) millis *= 10;       // centiseconds -> milliseconds
+            else if (fracDigits == 1) millis *= 100; // deciseconds -> milliseconds
+        }
         return (hours * 3600LL + minutes * 60LL + seconds) * 1000 + millis;
     }
-    
+
     // 解析 MM:SS,mmm
     if (sscanf(tc.c_str(), "%d:%d,%d", &minutes, &seconds, &millis) == 3) {
+        size_t commaPos = tc.find(',');
+        if (commaPos != std::string::npos && commaPos + 1 < tc.size()) {
+            int fracDigits = static_cast<int>(tc.size() - commaPos - 1);
+            if (fracDigits == 2) millis *= 10;
+            else if (fracDigits == 1) millis *= 100;
+        }
         return (minutes * 60LL + seconds) * 1000 + millis;
     }
-    
+
     return 0;
 }
 
@@ -205,82 +223,106 @@ bool SubtitleParser::parseSRT(const std::string& content) {
 
 bool SubtitleParser::parseASS(const std::string& content) {
     m_entries.clear();
-    
+
     std::istringstream stream(content);
     std::string line;
     bool inEvents = false;
     int formatStartIdx = -1, formatEndIdx = -1, formatTextIdx = -1;
-    
+    int formatFieldCount = 0;
+
+    Logger::instance().debug("[ASS] Starting parse, content size=" + std::to_string(content.size()));
+
     while (std::getline(stream, line)) {
         line = trim(line);
-        
+
         // 查找 Events 部分
         if (line == "[Events]") {
             inEvents = true;
+            Logger::instance().debug("[ASS] Found [Events]");
             continue;
         }
-        
+
+        // 其他 section 开始则退出 Events
+        if (inEvents && !line.empty() && line.front() == '[' && line.back() == ']') {
+            break;
+        }
+
         if (!inEvents) continue;
-        
-        // 检查是否是 Format 行
-        if (line.find("Format:") == 0) {
-            // 解析格式: Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-            std::string format = line.substr(7);
+
+        // 检查是否是 Format 行（大小写不敏感）
+        if (line.find("Format:") == 0 || line.find("format:") == 0) {
+            size_t colonPos = line.find(':');
+            std::string format = line.substr(colonPos + 1);
             std::istringstream fmtStream(format);
             std::string field;
             int idx = 0;
-            
+            formatFieldCount = 0;
+
             while (std::getline(fmtStream, field, ',')) {
                 field = trim(field);
                 if (field == "Start") formatStartIdx = idx;
                 else if (field == "End") formatEndIdx = idx;
                 else if (field == "Text") formatTextIdx = idx;
                 idx++;
+                formatFieldCount++;
             }
+            Logger::instance().debug("[ASS] Format parsed: Start=" + std::to_string(formatStartIdx) +
+                                     " End=" + std::to_string(formatEndIdx) +
+                                     " Text=" + std::to_string(formatTextIdx) +
+                                     " Count=" + std::to_string(formatFieldCount));
             continue;
         }
-        
-        // 解析 Dialogue 行
-        if (line.find("Dialogue:") == 0) {
-            std::string dialogue = line.substr(9);
-            std::istringstream dlgStream(dialogue);
-            std::string field;
+
+        // 解析 Dialogue 行（大小写不敏感）
+        if (line.find("Dialogue:") == 0 || line.find("dialogue:") == 0) {
+            size_t colonPos = line.find(':');
+            std::string dialogue = line.substr(colonPos + 1);
+
+            // 如果 Format 中没有 Text 字段，默认 Text 是最后一个字段
+            int targetTextIdx = formatTextIdx;
+            if (targetTextIdx < 0 && formatFieldCount > 0) {
+                targetTextIdx = formatFieldCount - 1;
+            }
+            // 如果仍然无法确定，尝试用 Start/End 推断
+            if (targetTextIdx < 0 && formatStartIdx >= 0 && formatEndIdx >= 0) {
+                targetTextIdx = std::max(formatStartIdx, formatEndIdx) + 1;
+            }
+            if (targetTextIdx < 0) {
+                continue; // 无法确定格式，跳过
+            }
+
             std::vector<std::string> fields;
-            
-            // 注意：Text 字段可能包含逗号，需要特殊处理
-            size_t textStart = 0;
-            int commaCount = 0;
-            for (size_t i = 0; i < dialogue.size() && commaCount < formatTextIdx; i++) {
-                if (dialogue[i] == ',') {
-                    commaCount++;
-                    if (commaCount == formatTextIdx) {
-                        textStart = i + 1;
-                    }
+            std::string remaining = dialogue;
+
+            // 提取前 targetTextIdx 个字段（按逗号分割）
+            for (int i = 0; i < targetTextIdx; ++i) {
+                size_t pos = remaining.find(',');
+                if (pos == std::string::npos) {
+                    fields.push_back(trim(remaining));
+                    remaining.clear();
+                    break;
                 }
+                fields.push_back(trim(remaining.substr(0, pos)));
+                remaining = remaining.substr(pos + 1);
             }
-            
-            // 提取前 N-1 个字段
-            std::string prefix = dialogue.substr(0, textStart > 0 ? textStart - 1 : 0);
-            std::istringstream prefixStream(prefix);
-            while (std::getline(prefixStream, field, ',')) {
-                fields.push_back(trim(field));
+
+            // 剩余部分是 Text 字段（可能包含逗号）
+            if (!remaining.empty() || fields.size() == static_cast<size_t>(targetTextIdx)) {
+                fields.push_back(trim(remaining));
             }
-            
-            // Text 字段是剩余部分
-            if (textStart > 0 && textStart < dialogue.size()) {
-                fields.push_back(trim(dialogue.substr(textStart)));
-            }
-            
-            if (formatStartIdx >= 0 && formatEndIdx >= 0 && 
-                formatStartIdx < (int)fields.size() && 
-                formatEndIdx < (int)fields.size() &&
-                formatTextIdx < (int)fields.size()) {
-                
+
+            int fStart = formatStartIdx >= 0 ? formatStartIdx : 1;
+            int fEnd   = formatEndIdx   >= 0 ? formatEndIdx   : 2;
+
+            if (fStart < (int)fields.size() &&
+                fEnd < (int)fields.size() &&
+                targetTextIdx < (int)fields.size()) {
+
                 SubtitleEntry entry;
-                entry.startTime = parseTimecode(fields[formatStartIdx]);
-                entry.endTime = parseTimecode(fields[formatEndIdx]);
-                entry.text = removeFormatting(fields[formatTextIdx]);
-                
+                entry.startTime = parseTimecode(fields[fStart]);
+                entry.endTime = parseTimecode(fields[fEnd]);
+                entry.text = removeFormatting(fields[targetTextIdx]);
+
                 // 替换 \N 和 \n 为换行
                 size_t pos = 0;
                 while ((pos = entry.text.find("\\N", pos)) != std::string::npos) {
@@ -292,14 +334,15 @@ bool SubtitleParser::parseASS(const std::string& content) {
                     entry.text.replace(pos, 2, "\n");
                     pos++;
                 }
-                
+
                 if (!entry.text.empty()) {
                     m_entries.push_back(entry);
                 }
             }
         }
     }
-    
+
+    Logger::instance().debug("[ASS] Parse complete, entries=" + std::to_string(m_entries.size()));
     return !m_entries.empty();
 }
 

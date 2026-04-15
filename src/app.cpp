@@ -274,6 +274,12 @@ void VideoPlayerApp::render() {
         avDiff = (audioPts - videoPts) / 1000.0;
     }
     
+    // 获取当前字幕
+    std::string subtitleText;
+    if (m_subtitleParser && m_subtitleParser->isLoaded()) {
+        subtitleText = m_subtitleParser->subtitleAt(m_position);
+    }
+
     // 渲染 UI
     m_renderer->renderUI(
         m_position,
@@ -283,6 +289,7 @@ void VideoPlayerApp::render() {
         m_isPlaying,
         m_speed,
         m_currentFile,
+        subtitleText,
         m_playlist,
         m_currentIndex,
         audioPts,
@@ -383,7 +390,12 @@ void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
     }
 
     Logger::instance().info("Loading subtitle: " + m_currentSubtitle);
-    // 字幕加载逻辑由 SubtitleParser 处理
+    if (m_subtitleParser) {
+        if (!m_subtitleParser->loadFile(m_currentSubtitle)) {
+            Logger::instance().warning("Failed to parse subtitle: " + m_currentSubtitle);
+            m_currentSubtitle.clear();
+        }
+    }
 }
 
 void VideoPlayerApp::play() {
@@ -571,6 +583,9 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 2: // 打开文件夹
             // TODO: 实现文件夹打开
             break;
+        case 4: // 导入字幕
+            openSubtitleDialog();
+            break;
         case 3: // 退出
             m_running = false;
             break;
@@ -601,6 +616,33 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 21: // 关于
             showAbout();
             break;
+    }
+}
+
+void VideoPlayerApp::openSubtitleDialog() {
+    if (!m_renderer) return;
+
+    Logger::instance().info("Opening subtitle dialog...");
+
+    m_renderer->openSubtitleDialog([this](const std::string& filePath) {
+        if (!filePath.empty()) {
+            Logger::instance().info("Selected subtitle: " + filePath);
+            loadSubtitleFile(filePath);
+        } else {
+            Logger::instance().info("Subtitle dialog cancelled");
+        }
+    });
+}
+
+void VideoPlayerApp::loadSubtitleFile(const std::string& path) {
+    if (!m_subtitleParser) return;
+
+    if (m_subtitleParser->loadFile(path)) {
+        m_currentSubtitle = path;
+        Logger::instance().info("Loaded subtitle: " + path);
+    } else {
+        Logger::instance().error("Failed to load subtitle: " + path);
+        m_currentSubtitle.clear();
     }
 }
 
