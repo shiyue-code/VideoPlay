@@ -550,6 +550,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                         const auto& item = m_menus[i].items[itemIndex];
                         if (!item.separator && item.enabled && m_menuCallback) {
                             m_menuCallback(item.id);
+                            closeAllMenus();
                         }
                     }
                 }
