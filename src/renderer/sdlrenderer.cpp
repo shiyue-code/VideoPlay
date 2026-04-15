@@ -41,16 +41,16 @@ namespace VideoPlay {
 namespace {
     // 颜色定义 (RGBA)
     const uint8_t COLOR_BG[] = { 20, 20, 20, 255 };
-    const uint8_t COLOR_CONTROL_BG[] = { 40, 40, 40, 230 };
-    const uint8_t COLOR_BUTTON_BG[] = { 60, 60, 60, 255 };
-    const uint8_t COLOR_BUTTON_BG_HOVER[] = { 80, 80, 80, 255 };
-    const uint8_t COLOR_BUTTON_BG_PRESSED[] = { 100, 100, 100, 255 };
-    const uint8_t COLOR_PROGRESS_BG[] = { 80, 80, 80, 255 };
-    const uint8_t COLOR_PROGRESS_FILL[] = { 0, 150, 255, 255 };
-    const uint8_t COLOR_PROGRESS_HOVER[] = { 0, 180, 255, 255 };
+    const uint8_t COLOR_CONTROL_BG[] = { 32, 34, 38, 175 };
+    const uint8_t COLOR_BUTTON_BG[] = { 60, 60, 60, 0 };
+    const uint8_t COLOR_BUTTON_BG_HOVER[] = { 255, 255, 255, 45 };
+    const uint8_t COLOR_BUTTON_BG_PRESSED[] = { 255, 255, 255, 75 };
+    const uint8_t COLOR_PROGRESS_BG[] = { 255, 255, 255, 60 };
+    const uint8_t COLOR_PROGRESS_FILL[] = { 0, 170, 255, 255 };
+    const uint8_t COLOR_PROGRESS_HOVER[] = { 80, 210, 255, 255 };
     const uint8_t COLOR_BUTTON[] = { 220, 220, 220, 255 };
     const uint8_t COLOR_BUTTON_HOVER[] = { 255, 255, 255, 255 };
-    const uint8_t COLOR_TEXT[] = { 220, 220, 220, 255 };
+    const uint8_t COLOR_TEXT[] = { 245, 245, 245, 255 };
     const uint8_t COLOR_MENU_BG[] = { 45, 45, 45, 255 };
     const uint8_t COLOR_MENU_HOVER[] = { 60, 60, 60, 255 };
     const uint8_t COLOR_MENU_ACTIVE[] = { 0, 120, 200, 255 };
@@ -152,6 +152,10 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         SDL_Quit();
         return false;
     }
+
+    // 启用 alpha 混合，确保半透明效果正常
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetDefaultTextureScaleMode(m_renderer, SDL_SCALEMODE_LINEAR);
 
     // 启用文件拖放
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
@@ -657,16 +661,20 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     // 清空控件区域
     m_controlRects.clear();
     
-    // 渲染菜单栏
-    renderMenuBar();
-    
-    // 自动隐藏控制栏（全屏模式下）
-    if (m_fullscreen && m_showControls && SDL_GetTicks() - m_lastMouseMove > 3000) {
+    // 自动隐藏控制栏（3秒无鼠标操作）
+    if (m_showControls && SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
     }
 
-    if (m_showControls || !m_fullscreen) {
+    if (m_showControls) {
+        // 底部渐变遮罩，让控制栏自然融入视频
+        drawGradientVignette();
+        // 渲染菜单栏
+        renderMenuBar();
         renderControls(position, duration, volume, isMuted, isPlaying, speed);
+    } else {
+        // 仅渲染菜单栏（始终可见）
+        renderMenuBar();
     }
     
     // 渲染文件名
@@ -762,70 +770,86 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y) {
 
 void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
                                  bool isPlaying, double speed) {
-    int controlY = m_windowHeight - m_controlHeight;
+    int marginX = 24;
+    int marginBottom = 24;
+    int controlY = m_windowHeight - m_controlHeight - marginBottom;
+    int controlW = m_windowWidth - marginX * 2;
+    int radius = 20;
     
-    // 控制栏背景
-    fillRect(0, controlY, m_windowWidth, m_controlHeight,
-             COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+    // 底部投影（增加悬浮感）
+    renderSmoothRoundRect(marginX + 2, controlY + 4, controlW, m_controlHeight, radius,
+                          0, 0, 0, 80);
+
+    // 外层细白边框（玻璃拟态边框效果）
+    renderSmoothRoundRect(marginX - 1, controlY - 1, controlW + 2, m_controlHeight + 2, radius + 1,
+                          255, 255, 255, 55);
+
+    // 内层主背景
+    renderSmoothRoundRect(marginX, controlY, controlW, m_controlHeight, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
     
     // 进度条（在最上面）
-    renderProgressBar(position, duration);
+    renderProgressBar(position, duration, controlY);
     
     // 播放控制按钮
-    renderPlaybackControls(isPlaying);
+    renderPlaybackControls(isPlaying, controlY);
     
     // 速度按钮
-    renderSpeedButton(speed);
+    renderSpeedButton(speed, controlY);
     
     // 时间显示
-    renderTimeDisplay(position, duration);
+    renderTimeDisplay(position, duration, controlY);
     
     // 音量控制
-    renderVolumeControl(volume, isMuted);
+    renderVolumeControl(volume, isMuted, controlY);
 }
 
-void SDLRenderer::renderProgressBar(int64_t position, int64_t duration) {
-    int barY = m_windowHeight - m_controlHeight + 5;
-    int margin = m_margin;
+void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int controlY) {
+    int barY = controlY + 14;
+    int margin = 44;
     int barWidth = m_windowWidth - margin * 2;
+    int barHeight = 6;
     
     // 检测悬浮
-    bool hovered = (m_mouseY >= barY && m_mouseY <= barY + m_progressBarHeight &&
+    bool hovered = (m_mouseY >= barY && m_mouseY <= barY + barHeight &&
                    m_mouseX >= margin && m_mouseX <= margin + barWidth);
     bool pressed = m_draggingProgress;
     
-    // 背景
-    fillRect(margin, barY, barWidth, m_progressBarHeight,
-             COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
-    
+    // 背景（圆角）
+    renderSmoothRoundRect(margin, barY, barWidth, barHeight, barHeight / 2,
+                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
+
     // 进度
     if (duration > 0) {
         float progress = static_cast<float>(position) / duration;
         progress = std::max(0.0f, std::min(1.0f, progress));
-        
-        const uint8_t* fillColor = pressed ? COLOR_PROGRESS_HOVER : 
+
+        const uint8_t* fillColor = pressed ? COLOR_PROGRESS_HOVER :
                                    (hovered ? COLOR_PROGRESS_HOVER : COLOR_PROGRESS_FILL);
-        
-        fillRect(margin, barY, static_cast<int>(barWidth * progress), m_progressBarHeight,
-                 fillColor[0], fillColor[1], fillColor[2], fillColor[3]);
-        
-        // 进度点
+
+        int fillW = static_cast<int>(barWidth * progress);
+        if (fillW < barHeight) fillW = barHeight;
+        renderSmoothRoundRect(margin, barY, fillW, barHeight, barHeight / 2,
+                              fillColor[0], fillColor[1], fillColor[2], fillColor[3]);
+
+        // 圆形进度 thumb
         int knobX = margin + static_cast<int>(barWidth * progress);
-        int knobY = barY + m_progressBarHeight / 2;
-        fillRect(knobX - 4, knobY - 6, 8, 12, 255, 255, 255, 255);
+        int knobY = barY + barHeight / 2;
+        int thumbRadius = (hovered || pressed) ? 7 : 5;
+        renderSmoothCircle(knobX, knobY, thumbRadius, 255, 255, 255, 255);
     }
     
     // 记录控件位置
-    m_controlRects.push_back({margin, barY, barWidth, m_progressBarHeight, 
+    m_controlRects.push_back({margin, barY, barWidth, barHeight,
                               ControlType::ProgressBar, 0});
 }
 
-void SDLRenderer::renderPlaybackControls(bool isPlaying) {
-    int buttonY = m_windowHeight - m_controlHeight + 25;
-    int x = m_margin;
+void SDLRenderer::renderPlaybackControls(bool isPlaying, int controlY) {
+    int buttonY = controlY + 26;
+    int x = 44;
     
     // 上一首按钮
-    drawButton(x, buttonY, m_buttonSize, m_buttonSize, "prev", 
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, "prev",
                m_hoveredControl == ControlType::PrevButton, false);
     m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::PrevButton, 0});
     x += m_buttonSize + 10;
@@ -848,18 +872,15 @@ void SDLRenderer::renderPlaybackControls(bool isPlaying) {
     m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::NextButton, 0});
 }
 
-void SDLRenderer::renderSpeedButton(double speed) {
-    int buttonY = m_windowHeight - m_controlHeight + 25;
-    int x = 200;
+void SDLRenderer::renderSpeedButton(double speed, int controlY) {
+    int buttonY = controlY + 32;
+    int x = 240;
     
     bool hovered = (m_hoveredControl == ControlType::SpeedButton);
     
-    // 按钮背景
+    // 圆角按钮背景
     const uint8_t* bgColor = hovered ? COLOR_BUTTON_BG_HOVER : COLOR_BUTTON_BG;
-    fillRect(x, buttonY, 50, m_buttonSize, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
-    
-    // 按钮边框
-    drawRect(x, buttonY, 50, m_buttonSize, 100, 100, 100, 255);
+    renderSmoothRoundRect(x, buttonY, 50, m_buttonSize, 8, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
     
     // 速度文字
     std::ostringstream oss;
@@ -873,9 +894,9 @@ void SDLRenderer::renderSpeedButton(double speed) {
     m_controlRects.push_back({x, buttonY, 50, m_buttonSize, ControlType::SpeedButton, 0});
 }
 
-void SDLRenderer::renderVolumeControl(int volume, bool isMuted) {
-    int buttonY = m_windowHeight - m_controlHeight + 25;
-    int x = m_windowWidth - m_margin - m_volumeWidth - 40;
+void SDLRenderer::renderVolumeControl(int volume, bool isMuted, int controlY) {
+    int buttonY = controlY + 32;
+    int x = m_windowWidth - 44 - m_volumeWidth - 40;
     
     // 音量图标按钮
     bool volHovered = (m_hoveredControl == ControlType::VolumeButton);
@@ -888,22 +909,24 @@ void SDLRenderer::renderVolumeControl(int volume, bool isMuted) {
     int volBarHeight = 6;
     int volBarY = buttonY + (m_buttonSize - volBarHeight) / 2;
     
-    fillRect(x, volBarY, volBarWidth, volBarHeight,
-             COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
-    
+    renderSmoothRoundRect(x, volBarY, volBarWidth, volBarHeight, volBarHeight / 2,
+                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
+
     if (!isMuted) {
         float vol = std::max(0, std::min(100, volume)) / 100.0f;
-        fillRect(x, volBarY, static_cast<int>(volBarWidth * vol), volBarHeight,
-                 COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], COLOR_PROGRESS_FILL[3]);
+        int fillW = static_cast<int>(volBarWidth * vol);
+        if (fillW < volBarHeight) fillW = volBarHeight;
+        renderSmoothRoundRect(x, volBarY, fillW, volBarHeight, volBarHeight / 2,
+                              COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], COLOR_PROGRESS_FILL[3]);
     }
 
     // 记录控件位置
     m_controlRects.push_back({x, volBarY, volBarWidth, volBarHeight, ControlType::VolumeBar, 0});
 }
 
-void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration) {
-    int x = 270;
-    int y = m_windowHeight - m_controlHeight + 25;
+void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration, int controlY) {
+    int x = 310;
+    int y = controlY + 32;
     
     // 格式化时间
     std::string timeText = VideoPlay::formatTime(position) + " / " + VideoPlay::formatTime(duration);
@@ -1107,18 +1130,279 @@ void SDLRenderer::fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uin
     SDL_RenderFillRect(m_renderer, &rect);
 }
 
+void SDLRenderer::fillRoundRect(int x, int y, int w, int h, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
+    if (!m_renderer || w <= 0 || h <= 0) return;
+    if (radius <= 0) {
+        fillRect(x, y, w, h, red, green, blue, a);
+        return;
+    }
+    int r = std::min(radius, std::min(w / 2, h / 2));
+
+    std::vector<SDL_Vertex> vertices;
+    auto addPoint = [&](float px, float py) {
+        SDL_Vertex v;
+        v.position.x = px;
+        v.position.y = py;
+        v.color.r = red / 255.0f;
+        v.color.g = green / 255.0f;
+        v.color.b = blue / 255.0f;
+        v.color.a = a / 255.0f;
+        v.tex_coord.x = 0;
+        v.tex_coord.y = 0;
+        vertices.push_back(v);
+    };
+
+    // center point
+    addPoint(x + w / 2.0f, y + h / 2.0f);
+
+    const float PI = 3.14159265f;
+    const int segments = 64;
+    // top-left arc
+    for (int i = 0; i <= segments; ++i) {
+        float angle = PI + PI / 2.0f * i / segments;
+        addPoint(x + r + r * std::cos(angle), y + r + r * std::sin(angle));
+    }
+    // top-right arc
+    for (int i = 0; i <= segments; ++i) {
+        float angle = PI * 1.5f + PI / 2.0f * i / segments;
+        addPoint(x + w - r + r * std::cos(angle), y + r + r * std::sin(angle));
+    }
+    // bottom-right arc
+    for (int i = 0; i <= segments; ++i) {
+        float angle = 0.0f + PI / 2.0f * i / segments;
+        addPoint(x + w - r + r * std::cos(angle), y + h - r + r * std::sin(angle));
+    }
+    // bottom-left arc
+    for (int i = 0; i <= segments; ++i) {
+        float angle = PI / 2.0f + PI / 2.0f * i / segments;
+        addPoint(x + r + r * std::cos(angle), y + h - r + r * std::sin(angle));
+    }
+
+    // Generate triangle list indices for a fan from center
+    std::vector<int> indices;
+    size_t boundaryCount = vertices.size() - 1;
+    for (size_t i = 0; i < boundaryCount; ++i) {
+        indices.push_back(0);
+        indices.push_back(static_cast<int>(1 + i));
+        indices.push_back(static_cast<int>(1 + ((i + 1) % boundaryCount)));
+    }
+
+    SDL_RenderGeometry(m_renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size()));
+}
+
+void SDLRenderer::fillCircle(int cx, int cy, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
+    if (!m_renderer || radius <= 0) return;
+    std::vector<SDL_Vertex> vertices;
+    SDL_Vertex center;
+    center.position.x = static_cast<float>(cx);
+    center.position.y = static_cast<float>(cy);
+    center.color.r = red / 255.0f; center.color.g = green / 255.0f; center.color.b = blue / 255.0f; center.color.a = a / 255.0f;
+    center.tex_coord.x = 0; center.tex_coord.y = 0;
+    vertices.push_back(center);
+
+    const int segments = 64;
+    const float PI = 3.14159265f;
+    for (int i = 0; i <= segments; ++i) {
+        float angle = 2.0f * PI * i / segments;
+        SDL_Vertex v;
+        v.position.x = cx + radius * std::cos(angle);
+        v.position.y = cy + radius * std::sin(angle);
+        v.color = center.color;
+        v.tex_coord.x = 0; v.tex_coord.y = 0;
+        vertices.push_back(v);
+    }
+
+    std::vector<int> indices;
+    for (int i = 0; i < segments; ++i) {
+        indices.push_back(0);
+        indices.push_back(1 + i);
+        indices.push_back(1 + i + 1);
+    }
+
+    SDL_RenderGeometry(m_renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size()));
+}
+
+void SDLRenderer::renderSmoothRoundRect(int x, int y, int w, int h, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
+    if (!m_renderer || w <= 0 || h <= 0) return;
+    const int scale = 8;
+    int texW = w * scale;
+    int texH = h * scale;
+    int texR = radius * scale;
+    if (texW < 1) texW = 1;
+    if (texH < 1) texH = 1;
+
+    SDL_Texture* target = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, texW, texH);
+    if (!target) return;
+    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(target, SDL_SCALEMODE_LINEAR);
+
+    SDL_Texture* oldTarget = SDL_GetRenderTarget(m_renderer);
+    SDL_SetRenderTarget(m_renderer, target);
+    SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 0);
+    SDL_RenderClear(m_renderer);
+
+    // 软边过渡层：扩大 8 高分辨率像素（≈1 屏幕像素），alpha 40%
+    uint8_t edgeA = static_cast<uint8_t>(std::min(255, a * 40 / 100));
+    if (edgeA > 0) {
+        fillRoundRect(-8, -8, texW + 16, texH + 16, texR, red, green, blue, edgeA);
+    }
+    // 核心实心层
+    fillRoundRect(0, 0, texW, texH, texR, red, green, blue, a);
+
+    SDL_SetRenderTarget(m_renderer, oldTarget);
+
+    SDL_FRect dst = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h) };
+    SDL_RenderTexture(m_renderer, target, nullptr, &dst);
+    SDL_DestroyTexture(target);
+}
+
+void SDLRenderer::renderSmoothCircle(int cx, int cy, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
+    if (!m_renderer || radius <= 0) return;
+    const int scale = 8;
+    int size = radius * 2 * scale;
+    if (size < 2) size = 2;
+
+    SDL_Texture* target = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, size, size);
+    if (!target) return;
+    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(target, SDL_SCALEMODE_LINEAR);
+
+    SDL_Texture* oldTarget = SDL_GetRenderTarget(m_renderer);
+    SDL_SetRenderTarget(m_renderer, target);
+    SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 0);
+    SDL_RenderClear(m_renderer);
+
+    int c = size / 2;
+    int r = radius * scale;
+    uint8_t edgeA = static_cast<uint8_t>(std::min(255, a * 40 / 100));
+    if (edgeA > 0) {
+        fillCircle(c, c, r + 8, red, green, blue, edgeA);
+    }
+    fillCircle(c, c, r, red, green, blue, a);
+
+    SDL_SetRenderTarget(m_renderer, oldTarget);
+
+    SDL_FRect dst = { static_cast<float>(cx - radius), static_cast<float>(cy - radius), static_cast<float>(radius * 2), static_cast<float>(radius * 2) };
+    SDL_RenderTexture(m_renderer, target, nullptr, &dst);
+    SDL_DestroyTexture(target);
+}
+
+void SDLRenderer::drawGradientVignette() {
+    if (!m_renderer) return;
+    int h = 180;
+    int y0 = m_windowHeight - h;
+    if (y0 < 0) y0 = 0;
+
+    SDL_Vertex verts[4];
+    auto setV = [&](int idx, float px, float py, uint8_t alpha) {
+        verts[idx].position.x = px;
+        verts[idx].position.y = py;
+        verts[idx].color.r = 0.0f;
+        verts[idx].color.g = 0.0f;
+        verts[idx].color.b = 0.0f;
+        verts[idx].color.a = alpha / 255.0f;
+        verts[idx].tex_coord.x = 0;
+        verts[idx].tex_coord.y = 0;
+    };
+    setV(0, 0.0f, static_cast<float>(y0), 0);
+    setV(1, static_cast<float>(m_windowWidth), static_cast<float>(y0), 0);
+    setV(2, static_cast<float>(m_windowWidth), static_cast<float>(m_windowHeight), 200);
+    setV(3, 0.0f, static_cast<float>(m_windowHeight), 200);
+
+    int indices[6] = {0, 1, 2, 0, 2, 3};
+    SDL_RenderGeometry(m_renderer, nullptr, verts, 4, indices, 6);
+}
+
 void SDLRenderer::drawButton(int x, int y, int w, int h, const std::string& iconType, bool hovered, bool pressed) {
-    // 按钮背景
-    const uint8_t* bgColor = pressed ? COLOR_BUTTON_BG_PRESSED : 
-                             (hovered ? COLOR_BUTTON_BG_HOVER : COLOR_BUTTON_BG);
-    fillRect(x, y, w, h, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
-    
-    // 按钮边框
-    const uint8_t* borderColor = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
-    drawRect(x, y, w, h, borderColor[0], borderColor[1], borderColor[2], borderColor[3]);
+    int cx = x + w / 2;
+    int cy = y + h / 2;
+    // 圆形 hover / pressed 背景（现代播放器风格）
+    if (pressed) {
+        renderSmoothCircle(cx, cy, w / 2 - 2, COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
+    } else if (hovered) {
+        renderSmoothCircle(cx, cy, w / 2 - 2, COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
+    }
     
     // 绘制图标
-    drawIcon(x + w/2, y + h/2, iconType, hovered);
+    drawIcon(cx, cy, iconType, hovered);
+}
+
+SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
+    if (!m_renderer) return nullptr;
+    const int size = 256;
+    SDL_Texture* target = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, size, size);
+    if (!target) return nullptr;
+    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(target, SDL_SCALEMODE_LINEAR);
+    SDL_SetRenderTarget(m_renderer, target);
+    SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 0);
+    SDL_RenderClear(m_renderer);
+
+    auto mkVert = [&](float px, float py) {
+        SDL_Vertex v;
+        v.position.x = px;
+        v.position.y = py;
+        v.color.r = 1.0f; v.color.g = 1.0f; v.color.b = 1.0f; v.color.a = 1.0f;
+        v.tex_coord.x = 0; v.tex_coord.y = 0;
+        return v;
+    };
+    auto drawTri = [&](const std::vector<SDL_Vertex>& verts) {
+        std::vector<int> idx = {0, 1, 2};
+        SDL_RenderGeometry(m_renderer, nullptr, verts.data(), static_cast<int>(verts.size()), idx.data(), static_cast<int>(idx.size()));
+    };
+    auto drawQuad = [&](const std::vector<SDL_Vertex>& verts) {
+        std::vector<int> idx = {0, 1, 2, 0, 2, 3};
+        SDL_RenderGeometry(m_renderer, nullptr, verts.data(), static_cast<int>(verts.size()), idx.data(), static_cast<int>(idx.size()));
+    };
+
+    int cx = size / 2;
+    int cy = size / 2;
+
+    // 辅助：先画稍大、alpha 50% 的过渡层，再画实心主体，产生边缘羽化
+    auto drawSoftTri = [&](const std::vector<SDL_Vertex>& base, float expand) {
+        if (expand > 0) {
+            std::vector<SDL_Vertex> soft;
+            for (const auto& v : base) {
+                SDL_Vertex sv = v;
+                sv.color.a = 0.5f;
+                soft.push_back(sv);
+            }
+            drawTri(soft);
+        }
+        drawTri(base);
+    };
+    auto drawSoftRoundRect = [&](int rx, int ry, int rw, int rh, int rr) {
+        fillRoundRect(rx - 8, ry - 8, rw + 16, rh + 16, rr, 255, 255, 255, 100);
+        fillRoundRect(rx, ry, rw, rh, rr, 255, 255, 255, 255);
+    };
+
+    if (type == "play") {
+        drawSoftTri({ mkVert(cx - 56, cy - 72), mkVert(cx + 80, cy), mkVert(cx - 56, cy + 72) }, 8);
+    } else if (type == "pause") {
+        drawSoftRoundRect(cx - 56, cy - 72, 40, 144, 16);
+        drawSoftRoundRect(cx + 16, cy - 72, 40, 144, 16);
+    } else if (type == "stop") {
+        drawSoftRoundRect(cx - 64, cy - 64, 128, 128, 24);
+    } else if (type == "prev") {
+        drawSoftRoundRect(cx + 32, cy - 64, 32, 128, 12);
+        drawSoftTri({ mkVert(cx - 16, cy), mkVert(cx + 56, cy - 72), mkVert(cx + 56, cy + 72) }, 8);
+    } else if (type == "next") {
+        drawSoftRoundRect(cx - 64, cy - 64, 32, 128, 12);
+        drawSoftTri({ mkVert(cx + 16, cy), mkVert(cx - 56, cy - 72), mkVert(cx - 56, cy + 72) }, 8);
+    } else if (type == "volume") {
+        drawSoftRoundRect(cx - 80, cy - 40, 56, 80, 12);
+        drawQuad({ mkVert(cx - 32, cy - 64), mkVert(cx + 72, cy - 88), mkVert(cx + 72, cy + 88), mkVert(cx - 32, cy + 64) });
+    } else if (type == "mute") {
+        drawSoftRoundRect(cx - 80, cy - 40, 56, 80, 12);
+        drawQuad({ mkVert(cx - 32, cy - 64), mkVert(cx + 72, cy - 88), mkVert(cx + 72, cy + 88), mkVert(cx - 32, cy + 64) });
+        drawSoftRoundRect(cx - 24, cy - 80, 20, 160, 8);
+    } else {
+        fillCircle(cx, cy, 72, 255, 255, 255, 100);
+        fillCircle(cx, cy, 64, 255, 255, 255, 255);
+    }
+
+    SDL_SetRenderTarget(m_renderer, nullptr);
+    return target;
 }
 
 SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
@@ -1132,49 +1416,12 @@ SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
         return nullptr;
     }
 
-    std::string exeDir = getExecutableDir();
-    std::vector<std::string> searchPaths = {
-        exeDir + "/icons/" + type + ".png",
-        exeDir + "\\icons\\" + type + ".png",
-        "icons/" + type + ".png",
-        "resources/icons/" + type + ".png"
-    };
-    Logger::instance().debug("getIconTexture: cwd=" + std::filesystem::current_path().string() + " exe=" + exeDir);
-
-    for (const auto& path : searchPaths) {
-        bool exists = std::filesystem::exists(path);
-        Logger::instance().debug("getIconTexture: checking " + path + " exists=" + (exists ? "true" : "false"));
-        if (!exists) continue;
-
-        int w = 0, h = 0, channels = 0;
-        unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
-        if (!data) {
-            Logger::instance().warning("getIconTexture: stbi_load failed for " + path);
-            continue;
-        }
-
-        SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, data, w * 4);
-        if (!surface) {
-            Logger::instance().warning("getIconTexture: SDL_CreateSurfaceFrom failed for " + path + ": " + SDL_GetError());
-            stbi_image_free(data);
-            continue;
-        }
-
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-        SDL_DestroySurface(surface);
-        stbi_image_free(data);
-
-        if (texture) {
-            Logger::instance().info("getIconTexture: loaded " + path + " " + std::to_string(w) + "x" + std::to_string(h));
-            m_iconTextures[type] = texture;
-            return texture;
-        } else {
-            Logger::instance().warning("getIconTexture: SDL_CreateTextureFromSurface failed for " + path);
-        }
+    SDL_Texture* texture = createIconTexture(type);
+    if (texture) {
+        m_iconTextures[type] = texture;
+        Logger::instance().info("Generated icon texture for: " + type);
     }
-
-    Logger::instance().debug("getIconTexture: no PNG found for " + type);
-    return nullptr;
+    return texture;
 }
 
 void SDLRenderer::loadIconTextures() {
@@ -1200,9 +1447,8 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
 
     SDL_Texture* texture = getIconTexture(type);
     if (texture) {
-        float w = 0.0f, h = 0.0f;
-        SDL_GetTextureSize(texture, &w, &h);
-        SDL_FRect dstRect = { static_cast<float>(cx - static_cast<int>(w) / 2), static_cast<float>(cy - static_cast<int>(h) / 2), w, h };
+        int drawSize = 24;
+        SDL_FRect dstRect = { static_cast<float>(cx - drawSize / 2), static_cast<float>(cy - drawSize / 2), static_cast<float>(drawSize), static_cast<float>(drawSize) };
         SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
         return;
     }
