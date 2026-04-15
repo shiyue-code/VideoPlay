@@ -216,6 +216,7 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_draggingProgress = false;
+    float m_dragProgressRatio = 0.0f;
     bool m_draggingVolume = false;
     int m_windowWidth = 1280;
     int m_windowHeight = 720;

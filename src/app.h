@@ -79,6 +79,7 @@ private:
     std::string m_currentSubtitle;
     int64_t m_duration = 0;
     int64_t m_position = 0;
+    int64_t m_seekTargetPosition = -1; // seek 后用于覆盖 UI 位置，防止进度条跳回
     bool m_isPlaying = false;
     int m_volume = 100;
     bool m_isMuted = false;
