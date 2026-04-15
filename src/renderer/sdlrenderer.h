@@ -145,11 +145,11 @@ private:
     // 渲染各个部分
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
                         bool isPlaying, double speed);
-    void renderProgressBar(int64_t position, int64_t duration);
-    void renderVolumeControl(int volume, bool isMuted);
-    void renderPlaybackControls(bool isPlaying);
-    void renderSpeedButton(double speed);
-    void renderTimeDisplay(int64_t position, int64_t duration);
+    void renderProgressBar(int64_t position, int64_t duration, int controlY);
+    void renderVolumeControl(int volume, bool isMuted, int controlY);
+    void renderPlaybackControls(bool isPlaying, int controlY);
+    void renderSpeedButton(double speed, int controlY);
+    void renderTimeDisplay(int64_t position, int64_t duration, int controlY);
     void renderFilename(const std::string& filename);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff);
     void renderTooltip();
@@ -168,10 +168,16 @@ private:
     void loadIconTextures();
     void clearIconTextures();
     SDL_Texture* getIconTexture(const std::string& type);
+    SDL_Texture* createIconTexture(const std::string& type);
 
     // 绘制辅助函数
     void drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void fillRoundRect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void fillCircle(int cx, int cy, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void drawGradientVignette();
+    void renderSmoothRoundRect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void renderSmoothCircle(int cx, int cy, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void drawButton(int x, int y, int w, int h, const std::string& iconType, bool hovered, bool pressed);
     void drawIcon(int cx, int cy, const std::string& type, bool hovered);
 
@@ -213,7 +219,7 @@ private:
 
     // 控件位置和尺寸
     int m_menuBarHeight = 24;
-    int m_controlHeight = 60;
+    int m_controlHeight = 70;
     int m_buttonSize = 32;
     int m_progressBarHeight = 10;
     int m_volumeWidth = 80;
