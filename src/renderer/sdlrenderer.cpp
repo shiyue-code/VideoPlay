@@ -425,10 +425,10 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_stopCallback) m_stopCallback();
                         break;
                     case SDLK_LEFT:
-                        if (m_seekCallback) m_seekCallback(-5000.0); // 后退5秒 (毫秒)
+                        if (m_seekCallback) m_seekCallback(-5.0); // 后退5秒
                         break;
                     case SDLK_RIGHT:
-                        if (m_seekCallback) m_seekCallback(5000.0);  // 前进5秒
+                        if (m_seekCallback) m_seekCallback(5.0);  // 前进5秒
                         break;
                     case SDLK_UP:
                         if (m_volumeCallback) m_volumeCallback(5);
@@ -502,7 +502,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
             if (rect.type == ControlType::ProgressBar) {
                 float ratio = static_cast<float>(x - rect.x) / rect.w;
                 ratio = std::max(0.0f, std::min(1.0f, ratio));
-                m_seekCallback(ratio * 1000); // 传回绝对位置
+                m_seekCallback(ratio * 1000 + 1000); // 传回绝对位置 (1000~2000)
                 break;
             }
         }
@@ -574,7 +574,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                 if (rect.type == ControlType::ProgressBar) {
                     float ratio = static_cast<float>(x - rect.x) / rect.w;
                     ratio = std::max(0.0f, std::min(1.0f, ratio));
-                    if (m_seekCallback) m_seekCallback(ratio * 1000);
+                    if (m_seekCallback) m_seekCallback(ratio * 1000 + 1000); // 传回绝对位置 (1000~2000)
                     break;
                 }
             }
