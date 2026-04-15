@@ -8,7 +8,7 @@
 |-----|------|
 | **FFmpeg 6.0+** | 视频/音频解码、解封装 |
 | **SDL3 3.4+** | 窗口管理、视频渲染、事件处理 |
-| **miniaudio** | 音频播放 |
+| **SDL3 Audio** | 音频播放 |
 | **OpenGL** | 硬件加速渲染 (可选) |
 
 ## 功能特性
@@ -100,7 +100,7 @@ VideoPlay/
 │   ├── app.h/cpp             # 主应用类
 │   ├── core/
 │   │   ├── ffmpegplayer.h/cpp   # FFmpeg 播放器核心
-│   │   ├── audioplayer.h/cpp    # 音频播放 (miniaudio)
+│   │   ├── audioplayer.h/cpp    # 音频播放 (SDL3 Audio)
 │   │   ├── settings.h/cpp       # 配置管理
 │   │   └── common.h             # 公共定义
 │   ├── renderer/
@@ -110,9 +110,9 @@ VideoPlay/
 │   └── utils/
 │       └── logger.h/cpp         # 日志系统
 ├── 3rdparty/
-│   ├── miniaudio/            # miniaudio 音频库
 │   ├── SDL3/                 # SDL3 (submodule)
-│   └── SDL3_ttf/             # SDL3_ttf (submodule)
+│   ├── SDL3_ttf/             # SDL3_ttf (submodule)
+│   └── nlohmann/             # JSON 库
 ├── CMakeLists.txt
 └── README.md
 ```

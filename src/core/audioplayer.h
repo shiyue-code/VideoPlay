@@ -10,7 +10,7 @@
 #include <functional>
 #include <chrono>
 
-#include "miniaudio/miniaudio.h"
+#include <SDL3/SDL.h>
 
 namespace VideoPlay {
 
@@ -52,31 +52,27 @@ public:
     void setDataCallback(DataCallback callback);
 
 private:
-    static void dataCallbackWrapper(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount);
-    void processAudio(float* output, size_t frameCount);
+    using Clock = std::chrono::high_resolution_clock;
 
     mutable std::mutex m_mutex;
-    
-    ma_device m_device;
-    ma_device_config m_deviceConfig;
-    bool m_initialized;
-    
-    // Flat buffer with read offset to avoid vector::erase in audio callback
-    std::vector<float> m_buffer;
-    size_t m_readOffset = 0;
-    
-    std::atomic<bool> m_playing;
-    std::atomic<bool> m_paused;
-    std::atomic<uint64_t> m_framesPlayed{0};
-    std::atomic<double> m_playedMsAtSpeedChange{0.0};
-    std::atomic<uint64_t> m_framesPlayedAtSpeedChange{0};
-    std::atomic<int> m_volume;
-    std::atomic<bool> m_muted;
+
+    SDL_AudioStream* m_stream = nullptr;
+    SDL_AudioDeviceID m_deviceId = 0;
+    bool m_initialized = false;
+
+    std::atomic<bool> m_playing{false};
+    std::atomic<bool> m_paused{false};
+    std::atomic<int> m_volume{100};
+    std::atomic<bool> m_muted{false};
     std::atomic<double> m_playbackSpeed{1.0};
-    
+
     AudioFormat m_format;
     DataCallback m_dataCallback;
-    std::chrono::high_resolution_clock::time_point m_lastProcessTime;
+
+    // Timing state for playedMs()
+    double m_basePlayedMs = 0.0;
+    Clock::time_point m_timerStart;
+    bool m_timerRunning = false;
 };
 
 } // namespace VideoPlay
