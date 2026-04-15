@@ -226,6 +226,14 @@ void VideoPlayerApp::render() {
             m_position = audioPos;
         }
     }
+    // seek 后异步生效前，用目标位置覆盖 UI，防止进度条跳回原位
+    if (m_seekTargetPosition >= 0) {
+        if (std::llabs(m_position - m_seekTargetPosition) < 500) {
+            m_seekTargetPosition = -1;
+        } else {
+            m_position = m_seekTargetPosition;
+        }
+    }
     double dtPos = elapsedMs(t0);
 
     // 根据当前播放时间从队列获取对应视频帧
@@ -422,6 +430,8 @@ void VideoPlayerApp::seek(double deltaMs) {
     
     Logger::instance().info("Seeking to: " + std::to_string(targetPos) + "ms");
     m_player->seek(targetPos);
+    m_seekTargetPosition = targetPos;
+    m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
 }
 
 void VideoPlayerApp::seekTo(double position) {
@@ -432,6 +442,8 @@ void VideoPlayerApp::seekTo(double position) {
     
     Logger::instance().info("Seeking to position: " + std::to_string(position));
     m_player->seek(targetPos);
+    m_seekTargetPosition = targetPos;
+    m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
 }
 
 void VideoPlayerApp::setVolume(int delta) {

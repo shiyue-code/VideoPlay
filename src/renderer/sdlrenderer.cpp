@@ -500,13 +500,12 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     // 检测菜单栏悬浮
     m_menuBarHovered = (y < m_menuBarHeight);
     
-    // 处理进度条拖动
-    if (m_draggingProgress && m_seekCallback) {
+    // 处理进度条拖动（仅更新 UI，不 seek）
+    if (m_draggingProgress) {
         for (const auto& rect : m_controlRects) {
             if (rect.type == ControlType::ProgressBar) {
-                float ratio = static_cast<float>(x - rect.x) / rect.w;
-                ratio = std::max(0.0f, std::min(1.0f, ratio));
-                m_seekCallback(ratio * 1000 + 1000); // 传回绝对位置 (1000~2000)
+                m_dragProgressRatio = static_cast<float>(x - rect.x) / rect.w;
+                m_dragProgressRatio = std::max(0.0f, std::min(1.0f, m_dragProgressRatio));
                 break;
             }
         }
@@ -580,12 +579,11 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             break;
         case ControlType::ProgressBar:
             m_draggingProgress = true;
-            // 立即更新位置
+            // 记录拖动位置用于实时渲染，释放时才 seek
             for (const auto& rect : m_controlRects) {
                 if (rect.type == ControlType::ProgressBar) {
-                    float ratio = static_cast<float>(x - rect.x) / rect.w;
-                    ratio = std::max(0.0f, std::min(1.0f, ratio));
-                    if (m_seekCallback) m_seekCallback(ratio * 1000 + 1000); // 传回绝对位置 (1000~2000)
+                    m_dragProgressRatio = static_cast<float>(x - rect.x) / rect.w;
+                    m_dragProgressRatio = std::max(0.0f, std::min(1.0f, m_dragProgressRatio));
                     break;
                 }
             }
@@ -620,6 +618,10 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
 }
 
 void SDLRenderer::handleMouseButtonUp(int x, int y) {
+    // 进度条释放时才执行 seek
+    if (m_draggingProgress && m_seekCallback) {
+        m_seekCallback(m_dragProgressRatio * 1000 + 1000); // 传回绝对位置 (1000~2000)
+    }
     m_draggingProgress = false;
     m_draggingVolume = false;
     m_pressedControl = ControlType::None;
@@ -842,7 +844,8 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
 
     // 进度
     if (duration > 0) {
-        float progress = static_cast<float>(position) / duration;
+        float progress = m_draggingProgress ? m_dragProgressRatio
+                                            : static_cast<float>(position) / duration;
         progress = std::max(0.0f, std::min(1.0f, progress));
 
         const uint8_t* fillColor = pressed ? COLOR_PROGRESS_HOVER :

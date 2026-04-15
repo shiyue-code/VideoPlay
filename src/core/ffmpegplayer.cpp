@@ -309,10 +309,11 @@ void FFmpegPlayer::seek(int64_t positionMs) {
 void FFmpegPlayer::handleSeek(int64_t positionMs) {
     if (!m_formatContext) return;
     
-    AVStream* seekStream = m_videoCtx.stream ? m_videoCtx.stream : m_formatContext->streams[0];
-    if (!seekStream) return;
-    
-    int64_t seekTarget = av_rescale_q(positionMs, {1, 1000}, seekStream->time_base);
+    // 使用 AV_TIME_BASE (微秒) 进行全局 seek
+    int64_t seekTarget = av_rescale_q(positionMs, {1, 1000}, {1, AV_TIME_BASE});
+    if (m_formatContext->start_time != AV_NOPTS_VALUE) {
+        seekTarget += m_formatContext->start_time;
+    }
     
     int ret = av_seek_frame(m_formatContext, -1, seekTarget, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
