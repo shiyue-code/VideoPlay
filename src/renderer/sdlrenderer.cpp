@@ -211,6 +211,7 @@ void SDLRenderer::initMenus() {
     fileMenu.items = {
         {1, "打开文件...", "Ctrl+O", false, true},
         {2, "打开文件夹...", "", false, true},
+        {4, "导入字幕...", "", false, true},
         {0, "", "", true}, // 分隔线
         {3, "退出", "Alt+F4", false, true}
     };
@@ -666,6 +667,7 @@ bool SDLRenderer::isMenuOpen() const {
 
 void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
                            bool isPlaying, double speed, const std::string& filename,
+                           const std::string& subtitle,
                            const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
                            int64_t audioPts, int64_t videoPts, double avDiff) {
     // 清空控件区域
@@ -695,7 +697,12 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     if (!filename.empty()) {
         renderFilename(filename);
     }
-    
+
+    // 渲染字幕
+    if (!subtitle.empty()) {
+        renderSubtitle(subtitle);
+    }
+
     // 渲染音视频同步调试信息
     renderSyncInfo(audioPts, videoPts, avDiff);
     
@@ -994,6 +1001,59 @@ void SDLRenderer::renderFilename(const std::string& filename) {
     
     // 渲染文件名
     drawText(name, 20, y + 5, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+}
+
+void SDLRenderer::renderSubtitle(const std::string& subtitle) {
+#ifdef HAS_SDL_TTF
+    if (!m_font || subtitle.empty()) return;
+
+    // 按换行符分割字幕文本
+    std::vector<std::string> lines;
+    std::string current;
+    for (char c : subtitle) {
+        if (c == '\n') {
+            lines.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) {
+        lines.push_back(current);
+    }
+    if (lines.empty()) return;
+
+    int fontSize = 16;
+    int maxWidth = 0;
+    int lineHeight = getFontHeight(fontSize);
+    for (const auto& line : lines) {
+        int w = getTextWidth(line, fontSize);
+        if (w > maxWidth) maxWidth = w;
+    }
+
+    int paddingX = 24;
+    int paddingY = 12;
+    int totalWidth = maxWidth + paddingX * 2;
+    int totalHeight = lines.size() * lineHeight + paddingY * 2;
+
+    // 底部边距：控制栏显示时在其上方，否则留一定边距
+    int bottomMargin = m_showControls ? m_controlHeight + 20 : 60;
+    int x = (m_windowWidth - totalWidth) / 2;
+    int y = m_windowHeight - bottomMargin - totalHeight;
+    if (y < m_menuBarHeight + 10) y = m_menuBarHeight + 10;
+
+    // 绘制半透明背景
+    fillRoundRect(x, y, totalWidth, totalHeight, 8, 0, 0, 0, 180);
+
+    // 绘制字幕文字（白色带轻微描边效果通过背景实现）
+    int textY = y + paddingY;
+    for (const auto& line : lines) {
+        int textW = getTextWidth(line, fontSize);
+        int textX = x + (totalWidth - textW) / 2;
+        drawText(line, textX, textY, 255, 255, 255, fontSize);
+        textY += lineHeight;
+    }
+#endif
 }
 
 void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex) {
@@ -1632,6 +1692,30 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
         SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy - r/2), static_cast<float>(cx + r/2), static_cast<float>(cy + r/2));
         SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy + r/2), static_cast<float>(cx + r/2), static_cast<float>(cy - r/2));
     }
+}
+
+void SDLRenderer::openSubtitleDialog(std::function<void(const std::string&)> callback) {
+    {
+        std::lock_guard<std::mutex> lock(m_dialogMutex);
+        m_dialogResultReady = false;
+        m_pendingDialogResult.clear();
+        m_dialogCallback = std::move(callback);
+    }
+
+    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
+        auto* renderer = static_cast<SDLRenderer*>(userdata);
+        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
+        if (filelist && filelist[0]) {
+            renderer->m_pendingDialogResult = filelist[0];
+        }
+        renderer->m_dialogResultReady = true;
+    };
+
+    SDL_DialogFileFilter sdlFilters[] = {
+        { "字幕文件", "srt;ass;ssa;vtt" }
+    };
+
+    SDL_ShowOpenFileDialog(sdlCallback, this, m_window, sdlFilters, 1, nullptr, false);
 }
 
 void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& /*filters*/) {
