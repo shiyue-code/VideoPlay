@@ -50,7 +50,7 @@ void AudioPlayer::shutdown() {
 
     if (m_initialized) {
         if (m_stream) {
-            SDL_CloseAudioDevice(m_deviceId);
+            SDL_DestroyAudioStream(m_stream);
             m_stream = nullptr;
             m_deviceId = 0;
         }
@@ -165,9 +165,13 @@ void AudioPlayer::enqueue(const std::vector<float>& audioData) {
         for (auto& sample : scaled) {
             sample *= volumeScale;
         }
-        SDL_PutAudioStreamData(m_stream, scaled.data(), static_cast<int>(scaled.size() * sizeof(float)));
+        if (!SDL_PutAudioStreamData(m_stream, scaled.data(), static_cast<int>(scaled.size() * sizeof(float)))) {
+            Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
+        }
     } else {
-        SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)));
+        if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
+            Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
+        }
     }
 }
 

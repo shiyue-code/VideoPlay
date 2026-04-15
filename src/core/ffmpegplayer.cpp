@@ -278,6 +278,11 @@ void FFmpegPlayer::stop() {
         m_audioPlayer->reset();
     }
     
+    // Seek back to beginning so play() restarts from the start
+    if (m_formatContext) {
+        handleSeek(0);
+    }
+    
     m_position = 0;
     m_audioBaseMs = 0;
     
