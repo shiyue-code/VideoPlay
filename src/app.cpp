@@ -110,6 +110,9 @@ bool VideoPlayerApp::initialize() {
     m_renderer->setFullscreenCallback([this]() {
         // 全屏切换由渲染器处理
     });
+    m_renderer->setPlaylistItemCallback([this](size_t index) {
+        playFromPlaylist(static_cast<int>(index));
+    });
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
@@ -272,6 +275,8 @@ void VideoPlayerApp::render() {
         m_isPlaying,
         m_speed,
         m_currentFile,
+        m_playlist,
+        m_currentIndex,
         audioPts,
         videoPts,
         avDiff
