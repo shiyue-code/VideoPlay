@@ -32,6 +32,7 @@ using PrevCallback = std::function<void()>;
 using NextCallback = std::function<void()>;
 using FullscreenCallback = std::function<void()>;
 using MenuCallback = std::function<void(int)>;     // menu item id
+using PlaylistItemCallback = std::function<void(size_t)>;
 
 // 控件类型
 enum class ControlType {
@@ -44,6 +45,8 @@ enum class ControlType {
     VolumeButton,
     VolumeBar,
     SpeedButton,
+    PlaylistButton,
+    PlaylistItem,
     MenuBar,
     MenuItem
 };
@@ -107,10 +110,12 @@ public:
     void setNextCallback(NextCallback callback);
     void setFullscreenCallback(FullscreenCallback callback);
     void setMenuCallback(MenuCallback callback);
+    void setPlaylistItemCallback(PlaylistItemCallback callback);
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
                   bool isPlaying, double speed, const std::string& filename,
+                  const std::vector<std::string>& playlist = {}, size_t currentPlaylistIndex = 0,
                   int64_t audioPts = 0, int64_t videoPts = 0, double avDiff = 0.0);
 
     // 打开文件对话框（异步回调）
@@ -153,6 +158,7 @@ private:
     void renderFilename(const std::string& filename);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff);
     void renderTooltip();
+    void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
 
     // 创建/更新纹理
     void ensureTexture(int width, int height);
@@ -208,6 +214,7 @@ private:
     bool m_initialized = false;
     bool m_fullscreen = false;
     bool m_showControls = true;
+    bool m_showPlaylistPanel = true;
     bool m_draggingProgress = false;
     bool m_draggingVolume = false;
     int m_windowWidth = 1280;
@@ -244,6 +251,7 @@ private:
     bool m_mouseDown = false;
     ControlType m_hoveredControl = ControlType::None;
     ControlType m_pressedControl = ControlType::None;
+    int m_pressedControlValue = 0;
     uint64_t m_lastMouseMove = 0;
     std::string m_tooltip;
     uint64_t m_tooltipTime = 0;
@@ -263,6 +271,7 @@ private:
     NextCallback m_nextCallback;
     FullscreenCallback m_fullscreenCallback;
     MenuCallback m_menuCallback;
+    PlaylistItemCallback m_playlistItemCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

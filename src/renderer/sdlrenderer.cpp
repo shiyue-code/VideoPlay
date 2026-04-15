@@ -526,7 +526,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
 }
 
 void SDLRenderer::handleMouseButtonDown(int x, int y) {
-    m_pressedControl = getControlAt(x, y);
+    m_pressedControl = getControlAt(x, y, &m_pressedControlValue);
     
     // 处理菜单点击
     if (y < m_menuBarHeight) {
@@ -608,6 +608,12 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         case ControlType::SpeedButton:
             if (m_speedCallback) m_speedCallback(0);
             break;
+        case ControlType::PlaylistButton:
+            m_showPlaylistPanel = !m_showPlaylistPanel;
+            break;
+        case ControlType::PlaylistItem:
+            if (m_playlistItemCallback) m_playlistItemCallback(static_cast<size_t>(m_pressedControlValue));
+            break;
         default:
             break;
     }
@@ -657,10 +663,11 @@ bool SDLRenderer::isMenuOpen() const {
 
 void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
                            bool isPlaying, double speed, const std::string& filename,
+                           const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
                            int64_t audioPts, int64_t videoPts, double avDiff) {
     // 清空控件区域
     m_controlRects.clear();
-    
+
     // 自动隐藏控制栏（3秒无鼠标操作）
     if (m_showControls && SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
@@ -672,11 +679,15 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         // 渲染菜单栏
         renderMenuBar();
         renderControls(position, duration, volume, isMuted, isPlaying, speed);
+        // 渲染播放列表
+        if (m_showPlaylistPanel && !playlist.empty()) {
+            renderPlaylistPanel(playlist, currentPlaylistIndex);
+        }
     } else {
         // 仅渲染菜单栏（始终可见）
         renderMenuBar();
     }
-    
+
     // 渲染文件名
     if (!filename.empty()) {
         renderFilename(filename);
@@ -799,6 +810,16 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
     
     // 时间显示
     renderTimeDisplay(position, duration, controlY);
+
+    // 播放列表切换按钮
+    {
+        int btnX = m_windowWidth - 44 - m_volumeWidth - 40 - 42;
+        int btnY = controlY + 32;
+        bool hovered = (m_hoveredControl == ControlType::PlaylistButton);
+        bool pressed = (m_pressedControl == ControlType::PlaylistButton);
+        drawButton(btnX, btnY, m_buttonSize, m_buttonSize, "playlist", hovered, pressed);
+        m_controlRects.push_back({btnX, btnY, m_buttonSize, m_buttonSize, ControlType::PlaylistButton, 0});
+    }
     
     // 音量控制
     renderVolumeControl(volume, isMuted, controlY);
@@ -969,6 +990,81 @@ void SDLRenderer::renderFilename(const std::string& filename) {
     
     // 渲染文件名
     drawText(name, 20, y + 5, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+}
+
+void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex) {
+    int panelW = 260;
+    int panelX = m_windowWidth - 24 - panelW;
+    int panelY = m_menuBarHeight + 20;
+    int panelBottomMargin = m_windowHeight - m_controlHeight - 34;
+    int panelH = panelBottomMargin - panelY;
+    if (panelH < 60) return;
+    int radius = 20;
+
+    // 投影
+    renderSmoothRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    // 白边
+    renderSmoothRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 55);
+    // 背景
+    renderSmoothRoundRect(panelX, panelY, panelW, panelH, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+
+    // 标题
+    int titleY = panelY + 16;
+    drawText("播放列表", panelX + 16, titleY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 13);
+
+    int itemStartY = titleY + 28;
+    int itemH = 28;
+    int maxVisible = (panelY + panelH - 16 - itemStartY) / itemH;
+    if (maxVisible < 1) maxVisible = 1;
+
+    // 计算起始索引，保证当前项尽量可见
+    size_t startIndex = 0;
+    if (currentIndex >= static_cast<size_t>(maxVisible)) {
+        startIndex = currentIndex - static_cast<size_t>(maxVisible) + 1;
+    }
+    size_t endIndex = startIndex + maxVisible;
+    if (endIndex > playlist.size()) endIndex = playlist.size();
+
+    for (size_t i = startIndex; i < endIndex; ++i) {
+        int itemY = itemStartY + static_cast<int>(i - startIndex) * itemH;
+        bool isCurrent = (i == currentIndex);
+        bool hovered = (m_mouseX >= panelX + 12 && m_mouseX <= panelX + panelW - 12 &&
+                        m_mouseY >= itemY && m_mouseY <= itemY + itemH);
+
+        if (isCurrent) {
+            renderSmoothRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
+        } else if (hovered) {
+            renderSmoothRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
+        }
+
+        // 记录控件位置用于点击检测
+        m_controlRects.push_back({panelX + 12, itemY, panelW - 24, itemH, ControlType::PlaylistItem, static_cast<int>(i)});
+
+        // 文件名
+        std::string name = playlist[i];
+        size_t pos = name.find_last_of("/\\");
+        if (pos != std::string::npos) {
+            name = name.substr(pos + 1);
+        }
+        // 截断
+        int maxTextW = panelW - 48;
+        int textW = getTextWidth(name, 12);
+        if (textW > maxTextW) {
+            while (textW > maxTextW - getTextWidth("...", 12) && name.length() > 3) {
+                name = name.substr(0, name.length() - 1);
+                textW = getTextWidth(name + "...", 12);
+            }
+            name += "...";
+        }
+
+        int textColorR = isCurrent ? 255 : COLOR_TEXT[0];
+        int textColorG = isCurrent ? 255 : COLOR_TEXT[1];
+        int textColorB = isCurrent ? 255 : COLOR_TEXT[2];
+        drawText(name, panelX + 20, itemY + (itemH - getFontHeight(12)) / 2, textColorR, textColorG, textColorB, 12);
+    }
 }
 
 void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff) {
@@ -1396,6 +1492,14 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
         drawSoftRoundRect(cx - 80, cy - 40, 56, 80, 12);
         drawQuad({ mkVert(cx - 32, cy - 64), mkVert(cx + 72, cy - 88), mkVert(cx + 72, cy + 88), mkVert(cx - 32, cy + 64) });
         drawSoftRoundRect(cx - 24, cy - 80, 20, 160, 8);
+    } else if (type == "playlist") {
+        // 汉堡菜单图标：三条横线
+        int lineW = 128;
+        int lineH = 20;
+        int gap = 28;
+        drawSoftRoundRect(cx - lineW/2, cy - gap - lineH/2, lineW, lineH, lineH/2);
+        drawSoftRoundRect(cx - lineW/2, cy - lineH/2, lineW, lineH, lineH/2);
+        drawSoftRoundRect(cx - lineW/2, cy + gap - lineH/2, lineW, lineH, lineH/2);
     } else {
         fillCircle(cx, cy, 72, 255, 255, 255, 100);
         fillCircle(cx, cy, 64, 255, 255, 255, 255);
@@ -1426,7 +1530,7 @@ SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
 
 void SDLRenderer::loadIconTextures() {
     const std::vector<std::string> iconNames = {
-        "play", "pause", "stop", "prev", "next", "volume", "mute"
+        "play", "pause", "stop", "prev", "next", "volume", "mute", "playlist"
     };
     for (const auto& name : iconNames) {
         getIconTexture(name);
@@ -1613,6 +1717,10 @@ void SDLRenderer::setFullscreenCallback(FullscreenCallback callback) {
 
 void SDLRenderer::setMenuCallback(MenuCallback callback) {
     m_menuCallback = callback;
+}
+
+void SDLRenderer::setPlaylistItemCallback(PlaylistItemCallback callback) {
+    m_playlistItemCallback = callback;
 }
 
 } // namespace VideoPlay
