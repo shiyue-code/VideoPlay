@@ -501,6 +501,25 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     // 检测菜单栏悬浮
     m_menuBarHovered = (y < m_menuBarHeight);
     
+    // 菜单栏 hover 自动切换（当已有菜单打开时）
+    if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
+        int menuX = 10;
+        for (int i = 0; i < (int)m_menus.size(); i++) {
+            int textW = getTextWidth(m_menus[i].label);
+            int itemWidth = textW + 20;
+            if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
+                if (m_activeMenu != i) {
+                    m_activeMenu = i;
+                    m_pendingMenu = i;
+                    m_menuAnimStartTime = SDL_GetTicks();
+                    m_menuAnimating = true;
+                }
+                break;
+            }
+            menuX += itemWidth + 10;
+        }
+    }
+    
     // 处理进度条拖动（仅更新 UI，不 seek）
     if (m_draggingProgress) {
         for (const auto& rect : m_controlRects) {
@@ -550,7 +569,9 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                     if (itemIndex >= 0 && itemIndex < (int)m_menus[i].items.size()) {
                         const auto& item = m_menus[i].items[itemIndex];
                         if (!item.separator && item.enabled && m_menuCallback) {
-                            m_menuCallback(item.id);
+                            if (!(m_menuAnimating && m_pendingMenu < 0)) {
+                                m_menuCallback(item.id);
+                            }
                             closeAllMenus();
                         }
                     }
@@ -643,26 +664,71 @@ ControlType SDLRenderer::getControlAt(int x, int y, int* outValue) {
 void SDLRenderer::handleMenuClick(int x, int y) {
     int menuX = 10;
     for (int i = 0; i < (int)m_menus.size(); i++) {
-        int menuWidth = 50; // 估算宽度
+        int textW = getTextWidth(m_menus[i].label);
+        int menuWidth = textW + 20;
         if (x >= menuX && x <= menuX + menuWidth) {
-            if (m_activeMenu == i) {
-                m_activeMenu = -1; // 切换关闭
+            if (m_activeMenu == i && !m_menuAnimating) {
+                m_pendingMenu = -1;
+                m_menuAnimStartTime = SDL_GetTicks();
+                m_menuAnimating = true;
             } else {
-                m_activeMenu = i; // 打开菜单
+                m_activeMenu = i;
+                m_pendingMenu = i;
+                m_menuAnimStartTime = SDL_GetTicks();
+                m_menuAnimating = true;
             }
             return;
         }
-        menuX += 60;
+        menuX += menuWidth + 10;
     }
     closeAllMenus();
 }
 
-void SDLRenderer::closeAllMenus() {
-    m_activeMenu = -1;
+void SDLRenderer::closeAllMenus(bool animate) {
+    if (m_activeMenu < 0 && m_menuAnimAlpha <= 0.0f) return;
+    if (!animate) {
+        m_activeMenu = -1;
+        m_pendingMenu = -1;
+        m_menuAnimAlpha = 0.0f;
+        m_menuAnimating = false;
+        return;
+    }
+    m_pendingMenu = -1;
+    m_menuAnimStartTime = SDL_GetTicks();
+    m_menuAnimating = true;
 }
 
 bool SDLRenderer::isMenuOpen() const {
     return m_activeMenu >= 0;
+}
+
+void SDLRenderer::updateMenuAnimation() {
+    if (!m_menuAnimating) {
+        m_menuAnimAlpha = (m_activeMenu >= 0) ? 1.0f : 0.0f;
+        return;
+    }
+
+    uint64_t elapsed = SDL_GetTicks() - m_menuAnimStartTime;
+    float t = std::min(1.0f, static_cast<float>(elapsed) / static_cast<float>(MENU_ANIM_DURATION_MS));
+
+    if (m_pendingMenu >= 0) {
+        // 打开动画（ease-out）
+        float ease = 1.0f - (1.0f - t) * (1.0f - t);
+        m_menuAnimAlpha = ease;
+        if (t >= 1.0f) {
+            m_menuAnimating = false;
+            m_menuAnimAlpha = 1.0f;
+        }
+    } else {
+        // 关闭动画（ease-in）
+        float ease = t * t;
+        m_menuAnimAlpha = 1.0f - ease;
+        if (t >= 1.0f) {
+            m_menuAnimating = false;
+            m_menuAnimAlpha = 0.0f;
+            m_activeMenu = -1;
+        }
+    }
 }
 
 void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -707,12 +773,16 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     renderSyncInfo(audioPts, videoPts, avDiff);
     
     // 渲染打开的菜单
-    if (m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) {
-        int menuX = 10;
-        for (int i = 0; i < m_activeMenu; i++) {
-            menuX += 60;
+    updateMenuAnimation();
+    if ((m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) || m_menuAnimating) {
+        if (m_menuAnimAlpha > 0.01f) {
+            int menuX = 10;
+            for (int i = 0; i < m_activeMenu; i++) {
+                int textW = getTextWidth(m_menus[i].label);
+                menuX += textW + 20 + 10;
+            }
+            renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
         }
-        renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight);
     }
 }
 
@@ -748,21 +818,22 @@ void SDLRenderer::renderMenuBar() {
     }
 }
 
-void SDLRenderer::renderMenu(const Menu& menu, int x, int y) {
+void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     int itemHeight = 24;
     int menuWidth = 180;
     int menuHeight = (int)menu.items.size() * itemHeight + 8;
+    uint8_t baseAlpha = static_cast<uint8_t>(240 * alpha);
     
     // 菜单背景
     fillRect(x, y, menuWidth, menuHeight,
-             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], 240);
+             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
     
     // 菜单项
     int itemY = y + 4;
     for (const auto& item : menu.items) {
         if (item.separator) {
             // 分隔线
-            fillRect(x + 5, itemY + itemHeight/2 - 1, menuWidth - 10, 2, 100, 100, 100, 255);
+            fillRect(x + 5, itemY + itemHeight/2 - 1, menuWidth - 10, 2, 100, 100, 100, static_cast<uint8_t>(255 * alpha));
         } else {
             // 检测悬浮
             bool hovered = (m_mouseX >= x && m_mouseX <= x + menuWidth &&
@@ -770,7 +841,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y) {
             
             if (hovered && item.enabled) {
                 fillRect(x + 2, itemY, menuWidth - 4, itemHeight,
-                         COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], COLOR_MENU_ACTIVE[3]);
+                         COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], static_cast<uint8_t>(COLOR_MENU_ACTIVE[3] * alpha));
             }
             
             // 渲染菜单项文字
