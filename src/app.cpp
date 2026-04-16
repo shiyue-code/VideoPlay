@@ -251,6 +251,12 @@ void VideoPlayerApp::render() {
             m_displayFrame = std::move(frame);
         }
     }
+    
+    // 停止状态清空显示帧，确保画面归零
+    if (!m_isPlaying && m_position == 0) {
+        m_displayFrame = VideoFrame();
+    }
+    
     double dtGet = elapsedMs(t0);
 
     auto t1 = Clock::now();

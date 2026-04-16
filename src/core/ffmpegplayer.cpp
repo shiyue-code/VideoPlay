@@ -216,23 +216,47 @@ bool FFmpegPlayer::initializeAudioContext() {
 }
 
 void FFmpegPlayer::play() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    bool wasPaused = false;
+    bool needNewThread = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_state == PlaybackState::Playing) return;
+        if (m_filePath.empty() || !m_formatContext) return;
+        
+        wasPaused = (m_state == PlaybackState::Paused);
+        m_state = PlaybackState::Playing;
+        m_abortRequest = false;
+        
+        if (!wasPaused && m_decodeThread.joinable()) {
+            // 自然 EOF 后旧线程已结束但尚未 join
+            needNewThread = true;
+        } else if (!m_decodeThread.joinable()) {
+            // 手动 stop 后或首次播放
+            needNewThread = true;
+        }
+    }
     
-    if (m_state == PlaybackState::Playing) return;
-    if (m_filePath.empty() || !m_formatContext) return;
-    
-    m_state = PlaybackState::Playing;
-    m_abortRequest = false;
-    
-    if (!m_decodeThread.joinable()) {
-        m_decodeThread = std::thread(&FFmpegPlayer::decodeLoop, this);
+    if (needNewThread) {
+        if (m_decodeThread.joinable()) {
+            m_decodeThread.join();
+        }
+        if (m_formatContext) {
+            handleSeek(0);
+        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_state == PlaybackState::Playing) {
+            m_decodeThread = std::thread(&FFmpegPlayer::decodeLoop, this);
+        }
     }
     
     if (m_audioPlayer) {
         m_audioPlayer->play();
     }
     
-    m_condition.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_condition.notify_all();
+    }
     
     if (m_stateCallback) {
         m_stateCallback(PlaybackState::Playing);
@@ -258,19 +282,24 @@ void FFmpegPlayer::pause() {
 }
 
 void FFmpegPlayer::stop() {
+    bool wasAlreadyStopped = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_state == PlaybackState::Stopped) return;
-        
-        m_state = PlaybackState::Stopped;
-        m_abortRequest = true;
+        if (m_state == PlaybackState::Stopped) {
+            wasAlreadyStopped = true;
+        } else {
+            m_state = PlaybackState::Stopped;
+            m_abortRequest = true;
+        }
     }
     
-    m_condition.notify_all();
-    m_decodeCondition.notify_all();
-    
-    if (m_decodeThread.joinable()) {
-        m_decodeThread.join();
+    if (!wasAlreadyStopped) {
+        m_condition.notify_all();
+        m_decodeCondition.notify_all();
+        
+        if (m_decodeThread.joinable()) {
+            m_decodeThread.join();
+        }
     }
     
     if (m_audioPlayer) {
@@ -404,6 +433,10 @@ void FFmpegPlayer::decodeLoop() {
                 m_state = PlaybackState::Stopped;
                 if (m_stateCallback) {
                     m_stateCallback(PlaybackState::Stopped);
+                }
+                if (m_audioPlayer) {
+                    m_audioPlayer->stop();
+                    m_audioPlayer->reset();
                 }
                 break;
             }
@@ -750,6 +783,9 @@ int64_t FFmpegPlayer::duration() const {
 }
 
 int64_t FFmpegPlayer::audioPositionMs() const {
+    if (m_state.load() == PlaybackState::Stopped) {
+        return 0;
+    }
     if (m_audioPlayer) {
         return m_audioBaseMs.load() + m_audioPlayer->playedMs();
     }
