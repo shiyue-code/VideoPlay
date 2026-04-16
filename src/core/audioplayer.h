@@ -47,6 +47,7 @@ public:
     bool isPaused() const;
     size_t queueSize() const;
     int64_t playedMs() const;
+    int64_t queuedMs() const;
 
     using DataCallback = std::function<void(float* output, size_t frameCount)>;
     void setDataCallback(DataCallback callback);

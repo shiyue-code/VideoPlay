@@ -208,6 +208,19 @@ size_t AudioPlayer::queueSize() const {
     return static_cast<size_t>(samples / channels);
 }
 
+int64_t AudioPlayer::queuedMs() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream) return 0;
+    int queuedBytes = SDL_GetAudioStreamQueued(m_stream);
+    if (queuedBytes <= 0) return 0;
+    int totalFloats = queuedBytes / static_cast<int>(sizeof(float));
+    int channels = m_format.channels > 0 ? m_format.channels : 1;
+    int sampleRate = m_format.sampleRate > 0 ? m_format.sampleRate : 48000;
+    int frames = totalFloats / channels;
+    if (frames <= 0 || sampleRate <= 0) return 0;
+    return static_cast<int64_t>(frames * 1000LL / sampleRate);
+}
+
 int64_t AudioPlayer::playedMs() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     double result = m_basePlayedMs;
