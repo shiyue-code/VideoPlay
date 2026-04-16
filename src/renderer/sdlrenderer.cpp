@@ -734,7 +734,8 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
                            bool isPlaying, double speed, const std::string& filename,
                            const std::string& subtitle,
                            const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
-                           int64_t audioPts, int64_t videoPts, double avDiff) {
+                           int64_t audioPts, int64_t videoPts, double avDiff,
+                           bool isPreloading) {
     // 清空控件区域
     m_controlRects.clear();
 
@@ -770,6 +771,11 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
 
     // 渲染音视频同步调试信息
     renderSyncInfo(audioPts, videoPts, avDiff);
+
+    // 渲染预缓冲加载动画
+    if (isPreloading) {
+        renderLoadingAnimation();
+    }
     
     // 渲染打开的菜单
     updateMenuAnimation();
@@ -1199,6 +1205,37 @@ void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, 
         int textColorB = isCurrent ? 255 : COLOR_TEXT[2];
         drawText(name, panelX + 20, itemY + (itemH - getFontHeight(12)) / 2, textColorR, textColorG, textColorB, 12);
     }
+}
+
+void SDLRenderer::renderLoadingAnimation() {
+    if (!m_renderer) return;
+
+    int cx = m_windowWidth / 2;
+    int cy = m_windowHeight / 2;
+    int radius = 36;
+    int dotCount = 8;
+    
+    // 基于时间计算旋转角度
+    uint64_t now = SDL_GetTicks();
+    float rotation = (now % 1500) / 1500.0f * 2.0f * 3.14159265f;
+    
+    for (int i = 0; i < dotCount; ++i) {
+        float angle = rotation + i * (2.0f * 3.14159265f / dotCount);
+        int dx = static_cast<int>(cx + std::cos(angle) * radius);
+        int dy = static_cast<int>(cy + std::sin(angle) * radius);
+        
+        // 渐隐效果：前面的点更亮
+        uint8_t alpha = static_cast<uint8_t>(255 * (1.0f - i / static_cast<float>(dotCount)));
+        int dotRadius = 5 - i / 3;
+        if (dotRadius < 2) dotRadius = 2;
+        
+        renderSmoothCircle(dx, dy, dotRadius, 0, 170, 255, alpha);
+    }
+    
+    // 绘制 "加载中..." 文字
+    std::string text = "加载中...";
+    int textW = getTextWidth(text, 14);
+    drawText(text, cx - textW / 2, cy + radius + 20, 200, 200, 200, 14);
 }
 
 void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff) {

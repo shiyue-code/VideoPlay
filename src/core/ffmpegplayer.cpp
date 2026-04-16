@@ -249,17 +249,23 @@ void FFmpegPlayer::play() {
         }
     }
     
-    if (m_audioPlayer) {
-        m_audioPlayer->play();
-    }
-    
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_condition.notify_all();
-    }
-    
-    if (m_stateCallback) {
-        m_stateCallback(PlaybackState::Playing);
+    if (wasPaused) {
+        // 暂停恢复：直接启动音频
+        if (m_audioPlayer) {
+            m_audioPlayer->play();
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_condition.notify_all();
+        }
+        if (m_stateCallback) {
+            m_stateCallback(PlaybackState::Playing);
+        }
+    } else {
+        // 首次播放：进入预缓冲状态，由主线程轮询 checkPreloadComplete()
+        m_preloading = true;
+        m_preloadStartTime = std::chrono::steady_clock::now();
+        Logger::instance().debug("Preload started");
     }
 }
 
@@ -301,6 +307,8 @@ void FFmpegPlayer::stop() {
             m_decodeThread.join();
         }
     }
+    
+    m_preloading = false;
     
     if (m_audioPlayer) {
         m_audioPlayer->stop();
@@ -374,6 +382,74 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     if (m_positionCallback) {
         m_positionCallback(positionMs);
     }
+}
+
+bool FFmpegPlayer::isPreloading() const {
+    return m_preloading.load();
+}
+
+bool FFmpegPlayer::checkPreloadComplete() {
+    if (!m_preloading.load()) {
+        return false;
+    }
+    
+    bool hasVideo = (m_videoCtx.codecContext != nullptr);
+    bool hasAudio = (m_audioPlayer != nullptr);
+    
+    bool videoReady = !hasVideo;
+    bool audioReady = !hasAudio;
+    int64_t audioQueuedMs = 0;
+    size_t videoQueueSize = 0;
+    
+    if (hasVideo) {
+        std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+        videoQueueSize = m_videoFrameQueue.size();
+        videoReady = videoQueueSize > 0;
+    }
+    
+    if (hasAudio) {
+        audioQueuedMs = m_audioPlayer->queuedMs();
+        audioReady = audioQueuedMs >= kPreloadAudioMs;
+    }
+    
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - m_preloadStartTime).count();
+    bool timeout = elapsedMs >= kPreloadTimeoutMs;
+    
+    if ((videoReady && audioReady) || timeout) {
+        m_preloading = false;
+        if (m_audioPlayer) {
+            m_audioPlayer->play();
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_condition.notify_all();
+        }
+        if (m_stateCallback) {
+            m_stateCallback(PlaybackState::Playing);
+        }
+        if (timeout) {
+            Logger::instance().warning("Preload timeout (" + std::to_string(elapsedMs) + 
+                "ms), forcing play. video=" + std::to_string(videoQueueSize) + 
+                " audio=" + std::to_string(audioQueuedMs) + "ms");
+        } else {
+            Logger::instance().debug("Preload complete in " + std::to_string(elapsedMs) + 
+                "ms. video=" + std::to_string(videoQueueSize) + 
+                " audio=" + std::to_string(audioQueuedMs) + "ms");
+        }
+        return true;
+    }
+    
+    // 每 500ms 输出一次调试日志
+    static auto s_lastLogTime = std::chrono::steady_clock::now();
+    if (std::chrono::steady_clock::now() - s_lastLogTime > std::chrono::milliseconds(500)) {
+        s_lastLogTime = std::chrono::steady_clock::now();
+        Logger::instance().debug("Preloading... elapsed=" + std::to_string(elapsedMs) +
+            "ms video=" + std::to_string(videoQueueSize) +
+            " audio=" + std::to_string(audioQueuedMs) + "ms");
+    }
+    
+    return false;
 }
 
 void FFmpegPlayer::decodeLoop() {

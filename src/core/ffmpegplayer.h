@@ -73,6 +73,9 @@ public:
     void setMuteCallback(MuteCallback callback);
     void setVideoFrameCallback(VideoFrameCallback callback);
 
+    bool isPreloading() const;
+    bool checkPreloadComplete();
+
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
 private:
@@ -131,6 +134,8 @@ private:
     std::atomic<bool> m_seekRequested{false};
     std::atomic<int64_t> m_seekPosition{0};
     std::atomic<int64_t> m_audioBaseMs{0};
+    std::atomic<bool> m_preloading{false};
+    std::chrono::steady_clock::time_point m_preloadStartTime;
     
     double m_audioClock = 0.0;
     double m_videoClock = 0.0;
@@ -140,6 +145,8 @@ private:
     std::deque<VideoFrame> m_videoFrameQueue;
     std::mutex m_videoQueueMutex;
     static constexpr size_t kMaxVideoQueueSize = 10;
+    static constexpr int kPreloadAudioMs = 40;
+    static constexpr int kPreloadTimeoutMs = 1000;
     void pushVideoFrame(VideoFrame&& frame);
 
     StateCallback m_stateCallback;

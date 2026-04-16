@@ -236,6 +236,13 @@ void VideoPlayerApp::render() {
     }
     double dtPos = elapsedMs(t0);
 
+    // 检查预缓冲是否完成
+    if (m_player && m_player->isPreloading()) {
+        if (m_player->checkPreloadComplete()) {
+            m_isPlaying = true;
+        }
+    }
+
     // 根据当前播放时间从队列获取对应视频帧
     VideoFrame frame;
     bool gotFrame = false;
@@ -286,6 +293,8 @@ void VideoPlayerApp::render() {
         subtitleText = m_subtitleParser->subtitleAt(m_position);
     }
 
+    bool isPreloading = (m_player && m_player->isPreloading());
+
     // 渲染 UI
     m_renderer->renderUI(
         m_position,
@@ -300,7 +309,8 @@ void VideoPlayerApp::render() {
         m_currentIndex,
         audioPts,
         videoPts,
-        avDiff
+        avDiff,
+        isPreloading
     );
     double dtRenderUI = elapsedMs(t3);
 
