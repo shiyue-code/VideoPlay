@@ -317,24 +317,23 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
         frame.width * 4  // BGRA stride
     );
 
-    // 计算视频显示区域 (保持宽高比)
-    int availableHeight = m_windowHeight - m_menuBarHeight - m_controlHeight;
-    float windowAspect = static_cast<float>(m_windowWidth) / availableHeight;
+    // 计算视频显示区域 (保持宽高比，铺满整个窗口，UI 悬浮在上方)
+    float windowAspect = static_cast<float>(m_windowWidth) / m_windowHeight;
     float videoAspect = static_cast<float>(frame.width) / frame.height;
 
     SDL_FRect dstRect;
     if (windowAspect > videoAspect) {
         // 窗口更宽，以高度为基准
-        dstRect.h = availableHeight;
-        dstRect.w = static_cast<int>(availableHeight * videoAspect);
-        dstRect.x = (m_windowWidth - dstRect.w) / 2;
-        dstRect.y = m_menuBarHeight;
+        dstRect.h = static_cast<float>(m_windowHeight);
+        dstRect.w = static_cast<float>(m_windowHeight) * videoAspect;
+        dstRect.x = (m_windowWidth - dstRect.w) / 2.0f;
+        dstRect.y = 0;
     } else {
         // 窗口更高，以宽度为基准
-        dstRect.w = m_windowWidth;
-        dstRect.h = static_cast<int>(m_windowWidth / videoAspect);
+        dstRect.w = static_cast<float>(m_windowWidth);
+        dstRect.h = static_cast<float>(m_windowWidth) / videoAspect;
         dstRect.x = 0;
-        dstRect.y = m_menuBarHeight + (availableHeight - dstRect.h) / 2;
+        dstRect.y = (m_windowHeight - dstRect.h) / 2.0f;
     }
 
     // 渲染视频
@@ -747,7 +746,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     if (m_showControls) {
         // 底部渐变遮罩，让控制栏自然融入视频
         drawGradientVignette();
-        // 渲染菜单栏
+        // 渲染菜单栏（悬浮在视频上方，随控制栏一起显隐）
         renderMenuBar();
         renderControls(position, duration, volume, isMuted, isPlaying, speed);
         // 渲染播放列表
@@ -755,8 +754,8 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
             renderPlaylistPanel(playlist, currentPlaylistIndex);
         }
     } else {
-        // 仅渲染菜单栏（始终可见）
-        renderMenuBar();
+        // 菜单栏随控制栏一起隐藏，确保不遮挡视频
+        closeAllMenus(false);
     }
 
     // 渲染文件名
