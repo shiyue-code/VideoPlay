@@ -144,9 +144,9 @@ private:
     // 菜单处理
     void initMenus();
     void renderMenuBar();
-    void renderMenu(const Menu& menu, int x, int y);
+    void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
     void handleMenuClick(int x, int y);
-    void closeAllMenus();
+    void closeAllMenus(bool animate = true);
     bool isMenuOpen() const;
 
     // 渲染各个部分
@@ -248,6 +248,14 @@ private:
     std::vector<Menu> m_menus;
     int m_activeMenu = -1;
     bool m_menuBarHovered = false;
+
+    // 菜单动画
+    void updateMenuAnimation();
+    float m_menuAnimAlpha = 0.0f;
+    bool m_menuAnimating = false;
+    uint64_t m_menuAnimStartTime = 0;
+    static constexpr uint64_t MENU_ANIM_DURATION_MS = 120;
+    int m_pendingMenu = -1;
 
     // 鼠标状态
     int m_mouseX = 0;
