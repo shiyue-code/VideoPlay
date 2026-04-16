@@ -108,10 +108,10 @@ void AudioPlayer::stop() {
         SDL_ClearAudioStream(m_stream);
         m_playing = false;
         m_paused = false;
-        m_basePlayedMs = 0.0;
-        m_timerRunning = false;
         Logger::instance().debug("Audio playback stopped");
     }
+    m_basePlayedMs = 0.0;
+    m_timerRunning = false;
 }
 
 void AudioPlayer::reset() {
