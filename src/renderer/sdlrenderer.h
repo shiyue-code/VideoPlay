@@ -123,6 +123,7 @@ public:
     // 打开文件对话框（异步回调）
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
     void openSubtitleDialog(std::function<void(const std::string&)> callback);
+    void openFolderDialog(std::function<void(const std::string&)> callback);
 
     // 获取窗口尺寸
     int windowWidth() const { return m_windowWidth; }
@@ -152,8 +153,8 @@ private:
 
     // 渲染各个部分
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
-                        bool isPlaying, double speed);
-    void renderProgressBar(int64_t position, int64_t duration, int controlY);
+                        bool isPlaying, double speed, bool isPreloading);
+    void renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying);
     void renderVolumeControl(int volume, bool isMuted, int controlY);
     void renderPlaybackControls(bool isPlaying, int controlY);
     void renderSpeedButton(double speed, int controlY);
@@ -186,6 +187,7 @@ private:
     void fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void fillRoundRect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void fillCircle(int cx, int cy, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void renderGlowBar(int cx, int cy, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t centerAlpha, int clipLeft, int clipRight);
     void drawGradientVignette();
     void renderSmoothRoundRect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void renderSmoothCircle(int cx, int cy, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
@@ -258,6 +260,11 @@ private:
     uint64_t m_menuAnimStartTime = 0;
     static constexpr uint64_t MENU_ANIM_DURATION_MS = 120;
     int m_pendingMenu = -1;
+
+    // 进度条宽度动画 (0.0 = 1/3 width, 1.0 = full width)
+    float m_progressBarScale = 0.0f;
+    uint64_t m_lastProgressAnimTime = 0;
+    static constexpr float PROGRESS_BAR_ANIM_SPEED = 12.0f; // 指数衰减系数，越大响应越快
 
     // 鼠标状态
     int m_mouseX = 0;

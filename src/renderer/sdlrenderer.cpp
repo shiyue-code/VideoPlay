@@ -739,6 +739,26 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     // 清空控件区域
     m_controlRects.clear();
 
+    // 更新进度条宽度动画（无论控制栏是否显示都更新，保证平滑）
+    {
+        uint64_t now = SDL_GetTicks();
+        float dt = 0.0f;
+        if (m_lastProgressAnimTime > 0) {
+            dt = std::min((now - m_lastProgressAnimTime) / 1000.0f, 0.05f);
+        }
+        m_lastProgressAnimTime = now;
+
+        bool isStopped = !isPlaying && !isPreloading && position == 0;
+        float targetScale = (duration > 0 && !isStopped) ? 1.0f : 0.0f;
+        float diff = targetScale - m_progressBarScale;
+        if (std::abs(diff) > 0.0005f) {
+            // 指数衰减插值：越接近目标速度越慢，天生 ease-out 效果
+            m_progressBarScale += diff * std::min(1.0f, PROGRESS_BAR_ANIM_SPEED * dt);
+        } else {
+            m_progressBarScale = targetScale;
+        }
+    }
+
     // 自动隐藏控制栏（3秒无鼠标操作）
     if (m_showControls && SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
@@ -749,7 +769,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         drawGradientVignette();
         // 渲染菜单栏（悬浮在视频上方，随控制栏一起显隐）
         renderMenuBar();
-        renderControls(position, duration, volume, isMuted, isPlaying, speed);
+        renderControls(position, duration, volume, isMuted, isPlaying, speed, isPreloading);
         // 渲染播放列表
         if (m_showPlaylistPanel && !playlist.empty()) {
             renderPlaylistPanel(playlist, currentPlaylistIndex);
@@ -772,10 +792,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     // 渲染音视频同步调试信息
     renderSyncInfo(audioPts, videoPts, avDiff);
 
-    // 渲染预缓冲加载动画
-    if (isPreloading) {
-        renderLoadingAnimation();
-    }
+    // 预缓冲加载动画已集成到进度条中
     
     // 渲染打开的菜单
     updateMenuAnimation();
@@ -866,7 +883,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 }
 
 void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
-                                 bool isPlaying, double speed) {
+                                 bool isPlaying, double speed, bool isPreloading) {
     int marginX = 24;
     int marginBottom = 24;
     int controlY = m_windowHeight - m_controlHeight - marginBottom;
@@ -886,7 +903,7 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
                           COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
     
     // 进度条（在最上面）
-    renderProgressBar(position, duration, controlY);
+    renderProgressBar(position, duration, controlY, isPreloading, isPlaying);
     
     // 播放控制按钮
     renderPlaybackControls(isPlaying, controlY);
@@ -911,23 +928,31 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
     renderVolumeControl(volume, isMuted, controlY);
 }
 
-void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int controlY) {
+void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying) {
     int barY = controlY + 14;
-    int margin = 44;
-    int barWidth = m_windowWidth - margin * 2;
     int barHeight = 6;
-    
+
+    // 根据动画状态计算进度条宽度和边距
+    int fullBarWidth = m_windowWidth - 44 * 2;
+    int compactBarWidth = m_windowWidth / 3;
+    int barWidth = static_cast<int>(fullBarWidth * m_progressBarScale + compactBarWidth * (1.0f - m_progressBarScale));
+    int margin = (m_windowWidth - barWidth) / 2;
+
     // 检测悬浮
     bool hovered = (m_mouseY >= barY && m_mouseY <= barY + barHeight &&
                    m_mouseX >= margin && m_mouseX <= margin + barWidth);
     bool pressed = m_draggingProgress;
-    
-    // 背景（圆角）
-    renderSmoothRoundRect(margin, barY, barWidth, barHeight, barHeight / 2,
-                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
 
-    // 进度
-    if (duration > 0) {
+    // 完全停止状态：刚启动或停止播放后（position=0，不播放，不预载）
+    bool isCompletelyStopped = !isPlaying && !isPreloading && position == 0;
+
+    // 背景（圆角）
+    uint8_t bgAlpha = isPreloading ? 180 : (duration > 0 ? COLOR_PROGRESS_BG[3] : 120);
+    renderSmoothRoundRect(margin, barY, barWidth, barHeight, barHeight / 2,
+                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], bgAlpha);
+
+    // 进度填充 + thumb（停止状态下只保留背景条，和刚启动时一致）
+    if (duration > 0 && !isCompletelyStopped) {
         float progress = m_draggingProgress ? m_dragProgressRatio
                                             : static_cast<float>(position) / duration;
         progress = std::max(0.0f, std::min(1.0f, progress));
@@ -937,16 +962,23 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
 
         int fillW = static_cast<int>(barWidth * progress);
         if (fillW < barHeight) fillW = barHeight;
-        renderSmoothRoundRect(margin, barY, fillW, barHeight, barHeight / 2,
-                              fillColor[0], fillColor[1], fillColor[2], fillColor[3]);
 
-        // 圆形进度 thumb
+        uint8_t fillAlpha = isPreloading ? 70 : fillColor[3];
+        renderSmoothRoundRect(margin, barY, fillW, barHeight, barHeight / 2,
+                              fillColor[0], fillColor[1], fillColor[2], fillAlpha);
+
+        // 圆形进度 thumb（预载期间用蓝色，播放时白色，避免半透明发灰）
         int knobX = margin + static_cast<int>(barWidth * progress);
         int knobY = barY + barHeight / 2;
         int thumbRadius = (hovered || pressed) ? 7 : 5;
-        renderSmoothCircle(knobX, knobY, thumbRadius, 255, 255, 255, 255);
+        if (isPreloading) {
+            renderSmoothCircle(knobX, knobY, thumbRadius,
+                               COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], 255);
+        } else {
+            renderSmoothCircle(knobX, knobY, thumbRadius, 255, 255, 255, 255);
+        }
     }
-    
+
     // 记录控件位置
     m_controlRects.push_back({margin, barY, barWidth, barHeight,
                               ControlType::ProgressBar, 0});
@@ -1489,6 +1521,57 @@ void SDLRenderer::fillCircle(int cx, int cy, int radius, uint8_t red, uint8_t gr
     SDL_RenderGeometry(m_renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size()));
 }
 
+void SDLRenderer::renderGlowBar(int cx, int cy, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t centerAlpha, int clipLeft, int clipRight) {
+    if (!m_renderer || width <= 0 || height <= 0 || centerAlpha == 0) return;
+
+    int halfW = width / 2;
+    int halfH = height / 2;
+    int left   = std::max(clipLeft, cx - halfW);
+    int right  = std::min(clipRight, cx + halfW);
+    int top    = cy - halfH;
+    int bottom = cy + halfH;
+    if (right <= left) return;
+
+    // 实际中心可能因裁剪偏移，重新计算插值用的中心 alpha
+    int actualCenterX = cx;
+    if (actualCenterX < left) actualCenterX = left;
+    if (actualCenterX > right) actualCenterX = right;
+
+    float rf = red / 255.0f;
+    float gf = green / 255.0f;
+    float bf = blue / 255.0f;
+    float af = centerAlpha / 255.0f;
+
+    SDL_Vertex v[6];
+    // top-left
+    v[0].position = { static_cast<float>(left),  static_cast<float>(top) };
+    v[0].color    = { rf, gf, bf, 0.0f };
+    v[0].tex_coord = { 0, 0 };
+    // top-center
+    v[1].position = { static_cast<float>(actualCenterX), static_cast<float>(top) };
+    v[1].color    = { rf, gf, bf, af };
+    v[1].tex_coord = { 0, 0 };
+    // top-right
+    v[2].position = { static_cast<float>(right), static_cast<float>(top) };
+    v[2].color    = { rf, gf, bf, 0.0f };
+    v[2].tex_coord = { 0, 0 };
+    // bottom-left
+    v[3].position = { static_cast<float>(left),  static_cast<float>(bottom) };
+    v[3].color    = { rf, gf, bf, 0.0f };
+    v[3].tex_coord = { 0, 0 };
+    // bottom-center
+    v[4].position = { static_cast<float>(actualCenterX), static_cast<float>(bottom) };
+    v[4].color    = { rf, gf, bf, af };
+    v[4].tex_coord = { 0, 0 };
+    // bottom-right
+    v[5].position = { static_cast<float>(right), static_cast<float>(bottom) };
+    v[5].color    = { rf, gf, bf, 0.0f };
+    v[5].tex_coord = { 0, 0 };
+
+    int indices[] = { 0, 1, 3, 1, 3, 4, 1, 2, 4, 2, 4, 5 };
+    SDL_RenderGeometry(m_renderer, nullptr, v, 6, indices, 12);
+}
+
 void SDLRenderer::renderSmoothRoundRect(int x, int y, int w, int h, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
     if (!m_renderer || w <= 0 || h <= 0) return;
     const int scale = 8;
@@ -1823,6 +1906,26 @@ void SDLRenderer::openSubtitleDialog(std::function<void(const std::string&)> cal
     };
 
     SDL_ShowOpenFileDialog(sdlCallback, this, m_window, sdlFilters, 1, nullptr, false);
+}
+
+void SDLRenderer::openFolderDialog(std::function<void(const std::string&)> callback) {
+    {
+        std::lock_guard<std::mutex> lock(m_dialogMutex);
+        m_dialogResultReady = false;
+        m_pendingDialogResult.clear();
+        m_dialogCallback = std::move(callback);
+    }
+
+    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
+        auto* renderer = static_cast<SDLRenderer*>(userdata);
+        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
+        if (filelist && filelist[0]) {
+            renderer->m_pendingDialogResult = filelist[0];
+        }
+        renderer->m_dialogResultReady = true;
+    };
+
+    SDL_ShowOpenFolderDialog(sdlCallback, this, m_window, nullptr, false);
 }
 
 void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& /*filters*/) {
