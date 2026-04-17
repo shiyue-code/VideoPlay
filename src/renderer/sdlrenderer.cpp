@@ -1728,30 +1728,31 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
     };
 
     if (type == "play") {
-        drawSoftTri({ mkVert(cx - 56, cy - 72), mkVert(cx + 80, cy), mkVert(cx - 56, cy + 72) }, 8);
+        // 向右三角，以纹理中心对称
+        drawSoftTri({ mkVert(cx - 56, cy), mkVert(cx + 56, cy - 72), mkVert(cx + 56, cy + 72) }, 8);
     } else if (type == "pause") {
         drawSoftRoundRect(cx - 56, cy - 72, 40, 144, 16);
         drawSoftRoundRect(cx + 16, cy - 72, 40, 144, 16);
     } else if (type == "stop") {
         drawSoftRoundRect(cx - 64, cy - 64, 128, 128, 24);
     } else if (type == "prev") {
-        drawSoftRoundRect(cx + 32, cy - 64, 32, 128, 12);
-        drawSoftTri({ mkVert(cx - 16, cy), mkVert(cx + 56, cy - 72), mkVert(cx + 56, cy + 72) }, 8);
+        // 上一首：竖条在右 + 向左三角，整体居中
+        drawSoftRoundRect(cx + 28, cy - 48, 20, 96, 8);
+        drawSoftTri({ mkVert(cx - 48, cy), mkVert(cx + 28, cy - 48), mkVert(cx + 28, cy + 48) }, 6);
     } else if (type == "next") {
-        drawSoftRoundRect(cx - 64, cy - 64, 32, 128, 12);
-        drawSoftTri({ mkVert(cx + 16, cy), mkVert(cx - 56, cy - 72), mkVert(cx - 56, cy + 72) }, 8);
+        // 下一首：竖条在左 + 向右三角，整体居中
+        drawSoftRoundRect(cx - 48, cy - 48, 20, 96, 8);
+        drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 28, cy - 48), mkVert(cx - 28, cy + 48) }, 6);
     } else if (type == "volume") {
-        // 喇叭底座
-        drawSoftRoundRect(cx - 80, cy - 28, 44, 56, 10);
-        // 喇叭口（向右的梯形三角形）
-        drawSoftTri({ mkVert(cx - 36, cy - 52), mkVert(cx + 52, cy), mkVert(cx - 36, cy + 52) }, 6);
+        // 喇叭底座 + 向右三角，整体居中
+        drawSoftRoundRect(cx - 48, cy - 24, 32, 48, 8);
+        drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 16, cy - 40), mkVert(cx - 16, cy + 40) }, 6);
     } else if (type == "mute") {
-        // 喇叭底座
-        drawSoftRoundRect(cx - 80, cy - 28, 44, 56, 10);
-        // 喇叭口
-        drawSoftTri({ mkVert(cx - 36, cy - 52), mkVert(cx + 52, cy), mkVert(cx - 36, cy + 52) }, 6);
-        // 静音斜杠
-        drawSoftRoundRect(cx - 24, cy - 72, 16, 144, 6);
+        // 喇叭底座 + 向右三角 + 斜杠，整体居中
+        drawSoftRoundRect(cx - 48, cy - 24, 32, 48, 8);
+        drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 16, cy - 40), mkVert(cx - 16, cy + 40) }, 6);
+        // 静音斜杠在喇叭右侧
+        drawSoftRoundRect(cx + 16, cy - 48, 12, 96, 4);
     } else if (type == "playlist") {
         // 汉堡菜单图标：三条横线
         int lineW = 128;
@@ -1811,7 +1812,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
 
     SDL_Texture* texture = getIconTexture(type);
     if (texture) {
-        int drawSize = static_cast<int>(24 * scale);
+        int drawSize = static_cast<int>(28 * scale);
         SDL_FRect dstRect = { static_cast<float>(cx - drawSize / 2), static_cast<float>(cy - drawSize / 2), static_cast<float>(drawSize), static_cast<float>(drawSize) };
         // 颜色调制：正常灰白，hover 纯白
         SDL_SetTextureColorMod(texture, color[0], color[1], color[2]);
