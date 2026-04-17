@@ -96,6 +96,12 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         return false;
     }
 
+    // 开启 OpenGL 多重采样（若后端为 OpenGL 则生效）
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 16);
+
+    // 调试 D3D11 渲染后端（仅在调试时有用）
+    SDL_SetHint(SDL_HINT_RENDER_DIRECT3D11_DEBUG, "1");
+
 #ifdef HAS_SDL_TTF
     // 初始化 SDL_ttf
     if (!TTF_Init()) {
@@ -139,18 +145,20 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         return false;
     }
 
-    // 创建渲染器
-    m_renderer = SDL_CreateRenderer(
-        m_window,
-        NULL
-    );
-
-    if (!m_renderer) {
-        Logger::instance().error("SDL_CreateRenderer failed: " + std::string(SDL_GetError()));
-        SDL_DestroyWindow(m_window);
-        m_window = nullptr;
-        SDL_Quit();
-        return false;
+    // 创建渲染器：优先尝试 OpenGL（使多重采样等 GL 特性生效）
+    m_renderer = SDL_CreateRenderer(m_window, "opengl");
+    if (m_renderer) {
+        Logger::instance().info("Renderer backend: opengl");
+    } else {
+        Logger::instance().warning("OpenGL renderer unavailable, falling back to default: " + std::string(SDL_GetError()));
+        m_renderer = SDL_CreateRenderer(m_window, NULL);
+        if (!m_renderer) {
+            Logger::instance().error("SDL_CreateRenderer failed: " + std::string(SDL_GetError()));
+            SDL_DestroyWindow(m_window);
+            m_window = nullptr;
+            SDL_Quit();
+            return false;
+        }
     }
 
     // 启用 alpha 混合，确保半透明效果正常
@@ -1744,15 +1752,25 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
         drawSoftRoundRect(cx - 48, cy - 48, 20, 96, 8);
         drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 28, cy - 48), mkVert(cx - 28, cy + 48) }, 6);
     } else if (type == "volume") {
-        // 喇叭底座 + 向右三角，整体居中
-        drawSoftRoundRect(cx - 48, cy - 24, 32, 48, 8);
-        drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 16, cy - 40), mkVert(cx - 16, cy + 40) }, 6);
+        // 喇叭：左侧窄手柄 + 右侧梯形喇叭口
+        drawSoftRoundRect(cx - 50, cy - 16, 28, 32, 6);
+        auto v0 = mkVert(static_cast<float>(cx - 22), static_cast<float>(cy - 20));
+        auto v1 = mkVert(static_cast<float>(cx - 22), static_cast<float>(cy + 20));
+        auto v2 = mkVert(static_cast<float>(cx + 60), static_cast<float>(cy + 56));
+        auto v3 = mkVert(static_cast<float>(cx + 60), static_cast<float>(cy - 56));
+        drawSoftTri({ v0, v1, v2 }, 6);
+        drawSoftTri({ v0, v2, v3 }, 6);
     } else if (type == "mute") {
-        // 喇叭底座 + 向右三角 + 斜杠，整体居中
-        drawSoftRoundRect(cx - 48, cy - 24, 32, 48, 8);
-        drawSoftTri({ mkVert(cx + 48, cy), mkVert(cx - 16, cy - 40), mkVert(cx - 16, cy + 40) }, 6);
-        // 静音斜杠在喇叭右侧
-        drawSoftRoundRect(cx + 16, cy - 48, 12, 96, 4);
+        // 喇叭 + 静音斜杠
+        drawSoftRoundRect(cx - 50, cy - 16, 28, 32, 6);
+        auto v0 = mkVert(static_cast<float>(cx - 22), static_cast<float>(cy - 20));
+        auto v1 = mkVert(static_cast<float>(cx - 22), static_cast<float>(cy + 20));
+        auto v2 = mkVert(static_cast<float>(cx + 60), static_cast<float>(cy + 56));
+        auto v3 = mkVert(static_cast<float>(cx + 60), static_cast<float>(cy - 56));
+        drawSoftTri({ v0, v1, v2 }, 6);
+        drawSoftTri({ v0, v2, v3 }, 6);
+        // 静音斜杠在喇叭开口右侧
+        drawSoftRoundRect(cx + 68, cy - 52, 12, 104, 4);
     } else if (type == "playlist") {
         // 汉堡菜单图标：三条横线
         int lineW = 128;
@@ -1812,7 +1830,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
 
     SDL_Texture* texture = getIconTexture(type);
     if (texture) {
-        int drawSize = static_cast<int>(28 * scale);
+        int drawSize = static_cast<int>(32 * scale);
         SDL_FRect dstRect = { static_cast<float>(cx - drawSize / 2), static_cast<float>(cy - drawSize / 2), static_cast<float>(drawSize), static_cast<float>(drawSize) };
         // 颜色调制：正常灰白，hover 纯白
         SDL_SetTextureColorMod(texture, color[0], color[1], color[2]);
@@ -1867,30 +1885,40 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
             }
         }
     } else if (type == "volume") {
-        fillRect(cx - r, cy - r/2, r/2, r, color[0], color[1], color[2], color[3]);
-        for (int row = -r; row <= r; row++) {
-            int y = cy + row;
-            int distFromCenter = abs(row);
-            int lineWidth = r - distFromCenter / 2;
-            int xStart = cx - r/2;
-            for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
-            }
-        }
+        int hw = r / 2;
+        int hh = r;
+        int mouthW = r;
+        int mouthH = r * 2;
+        // 手柄
+        fillRect(cx - r, cy - hh / 2, hw, hh, color[0], color[1], color[2], color[3]);
+        // 喇叭口梯形
+        SDL_Vertex verts[4];
+        verts[0] = { {static_cast<float>(cx - r + hw), static_cast<float>(cy - hh / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[1] = { {static_cast<float>(cx - r + hw), static_cast<float>(cy + hh / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[2] = { {static_cast<float>(cx + mouthW), static_cast<float>(cy + mouthH / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[3] = { {static_cast<float>(cx + mouthW), static_cast<float>(cy - mouthH / 2)}, {1, 1, 1, 1}, {0, 0} };
+        int idx[6] = {0, 1, 2, 0, 2, 3};
+        SDL_RenderGeometry(m_renderer, nullptr, verts, 4, idx, 6);
     } else if (type == "mute") {
-        fillRect(cx - r, cy - r/2, r/2, r, 150, 150, 150, 255);
-        for (int row = -r; row <= r; row++) {
-            int y = cy + row;
-            int distFromCenter = abs(row);
-            int lineWidth = r - distFromCenter / 2;
-            int xStart = cx - r/2;
-            for (int i = 0; i < lineWidth; i++) {
-                SDL_RenderPoint(m_renderer, static_cast<float>(xStart + i), static_cast<float>(y));
-            }
-        }
+        int hw = r / 2;
+        int hh = r;
+        int mouthW = r;
+        int mouthH = r * 2;
+        fillRect(cx - r, cy - hh / 2, hw, hh, 150, 150, 150, 255);
+        SDL_Vertex verts[4];
+        verts[0] = { {static_cast<float>(cx - r + hw), static_cast<float>(cy - hh / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[1] = { {static_cast<float>(cx - r + hw), static_cast<float>(cy + hh / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[2] = { {static_cast<float>(cx + mouthW), static_cast<float>(cy + mouthH / 2)}, {1, 1, 1, 1}, {0, 0} };
+        verts[3] = { {static_cast<float>(cx + mouthW), static_cast<float>(cy - mouthH / 2)}, {1, 1, 1, 1}, {0, 0} };
+        int idx[6] = {0, 1, 2, 0, 2, 3};
+        SDL_RenderGeometry(m_renderer, nullptr, verts, 4, idx, 6);
+        // 静音斜杠
         SDL_SetRenderDrawColor(m_renderer, 255, 100, 100, 255);
-        SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy - r/2), static_cast<float>(cx + r/2), static_cast<float>(cy + r/2));
-        SDL_RenderLine(m_renderer, static_cast<float>(cx), static_cast<float>(cy + r/2), static_cast<float>(cx + r/2), static_cast<float>(cy - r/2));
+        int sx = cx + mouthW + 2;
+        int sy1 = cy - mouthH / 2 - 2;
+        int sy2 = cy + mouthH / 2 + 2;
+        SDL_RenderLine(m_renderer, static_cast<float>(sx), static_cast<float>(sy1), static_cast<float>(sx + r / 2), static_cast<float>(sy2));
+        SDL_RenderLine(m_renderer, static_cast<float>(sx + 1), static_cast<float>(sy1), static_cast<float>(sx + 1 + r / 2), static_cast<float>(sy2));
     }
 }
 
