@@ -1673,8 +1673,9 @@ void SDLRenderer::drawButton(int x, int y, int w, int h, const std::string& icon
         renderSmoothCircle(cx, cy, w / 2 - 2, COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
     }
     
-    // 绘制图标
-    drawIcon(cx, cy, iconType, hovered);
+    // 绘制图标（pressed 时缩小 15%，增加按压感）
+    float scale = pressed ? 0.85f : 1.0f;
+    drawIcon(cx, cy, iconType, hovered, scale);
 }
 
 SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
@@ -1740,12 +1741,17 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
         drawSoftRoundRect(cx - 64, cy - 64, 32, 128, 12);
         drawSoftTri({ mkVert(cx + 16, cy), mkVert(cx - 56, cy - 72), mkVert(cx - 56, cy + 72) }, 8);
     } else if (type == "volume") {
-        drawSoftRoundRect(cx - 80, cy - 40, 56, 80, 12);
-        drawQuad({ mkVert(cx - 32, cy - 64), mkVert(cx + 72, cy - 88), mkVert(cx + 72, cy + 88), mkVert(cx - 32, cy + 64) });
+        // 喇叭底座
+        drawSoftRoundRect(cx - 80, cy - 28, 44, 56, 10);
+        // 喇叭口（向右的梯形三角形）
+        drawSoftTri({ mkVert(cx - 36, cy - 52), mkVert(cx + 52, cy), mkVert(cx - 36, cy + 52) }, 6);
     } else if (type == "mute") {
-        drawSoftRoundRect(cx - 80, cy - 40, 56, 80, 12);
-        drawQuad({ mkVert(cx - 32, cy - 64), mkVert(cx + 72, cy - 88), mkVert(cx + 72, cy + 88), mkVert(cx - 32, cy + 64) });
-        drawSoftRoundRect(cx - 24, cy - 80, 20, 160, 8);
+        // 喇叭底座
+        drawSoftRoundRect(cx - 80, cy - 28, 44, 56, 10);
+        // 喇叭口
+        drawSoftTri({ mkVert(cx - 36, cy - 52), mkVert(cx + 52, cy), mkVert(cx - 36, cy + 52) }, 6);
+        // 静音斜杠
+        drawSoftRoundRect(cx - 24, cy - 72, 16, 144, 6);
     } else if (type == "playlist") {
         // 汉堡菜单图标：三条横线
         int lineW = 128;
@@ -1800,14 +1806,17 @@ void SDLRenderer::clearIconTextures() {
     m_iconTextures.clear();
 }
 
-void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered) {
+void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered, float scale) {
     const uint8_t* color = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
 
     SDL_Texture* texture = getIconTexture(type);
     if (texture) {
-        int drawSize = 24;
+        int drawSize = static_cast<int>(20 * scale);
         SDL_FRect dstRect = { static_cast<float>(cx - drawSize / 2), static_cast<float>(cy - drawSize / 2), static_cast<float>(drawSize), static_cast<float>(drawSize) };
+        // 颜色调制：正常灰白，hover 纯白
+        SDL_SetTextureColorMod(texture, color[0], color[1], color[2]);
         SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
+        SDL_SetTextureColorMod(texture, 255, 255, 255); // 重置，避免影响后续渲染
         return;
     }
 

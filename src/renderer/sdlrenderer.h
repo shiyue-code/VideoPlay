@@ -192,7 +192,7 @@ private:
     void renderSmoothRoundRect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void renderSmoothCircle(int cx, int cy, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
     void drawButton(int x, int y, int w, int h, const std::string& iconType, bool hovered, bool pressed);
-    void drawIcon(int cx, int cy, const std::string& type, bool hovered);
+    void drawIcon(int cx, int cy, const std::string& type, bool hovered, float scale = 1.0f);
 
     // SDL 对象
     SDL_Window* m_window = nullptr;
