@@ -1673,8 +1673,8 @@ void SDLRenderer::drawButton(int x, int y, int w, int h, const std::string& icon
         renderSmoothCircle(cx, cy, w / 2 - 2, COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
     }
     
-    // 绘制图标（pressed 时缩小 15%，增加按压感）
-    float scale = pressed ? 0.85f : 1.0f;
+    // 绘制图标（pressed 时缩小 8%，增加轻微按压感）
+    float scale = pressed ? 0.92f : 1.0f;
     drawIcon(cx, cy, iconType, hovered, scale);
 }
 
@@ -1811,7 +1811,7 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
 
     SDL_Texture* texture = getIconTexture(type);
     if (texture) {
-        int drawSize = static_cast<int>(20 * scale);
+        int drawSize = static_cast<int>(24 * scale);
         SDL_FRect dstRect = { static_cast<float>(cx - drawSize / 2), static_cast<float>(cy - drawSize / 2), static_cast<float>(drawSize), static_cast<float>(drawSize) };
         // 颜色调制：正常灰白，hover 纯白
         SDL_SetTextureColorMod(texture, color[0], color[1], color[2]);
