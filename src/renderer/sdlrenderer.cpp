@@ -1729,7 +1729,7 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
 
     if (type == "play") {
         // 向右三角，以纹理中心对称
-        drawSoftTri({ mkVert(cx - 56, cy), mkVert(cx + 56, cy - 72), mkVert(cx + 56, cy + 72) }, 8);
+        drawSoftTri({ mkVert(cx + 56, cy), mkVert(cx - 56, cy - 72), mkVert(cx - 56, cy + 72) }, 8);
     } else if (type == "pause") {
         drawSoftRoundRect(cx - 56, cy - 72, 40, 144, 16);
         drawSoftRoundRect(cx + 16, cy - 72, 40, 144, 16);
