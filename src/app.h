@@ -29,6 +29,7 @@ private:
     // 文件操作
     void openFile(const std::string& path);
     void openFileDialog();
+    void openFolderDialog();
     void openSubtitleDialog();
     void loadSubtitle(const std::string& videoPath);
     void loadSubtitleFile(const std::string& path);

@@ -388,6 +388,61 @@ void VideoPlayerApp::openFileDialog() {
     });
 }
 
+void VideoPlayerApp::openFolderDialog() {
+    if (!m_renderer) return;
+
+    Logger::instance().info("Opening folder dialog...");
+
+    m_renderer->openFolderDialog([this](const std::string& folderPath) {
+        if (folderPath.empty()) {
+            Logger::instance().info("Folder dialog cancelled");
+            return;
+        }
+
+        Logger::instance().info("Selected folder: " + folderPath);
+
+        std::vector<std::string> mediaFiles;
+        const std::vector<std::string> extensions = {
+            ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
+            ".mp3", ".aac", ".wav", ".flac", ".ogg"
+        };
+
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
+                        mediaFiles.push_back(entry.path().string());
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            Logger::instance().error("Failed to read folder: " + std::string(e.what()));
+            return;
+        }
+
+        if (mediaFiles.empty()) {
+            Logger::instance().info("No media files found in folder");
+            return;
+        }
+
+        std::sort(mediaFiles.begin(), mediaFiles.end());
+
+        // 添加到播放列表
+        for (const auto& file : mediaFiles) {
+            addToPlaylist(file);
+        }
+
+        Logger::instance().info("Added " + std::to_string(mediaFiles.size()) + " files from folder");
+
+        // 如果当前没有播放文件，自动播放第一个
+        if (m_currentFile.empty()) {
+            playFromPlaylist(0);
+        }
+    });
+}
+
 void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
     std::filesystem::path video(videoPath);
     std::filesystem::path srtPath = video.parent_path() / (video.stem().string() + ".srt");
@@ -597,7 +652,7 @@ void VideoPlayerApp::handleMenu(int menuId) {
             openFileDialog();
             break;
         case 2: // 打开文件夹
-            // TODO: 实现文件夹打开
+            openFolderDialog();
             break;
         case 4: // 导入字幕
             openSubtitleDialog();
