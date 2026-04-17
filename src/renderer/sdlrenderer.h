@@ -235,7 +235,7 @@ private:
     // 控件位置和尺寸
     int m_menuBarHeight = 24;
     int m_controlHeight = 70;
-    int m_buttonSize = 32;
+    int m_buttonSize = 36;
     int m_progressBarHeight = 10;
     int m_volumeWidth = 80;
     int m_margin = 10;
