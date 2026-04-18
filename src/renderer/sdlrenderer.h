@@ -161,7 +161,7 @@ private:
     void renderTimeDisplay(int64_t position, int64_t duration, int controlY);
     void renderFilename(const std::string& filename);
     void renderSubtitle(const std::string& subtitle);
-    void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff);
+    void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);

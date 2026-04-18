@@ -782,23 +782,21 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         if (m_showPlaylistPanel && !playlist.empty()) {
             renderPlaylistPanel(playlist, currentPlaylistIndex);
         }
+        // 渲染文件名（左上角，随控制栏自动隐藏）
+        if (!filename.empty()) {
+            renderFilename(filename);
+        }
+        // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏）
+        renderSyncInfo(audioPts, videoPts, avDiff, m_showPlaylistPanel && !playlist.empty());
     } else {
         // 菜单栏随控制栏一起隐藏，确保不遮挡视频
         closeAllMenus(false);
     }
 
-    // 渲染文件名
-    if (!filename.empty()) {
-        renderFilename(filename);
-    }
-
-    // 渲染字幕
+    // 渲染字幕（始终显示，不受控制栏影响）
     if (!subtitle.empty()) {
         renderSubtitle(subtitle);
     }
-
-    // 渲染音视频同步调试信息
-    renderSyncInfo(audioPts, videoPts, avDiff);
 
     // 预缓冲加载动画已集成到进度条中
     
@@ -1097,9 +1095,10 @@ void SDLRenderer::renderFilename(const std::string& filename) {
         name = filename.substr(pos + 1);
     }
     
-    // 计算文字宽度
+    // 计算文字宽度，限制为不与右侧播放列表面板重叠（面板左边缘 = m_windowWidth - 284）
     int textW = getTextWidth(name);
-    int maxWidth = m_windowWidth - 40;
+    int maxWidth = m_windowWidth - 340; // 留 20px 安全间隙
+    if (maxWidth < 120) maxWidth = 120;
     
     // 截断过长的文件名
     if (textW > maxWidth) {
@@ -1175,8 +1174,10 @@ void SDLRenderer::renderSubtitle(const std::string& subtitle) {
 void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex) {
     int panelW = 260;
     int panelX = m_windowWidth - 24 - panelW;
-    int panelY = m_menuBarHeight + 20;
-    int panelBottomMargin = m_windowHeight - m_controlHeight - 34;
+    int panelY = m_menuBarHeight + 10; // 上边距 10px，与下方控制栏间距一致
+    // 控制栏底部有 24px 边距，其顶部在 m_windowHeight - m_controlHeight - 24
+    // 播放列表面板底部需位于控制栏上方，留 10px 安全间隙
+    int panelBottomMargin = m_windowHeight - m_controlHeight - 24 - 10;
     int panelH = panelBottomMargin - panelY;
     if (panelH < 60) return;
     int radius = 20;
@@ -1278,22 +1279,47 @@ void SDLRenderer::renderLoadingAnimation() {
     drawText(text, cx - textW / 2, cy + radius + 20, 200, 200, 200, 14);
 }
 
-void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff) {
-    // 仅在播放状态且有有效 PTS 时显示（或者总是显示调试信息）
-    std::ostringstream oss;
-    oss << "A:" << VideoPlay::formatTime(audioPts)
-        << " V:" << VideoPlay::formatTime(videoPts)
-        << " Diff:" << std::fixed << std::setprecision(0) << (avDiff * 1000.0) << "ms";
-    std::string syncText = oss.str();
+void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible) {
+    // 分三列渲染，每列独立圆角背景，列间留白自然分隔，不使用线条
+    // A/V/Diff 固定在右上角，播放列表面板在 y=44 开始，自然垂直错开
+    const int COL_A_WIDTH = 65;
+    const int COL_V_WIDTH = 65;
+    const int COL_DIFF_WIDTH = 80;
+    const int COL_GAP = 10;
+    const int PADDING = 8;
+    const int RIGHT_MARGIN = 15;
+    const int fontSize = 11;
     
-    int textW = getTextWidth(syncText, 11);
-    int x = m_windowWidth - textW - 15;
-    int y = m_menuBarHeight + 5;
+    std::string aTime = VideoPlay::formatTime(audioPts);
+    std::string vTime = VideoPlay::formatTime(videoPts);
+    std::ostringstream diffOss;
+    diffOss << std::fixed << std::setprecision(0) << (avDiff * 1000.0);
+    std::string diffVal = diffOss.str() + "ms";
     
-    // 半透明背景
-    fillRect(x - 10, y, textW + 20, 22, 0, 0, 0, 150);
+    int aTimeW = getTextWidth(aTime, fontSize);
+    int vTimeW = getTextWidth(vTime, fontSize);
+    int diffValW = getTextWidth(diffVal, fontSize);
+    int aLabelW = getTextWidth("A:", fontSize);
+    int vLabelW = getTextWidth("V:", fontSize);
+    int diffLabelW = getTextWidth("Diff:", fontSize);
     
-    // 根据 diff 大小改变颜色：正常为绿色，偏差大为黄色/红色
+    int totalWidth = COL_A_WIDTH + COL_GAP + COL_V_WIDTH + COL_GAP + COL_DIFF_WIDTH + PADDING * 2;
+    
+    // 播放列表面板显示时水平避让，否则固定在标准右上角
+    int panelRight;
+    if (playlistVisible) {
+        int playlistPanelW = 260;
+        int playlistPanelX = m_windowWidth - 24 - playlistPanelW;
+        panelRight = playlistPanelX - 20; // 面板左边缘左侧 20px，避免视觉拥挤
+    } else {
+        panelRight = m_windowWidth - RIGHT_MARGIN;
+    }
+    
+    int x = panelRight - totalWidth;
+    // 固定在菜单栏下方，与播放列表面板顶部对齐，上边距 10px
+    int y = m_menuBarHeight + 10;
+    
+    // 根据 diff 大小改变颜色
     uint8_t r = 0, g = 255, b = 0;
     double absDiff = std::abs(avDiff);
     if (absDiff > 0.080) {
@@ -1302,7 +1328,30 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
         r = 255; g = 255; b = 0;
     }
     
-    drawText(syncText, x, y + 3, r, g, b, 11);
+    // 每列左边缘固定（从右向左推导，确保整体右对齐）
+    int diffColX = panelRight - PADDING - COL_DIFF_WIDTH;
+    int vColX = diffColX - COL_GAP - COL_V_WIDTH;
+    int aColX = vColX - COL_GAP - COL_A_WIDTH;
+    
+    // 每列独立圆角高亮背景，自然分隔三列
+    fillRoundRect(aColX, y, COL_A_WIDTH, 22, 4, 40, 40, 40, 160);
+    fillRoundRect(vColX, y, COL_V_WIDTH, 22, 4, 40, 40, 40, 160);
+    fillRoundRect(diffColX, y, COL_DIFF_WIDTH, 22, 4, 40, 40, 40, 160);
+    
+    // A 列：标签左对齐，时间右对齐（与标签保持最小间距）
+    drawText("A:", aColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(aTime, std::max(aColX + aLabelW + 8, aColX + COL_A_WIDTH - aTimeW - 4), y + 3,
+             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    
+    // V 列：标签左对齐，时间右对齐
+    drawText("V:", vColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(vTime, std::max(vColX + vLabelW + 8, vColX + COL_V_WIDTH - vTimeW - 4), y + 3,
+             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    
+    // Diff 列：标签左对齐，数值右对齐
+    drawText("Diff:", diffColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(diffVal, std::max(diffColX + diffLabelW + 8, diffColX + COL_DIFF_WIDTH - diffValW - 4), y + 3,
+             r, g, b, fontSize);
 }
 
 bool SDLRenderer::loadFont(const std::string& fontPath, int fontSize) {
