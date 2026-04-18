@@ -679,7 +679,7 @@ void VideoPlayerApp::handleMenu(int menuId) {
             setSpeed(m_speed * 0.8);
             break;
         case 16: // 全屏
-            // 由渲染器处理
+            if (m_renderer) m_renderer->toggleFullscreen();
             break;
         case 20: // 快捷键
             showHelp();
