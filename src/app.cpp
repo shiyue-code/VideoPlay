@@ -681,6 +681,9 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 16: // 全屏
             if (m_renderer) m_renderer->toggleFullscreen();
             break;
+        case 17: // 无边框模式
+            if (m_renderer) m_renderer->toggleBorderless();
+            break;
         case 20: // 快捷键
             showHelp();
             break;

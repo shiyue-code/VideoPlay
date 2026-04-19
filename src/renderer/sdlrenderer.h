@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/common.h"
+#include "renderer/windowframe.h"
 
 #include <string>
 #include <functional>
@@ -14,6 +15,7 @@ struct SDL_Renderer;
 struct SDL_Texture;
 union SDL_Event;
 typedef struct TTF_Font TTF_Font;
+typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
 
@@ -48,7 +50,23 @@ enum class ControlType {
     PlaylistButton,
     PlaylistItem,
     MenuBar,
-    MenuItem
+    MenuItem,
+    SysMinButton,
+    SysMaxButton,
+    SysCloseButton
+};
+
+// 无边框窗口 resize 模式
+enum class ResizeMode {
+    None,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight
 };
 
 // 菜单项
@@ -86,6 +104,9 @@ public:
     void setWindowSize(int width, int height);
     void toggleFullscreen();
     bool isFullscreen() const { return m_fullscreen; }
+    void toggleBorderless();
+    bool isBorderless() const;
+    bool isBorderlessEnabled() const { return m_borderless; }
 
     // 视频渲染
     void renderFrame(const VideoFrame& frame);
@@ -142,12 +163,14 @@ private:
 
     // 控件检测
     ControlType getControlAt(int x, int y, int* outValue = nullptr);
-    
+    ResizeMode getResizeModeAt(int x, int y) const;
+    void updateCursorForResize(ResizeMode mode);
+
     // 菜单处理
     void initMenus();
     void renderMenuBar();
     void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
-    void handleMenuClick(int x, int y);
+    bool handleMenuClick(int x, int y);
     void closeAllMenus(bool animate = true);
     bool isMenuOpen() const;
 
@@ -220,6 +243,7 @@ private:
     // 状态
     bool m_initialized = false;
     bool m_fullscreen = false;
+    bool m_borderless = false;
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_draggingProgress = false;
@@ -233,7 +257,7 @@ private:
     int m_videoHeight = 0;
 
     // 控件位置和尺寸
-    int m_menuBarHeight = 24;
+    int m_menuBarHeight = 32;
     int m_controlHeight = 70;
     int m_buttonSize = 36;
     int m_progressBarHeight = 10;
@@ -274,6 +298,31 @@ private:
     ControlType m_pressedControl = ControlType::None;
     int m_pressedControlValue = 0;
     uint64_t m_lastMouseMove = 0;
+
+    // 窗口框架管理器（无边框模式）
+    std::unique_ptr<WindowFrame> m_windowFrame;
+
+    // 无边框 resize 状态
+    bool m_resizingWindow = false;
+    ResizeMode m_resizeMode = ResizeMode::None;
+    int m_resizeStartMouseX = 0;
+    int m_resizeStartMouseY = 0;
+    int m_resizeStartWindowX = 0;
+    int m_resizeStartWindowY = 0;
+    int m_resizeStartWindowW = 0;
+    int m_resizeStartWindowH = 0;
+
+    // 光标
+    SDL_Cursor* m_cursorDefault = nullptr;
+    SDL_Cursor* m_cursorSizeWE = nullptr;
+    SDL_Cursor* m_cursorSizeNS = nullptr;
+    SDL_Cursor* m_cursorSizeNWSE = nullptr;
+    SDL_Cursor* m_cursorSizeNESW = nullptr;
+
+    // 双击检测
+    uint64_t m_lastClickTime = 0;
+    int m_lastClickX = 0;
+    int m_lastClickY = 0;
     std::string m_tooltip;
     uint64_t m_tooltipTime = 0;
 
