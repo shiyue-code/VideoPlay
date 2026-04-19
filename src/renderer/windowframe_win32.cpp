@@ -134,8 +134,15 @@ namespace {
                 }
 
                 // 边框 resize 区域（对应 ShadowWindow 外部的 8px 边框）
+                // 但右上角区域（系统按钮下方到右边）不返回 resize，完全交给 ShadowWindow 处理
                 if (!IsZoomed(hwnd)) {
                     const int border = 8;
+                    // 右上角区域：x 接近右边且 y 在菜单栏下方到上边框之间
+                    // 这个区域完全由 ShadowWindow 处理，主窗口不返回任何 hit-test
+                    if (pt.x >= w - border && pt.y >= menuBarHeight && pt.y < h - border) {
+                        // 右侧中间区域（避开右上角和右下角）
+                        return HTRIGHT;
+                    }
                     if (pt.x < border) {
                         if (pt.y < border)       return HTTOPLEFT;
                         else if (pt.y >= h - border) return HTBOTTOMLEFT;
