@@ -179,11 +179,6 @@ namespace {
                     SendMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(pt.x, pt.y));
                     return 0;
                 }
-                // 拦截所有 resize 边框的鼠标按下，防止系统默认行为
-                if (ht == HTLEFT || ht == HTRIGHT || ht == HTTOP || ht == HTBOTTOM ||
-                    ht == HTTOPLEFT || ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT) {
-                    return 0;
-                }
                 break;
             }
 
@@ -199,11 +194,6 @@ namespace {
                     POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
                     ScreenToClient(hwnd, &pt);
                     SendMessage(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
-                    return 0;
-                }
-                // 拦截所有 resize 边框的鼠标释放
-                if (ht == HTLEFT || ht == HTRIGHT || ht == HTTOP || ht == HTBOTTOM ||
-                    ht == HTTOPLEFT || ht == HTTOPRIGHT || ht == HTBOTTOMLEFT || ht == HTBOTTOMRIGHT) {
                     return 0;
                 }
                 break;
