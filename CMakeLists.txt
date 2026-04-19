@@ -100,7 +100,14 @@ set(SOURCES
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
     src/renderer/sdlrenderer.cpp
+    src/renderer/windowframe.cpp
 )
+
+if(WIN32)
+    list(APPEND SOURCES src/renderer/windowframe_win32.cpp)
+else()
+    list(APPEND SOURCES src/renderer/windowframe_linux.cpp)
+endif()
 
 set(HEADERS
     src/app.h
@@ -111,6 +118,7 @@ set(HEADERS
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/renderer/sdlrenderer.h
+    src/renderer/windowframe.h
 )
 
 # 创建可执行文件

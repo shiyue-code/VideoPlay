@@ -1,6 +1,8 @@
 #include "renderer/sdlrenderer.h"
 #include "utils/logger.h"
 
+#include "renderer/windowframe.h"
+
 #include <SDL3/SDL.h>
 #ifdef HAS_SDL_TTF
 #include <SDL3_ttf/SDL_ttf.h>
@@ -174,6 +176,13 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 加载 PNG 图标
     loadIconTextures();
 
+    // 预创建系统光标（无边框 resize 用）
+    m_cursorDefault = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    m_cursorSizeWE  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
+    m_cursorSizeNS  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
+    m_cursorSizeNWSE = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
+    m_cursorSizeNESW = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NESW_RESIZE);
+
     m_initialized = true;
     Logger::instance().info("SDLRenderer initialized: " + std::to_string(width) + "x" + std::to_string(height));
     
@@ -209,6 +218,22 @@ void SDLRenderer::shutdown() {
         m_initialized = false;
     }
 
+    SDL_DestroyCursor(m_cursorDefault);
+    SDL_DestroyCursor(m_cursorSizeWE);
+    SDL_DestroyCursor(m_cursorSizeNS);
+    SDL_DestroyCursor(m_cursorSizeNWSE);
+    SDL_DestroyCursor(m_cursorSizeNESW);
+    m_cursorDefault = nullptr;
+    m_cursorSizeWE = nullptr;
+    m_cursorSizeNS = nullptr;
+    m_cursorSizeNWSE = nullptr;
+    m_cursorSizeNESW = nullptr;
+
+    if (m_windowFrame) {
+        m_windowFrame->disable();
+        m_windowFrame.reset();
+    }
+
     Logger::instance().info("SDLRenderer shutdown");
 }
 
@@ -238,7 +263,9 @@ void SDLRenderer::initMenus() {
         {14, "增加速度", "]", false, true},
         {15, "降低速度", "[", false, true},
         {0, "", "", true},
-        {16, "全屏", "F", false, true}
+        {16, "全屏", "F", false, true},
+        {0, "", "", true},
+        {17, "无边框模式", "B", false, true}
     };
     m_menus.push_back(playMenu);
 
@@ -275,6 +302,27 @@ void SDLRenderer::toggleFullscreen() {
     if (m_fullscreenCallback) {
         m_fullscreenCallback();
     }
+}
+
+void SDLRenderer::toggleBorderless() {
+    if (!m_window) return;
+
+    m_borderless = !m_borderless;
+    Logger::instance().info("toggleBorderless called, new state: " + std::string(m_borderless ? "true" : "false"));
+
+    if (!m_windowFrame) {
+        m_windowFrame = WindowFrame::create();
+    }
+
+    if (m_borderless) {
+        m_windowFrame->enable(m_window);
+    } else {
+        m_windowFrame->disable();
+    }
+}
+
+bool SDLRenderer::isBorderless() const {
+    return m_borderless;
 }
 
 void SDLRenderer::ensureTexture(int width, int height) {
@@ -364,7 +412,14 @@ void SDLRenderer::present() {
 bool SDLRenderer::processEvents() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        handleEvent(event);
+        // 先让 WindowFrame 处理平台特定事件
+        bool handled = false;
+        if (m_borderless && m_windowFrame) {
+            handled = m_windowFrame->processEvent(event);
+        }
+        if (!handled) {
+            handleEvent(event);
+        }
     }
 
     // 处理异步对话框结果（确保在主线程回调）
@@ -549,14 +604,175 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
             }
         }
     }
+    
+    // 无边框模式：处理 resize 区域光标和 resize 拖动
+    if (m_borderless && m_windowFrame) {
+        FrameHitTest hit = m_windowFrame->hitTest(x, y);
+        // 如果不在控件上，更新光标为 resize 光标
+        if (m_hoveredControl == ControlType::None) {
+            switch (hit) {
+                case FrameHitTest::ResizeLeft:
+                case FrameHitTest::ResizeRight:
+                    SDL_SetCursor(m_cursorSizeWE);
+                    break;
+                case FrameHitTest::ResizeTop:
+                case FrameHitTest::ResizeBottom:
+                    SDL_SetCursor(m_cursorSizeNS);
+                    break;
+                case FrameHitTest::ResizeTopLeft:
+                case FrameHitTest::ResizeBottomRight:
+                    SDL_SetCursor(m_cursorSizeNWSE);
+                    break;
+                case FrameHitTest::ResizeTopRight:
+                case FrameHitTest::ResizeBottomLeft:
+                    SDL_SetCursor(m_cursorSizeNESW);
+                    break;
+                case FrameHitTest::Caption:
+                    SDL_SetCursor(m_cursorDefault);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // 处理 resize 拖动
+        if (m_resizingWindow && m_window) {
+            int dx = x - m_resizeStartMouseX;
+            int dy = y - m_resizeStartMouseY;
+            int newX = m_resizeStartWindowX;
+            int newY = m_resizeStartWindowY;
+            int newW = m_resizeStartWindowW;
+            int newH = m_resizeStartWindowH;
+
+            switch (m_resizeMode) {
+                case ResizeMode::Left:
+                    newX += dx;
+                    newW -= dx;
+                    break;
+                case ResizeMode::Right:
+                    newW += dx;
+                    break;
+                case ResizeMode::Top:
+                    newY += dy;
+                    newH -= dy;
+                    break;
+                case ResizeMode::Bottom:
+                    newH += dy;
+                    break;
+                case ResizeMode::TopLeft:
+                    newX += dx;
+                    newY += dy;
+                    newW -= dx;
+                    newH -= dy;
+                    break;
+                case ResizeMode::TopRight:
+                    newY += dy;
+                    newW += dx;
+                    newH -= dy;
+                    break;
+                case ResizeMode::BottomLeft:
+                    newX += dx;
+                    newW -= dx;
+                    newH += dy;
+                    break;
+                case ResizeMode::BottomRight:
+                    newW += dx;
+                    newH += dy;
+                    break;
+                default:
+                    break;
+            }
+
+            // 最小窗口尺寸限制
+            const int MIN_W = 400;
+            const int MIN_H = 300;
+            if (newW < MIN_W) {
+                if (m_resizeMode == ResizeMode::Left ||
+                    m_resizeMode == ResizeMode::TopLeft ||
+                    m_resizeMode == ResizeMode::BottomLeft) {
+                    newX = m_resizeStartWindowX + m_resizeStartWindowW - MIN_W;
+                }
+                newW = MIN_W;
+            }
+            if (newH < MIN_H) {
+                if (m_resizeMode == ResizeMode::Top ||
+                    m_resizeMode == ResizeMode::TopLeft ||
+                    m_resizeMode == ResizeMode::TopRight) {
+                    newY = m_resizeStartWindowY + m_resizeStartWindowH - MIN_H;
+                }
+                newH = MIN_H;
+            }
+
+            SDL_SetWindowPosition(m_window, newX, newY);
+            SDL_SetWindowSize(m_window, newW, newH);
+        }
+    }
 }
 
 void SDLRenderer::handleMouseButtonDown(int x, int y) {
+    // 无边框模式下优先检测 resize 区域（避免被控件检测拦截）
+    if (m_borderless && m_windowFrame && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {
+        ResizeMode mode = getResizeModeAt(x, y);
+        if (mode != ResizeMode::None) {
+            m_resizingWindow = true;
+            m_resizeMode = mode;
+            m_resizeStartMouseX = x;
+            m_resizeStartMouseY = y;
+            SDL_GetWindowPosition(m_window, &m_resizeStartWindowX, &m_resizeStartWindowY);
+            SDL_GetWindowSize(m_window, &m_resizeStartWindowW, &m_resizeStartWindowH);
+            return;
+        }
+    }
+
     m_pressedControl = getControlAt(x, y, &m_pressedControlValue);
+
+    // 处理系统按钮（无边框模式下位于菜单栏区域）
+    if (m_pressedControl == ControlType::SysMinButton) {
+        SDL_MinimizeWindow(m_window);
+        return;
+    }
+    if (m_pressedControl == ControlType::SysMaxButton) {
+        if (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) {
+            SDL_RestoreWindow(m_window);
+        } else {
+            SDL_MaximizeWindow(m_window);
+        }
+        return;
+    }
+    if (m_pressedControl == ControlType::SysCloseButton) {
+        SDL_Event quitEvent;
+        quitEvent.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&quitEvent);
+        return;
+    }
     
-    // 处理菜单点击
+    // 处理菜单栏区域的点击
     if (y < m_menuBarHeight) {
-        handleMenuClick(x, y);
+        bool clickedMenu = handleMenuClick(x, y);
+        
+        // 无边框模式下点击菜单栏空白处：双击最大化/还原，单击拖动
+        if (m_borderless && !clickedMenu && m_windowFrame) {
+            uint64_t now = SDL_GetTicks();
+            if (now - m_lastClickTime < 300 &&
+                std::abs(x - m_lastClickX) < 5 && std::abs(y - m_lastClickY) < 5) {
+                // 双击：最大化/还原
+                if (m_windowFrame->isMaximized()) {
+                    m_windowFrame->restoreWindow();
+                } else {
+                    m_windowFrame->maximizeWindow();
+                }
+                m_lastClickTime = 0;
+            } else {
+                // 单击：记录时间并开始拖动
+                m_lastClickTime = now;
+                m_lastClickX = x;
+                m_lastClickY = y;
+                FrameHitTest hit = m_windowFrame->hitTest(x, y);
+                if (hit == FrameHitTest::Caption) {
+                    m_windowFrame->startDrag();
+                }
+            }
+        }
         return;
     }
     
@@ -654,6 +870,8 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
     }
     m_draggingProgress = false;
     m_draggingVolume = false;
+    m_resizingWindow = false;
+    m_resizeMode = ResizeMode::None;
     m_pressedControl = ControlType::None;
 }
 
@@ -668,7 +886,56 @@ ControlType SDLRenderer::getControlAt(int x, int y, int* outValue) {
     return ControlType::None;
 }
 
-void SDLRenderer::handleMenuClick(int x, int y) {
+ResizeMode SDLRenderer::getResizeModeAt(int x, int y) const {
+    if (!m_borderless || !m_windowFrame) {
+        return ResizeMode::None;
+    }
+    if (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) {
+        return ResizeMode::None;
+    }
+
+    FrameHitTest hit = m_windowFrame->hitTest(x, y);
+    switch (hit) {
+        case FrameHitTest::ResizeLeft:        return ResizeMode::Left;
+        case FrameHitTest::ResizeRight:       return ResizeMode::Right;
+        case FrameHitTest::ResizeTop:         return ResizeMode::Top;
+        case FrameHitTest::ResizeBottom:      return ResizeMode::Bottom;
+        case FrameHitTest::ResizeTopLeft:     return ResizeMode::TopLeft;
+        case FrameHitTest::ResizeTopRight:    return ResizeMode::TopRight;
+        case FrameHitTest::ResizeBottomLeft:  return ResizeMode::BottomLeft;
+        case FrameHitTest::ResizeBottomRight: return ResizeMode::BottomRight;
+        default:                              return ResizeMode::None;
+    }
+}
+
+void SDLRenderer::updateCursorForResize(ResizeMode mode) {
+    SDL_Cursor* target = m_cursorDefault;
+    switch (mode) {
+        case ResizeMode::Left:
+        case ResizeMode::Right:
+            target = m_cursorSizeWE;
+            break;
+        case ResizeMode::Top:
+        case ResizeMode::Bottom:
+            target = m_cursorSizeNS;
+            break;
+        case ResizeMode::TopLeft:
+        case ResizeMode::BottomRight:
+            target = m_cursorSizeNWSE;
+            break;
+        case ResizeMode::TopRight:
+        case ResizeMode::BottomLeft:
+            target = m_cursorSizeNESW;
+            break;
+        default:
+            break;
+    }
+    if (target) {
+        SDL_SetCursor(target);
+    }
+}
+
+bool SDLRenderer::handleMenuClick(int x, int y) {
     int menuX = 10;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         int textW = getTextWidth(m_menus[i].label);
@@ -684,11 +951,12 @@ void SDLRenderer::handleMenuClick(int x, int y) {
                 m_menuAnimStartTime = SDL_GetTicks();
                 m_menuAnimating = true;
             }
-            return;
+            return true;
         }
         menuX += menuWidth + 10;
     }
     closeAllMenus();
+    return false;
 }
 
 void SDLRenderer::closeAllMenus(bool animate) {
@@ -793,6 +1061,11 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         closeAllMenus(false);
     }
 
+    // 无边框模式下始终渲染菜单栏（不随控制栏隐藏）
+    if (!m_showControls && m_borderless) {
+        renderMenuBar();
+    }
+
     // 渲染字幕（始终显示，不受控制栏影响）
     if (!subtitle.empty()) {
         renderSubtitle(subtitle);
@@ -811,6 +1084,24 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
             }
             renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
         }
+    }
+
+    // 自绘 1px 边框，确保 Win10 和 Win11 显示效果完全一致
+    // （Win11 的 DWMWA_BORDER_COLOR 是独占特性，Win10 不支持，因此统一由 SDL 自绘）
+    // 圆角窗口下不绘制四边直边框，让 DWM 圆角自然呈现
+    if (m_borderless && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {
+        uint8_t br = COLOR_MENU_BG[0];
+        uint8_t bg = COLOR_MENU_BG[1];
+        uint8_t bb = COLOR_MENU_BG[2];
+        const int r = 8; // 圆角半径
+        // 上边框（避开圆角区域）
+        fillRect(r, 0, m_windowWidth - r * 2, 1, br, bg, bb, 255);
+        // 下边框
+        fillRect(r, m_windowHeight - 1, m_windowWidth - r * 2, 1, br, bg, bb, 255);
+        // 左边框（避开圆角区域）
+        fillRect(0, r, 1, m_windowHeight - r * 2, br, bg, bb, 255);
+        // 右边框（避开圆角区域）
+        fillRect(m_windowWidth - 1, r, 1, m_windowHeight - r * 2, br, bg, bb, 255);
     }
 }
 
@@ -843,6 +1134,92 @@ void SDLRenderer::renderMenuBar() {
                  COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
         
         x += itemWidth + 10;
+    }
+
+    // 无边框模式下的系统按钮
+    if (m_borderless) {
+        int btnSize = 14;
+        int btnGap = 12;
+        int rightMargin = 14;
+        int btnY = (m_menuBarHeight - btnSize) / 2;
+        int startX = m_windowWidth - rightMargin - 3 * btnSize - 2 * btnGap;
+
+        // 最小化按钮
+        {
+            int bx = startX;
+            bool hovered = (m_hoveredControl == ControlType::SysMinButton);
+            bool pressed = (m_pressedControl == ControlType::SysMinButton);
+            const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
+            if (pressed) {
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                         COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
+            } else if (hovered) {
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                         COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
+            }
+            // 横线
+            int lineW = btnSize - 4;
+            int lineH = 2;
+            int lineX = bx + (btnSize - lineW) / 2;
+            int lineY = btnY + (btnSize - lineH) / 2;
+            fillRect(lineX, lineY, lineW, lineH, c[0], c[1], c[2], c[3]);
+            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysMinButton, 0});
+        }
+
+        // 最大化/还原按钮
+        {
+            int bx = startX + btnSize + btnGap;
+            bool hovered = (m_hoveredControl == ControlType::SysMaxButton);
+            bool pressed = (m_pressedControl == ControlType::SysMaxButton);
+            const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
+            if (pressed) {
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                         COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
+            } else if (hovered) {
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                         COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
+            }
+            bool isMaximized = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED);
+            if (isMaximized) {
+                // 还原：两个错位小方框
+                int s = btnSize - 6;
+                int ox = bx + 2;
+                int oy = btnY + 2;
+                drawRect(ox, oy + 2, s, s, c[0], c[1], c[2], c[3]);
+                drawRect(ox + 3, oy - 1, s, s, c[0], c[1], c[2], c[3]);
+            } else {
+                // 最大化：空心方框
+                int s = btnSize - 4;
+                int ox = bx + 2;
+                int oy = btnY + 2;
+                drawRect(ox, oy, s, s, c[0], c[1], c[2], c[3]);
+            }
+            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysMaxButton, 0});
+        }
+
+        // 关闭按钮
+        {
+            int bx = startX + 2 * (btnSize + btnGap);
+            bool hovered = (m_hoveredControl == ControlType::SysCloseButton);
+            bool pressed = (m_pressedControl == ControlType::SysCloseButton);
+            const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
+            if (pressed) {
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                         COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
+            } else if (hovered) {
+                // 关闭按钮 hover 用红色背景（现代风格）
+                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4, 232, 17, 35, 255);
+                c = COLOR_BUTTON_HOVER;
+            }
+            // X
+            SDL_SetRenderDrawColor(m_renderer, c[0], c[1], c[2], c[3]);
+            int pad = 3;
+            SDL_RenderLine(m_renderer, static_cast<float>(bx + pad), static_cast<float>(btnY + pad),
+                           static_cast<float>(bx + btnSize - 1 - pad), static_cast<float>(btnY + btnSize - 1 - pad));
+            SDL_RenderLine(m_renderer, static_cast<float>(bx + btnSize - 1 - pad), static_cast<float>(btnY + pad),
+                           static_cast<float>(bx + pad), static_cast<float>(btnY + btnSize - 1 - pad));
+            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysCloseButton, 0});
+        }
     }
 }
 
