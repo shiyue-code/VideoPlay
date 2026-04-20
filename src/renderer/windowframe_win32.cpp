@@ -106,7 +106,7 @@ namespace {
                 int w = rcClient.right;
                 int h = rcClient.bottom;
 
-                if (w <= 0 || h <= 0) break;
+                if (w <= 0 || h <= 0) return HTCLIENT;
 
                 const int menuBarHeight = 32;
                 const int btnSize = 14;
@@ -133,32 +133,9 @@ namespace {
                         return HTCAPTION;
                 }
 
-                // 边框 resize 区域（对应 ShadowWindow 外部的 8px 边框）
-                // 但右上角区域（系统按钮下方到右边）不返回 resize，完全交给 ShadowWindow 处理
-                if (!IsZoomed(hwnd)) {
-                    const int border = 8;
-                    // 右上角区域：x 接近右边且 y 在菜单栏下方到上边框之间
-                    // 这个区域完全由 ShadowWindow 处理，主窗口不返回任何 hit-test
-                    if (pt.x >= w - border && pt.y >= menuBarHeight && pt.y < h - border) {
-                        // 右侧中间区域（避开右上角和右下角）
-                        return HTRIGHT;
-                    }
-                    if (pt.x < border) {
-                        if (pt.y < border)       return HTTOPLEFT;
-                        else if (pt.y >= h - border) return HTBOTTOMLEFT;
-                        else                     return HTLEFT;
-                    } else if (pt.x >= w - border) {
-                        if (pt.y < border)       return HTTOPRIGHT;
-                        else if (pt.y >= h - border) return HTBOTTOMRIGHT;
-                        else                     return HTRIGHT;
-                    } else if (pt.y < border) {
-                        return HTTOP;
-                    } else if (pt.y >= h - border) {
-                        return HTBOTTOM;
-                    }
-                }
-
-                break;
+                // 主窗口不返回任何 resize hit-test，完全交给 ShadowWindow 处理。
+                // 返回 HTCLIENT 可防止 Windows 因 WS_THICKFRAME 而绘制原生 resize 边框。
+                return HTCLIENT;
             }
 
             case WM_NCMOUSEMOVE: {
@@ -329,9 +306,18 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
                 auto contentIt = g_shadowToContent.find(hwnd);
                 if (contentIt != g_shadowToContent.end()) {
                     HWND contentHwnd = contentIt->second;
+                    int newW = newRight - newLeft;
+                    int newH = newBottom - newTop;
                     SetWindowPos(contentHwnd, nullptr,
                         newLeft, newTop,
-                        newRight - newLeft, newBottom - newTop,
+                        newW, newH,
+                        SWP_NOZORDER | SWP_NOACTIVATE);
+                    // 同步 ShadowWindow 自身位置，确保边框始终对齐主窗口边缘
+                    SetWindowPos(hwnd, nullptr,
+                        newLeft - WindowFrameWin32::kShadowBorder,
+                        newTop - WindowFrameWin32::kShadowBorder,
+                        newW + WindowFrameWin32::kShadowBorder * 2,
+                        newH + WindowFrameWin32::kShadowBorder * 2,
                         SWP_NOZORDER | SWP_NOACTIVATE);
                 }
                 return 0;
@@ -347,6 +333,20 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
                 g_shadowResizingActive = false;
                 ReleaseCapture();
                 return 0;
+            }
+            break;
+        }
+
+        case WM_SIZE: {
+            int w = LOWORD(lParam);
+            int h = HIWORD(lParam);
+            if (w > WindowFrameWin32::kShadowBorder * 2 && h > WindowFrameWin32::kShadowBorder * 2) {
+                HRGN hRgn = CreateRectRgn(0, 0, w, h);
+                HRGN hInner = CreateRectRgn(WindowFrameWin32::kShadowBorder, WindowFrameWin32::kShadowBorder,
+                                            w - WindowFrameWin32::kShadowBorder, h - WindowFrameWin32::kShadowBorder);
+                CombineRgn(hRgn, hRgn, hInner, RGN_DIFF);
+                SetWindowRgn(hwnd, hRgn, FALSE);
+                DeleteObject(hInner);
             }
             break;
         }
@@ -624,7 +624,7 @@ void WindowFrameWin32::createShadowWindow() {
         wc.cbSize = sizeof(WNDCLASSEXW);
         wc.lpfnWndProc = shadowWndProc;
         wc.hInstance = hInstance;
-        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        wc.hbrBackground = (HBRUSH)GetStockObject(HOLLOW_BRUSH);
         wc.lpszClassName = L"VideoPlayShadowWindow";
         RegisterClassExW(&wc);
         classRegistered = true;
@@ -634,7 +634,7 @@ void WindowFrameWin32::createShadowWindow() {
     GetWindowRect(m_hwnd, &rc);
 
     m_shadowHwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         L"VideoPlayShadowWindow",
         nullptr,
         WS_POPUP,
@@ -646,8 +646,7 @@ void WindowFrameWin32::createShadowWindow() {
     );
 
     if (m_shadowHwnd) {
-        // ShadowWindow 全透明，仅用于接收边框 resize 事件
-        SetLayeredWindowAttributes(m_shadowHwnd, 0, 1, LWA_ALPHA);
+        // ShadowWindow 不绘制内容，仅用于接收边框 resize 事件
         g_shadowToContent[m_shadowHwnd] = m_hwnd;
 
         // Z-Order 设置：ShadowWindow 必须在主窗口上方
@@ -656,6 +655,18 @@ void WindowFrameWin32::createShadowWindow() {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         SetWindowPos(m_hwnd, m_shadowHwnd, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+        // 设置窗口区域为仅保留 8px 边框，中间完全挖空
+        // 这样 DWM 命中测试只会在边框区域进行，避免 WS_EX_LAYERED + alpha=1
+        // 在非激活状态下被 DWM 跳过命中测试的问题
+        int totalW = rc.right - rc.left + kShadowBorder * 2;
+        int totalH = rc.bottom - rc.top + kShadowBorder * 2;
+        HRGN hRgn = CreateRectRgn(0, 0, totalW, totalH);
+        HRGN hInner = CreateRectRgn(kShadowBorder, kShadowBorder,
+            totalW - kShadowBorder, totalH - kShadowBorder);
+        CombineRgn(hRgn, hRgn, hInner, RGN_DIFF);
+        SetWindowRgn(m_shadowHwnd, hRgn, FALSE);
+        DeleteObject(hInner);
 
         Logger::instance().info("ShadowWindow created: hwnd=" +
             std::to_string(reinterpret_cast<uintptr_t>(m_shadowHwnd)) +
