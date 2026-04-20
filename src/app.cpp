@@ -41,6 +41,9 @@ bool VideoPlayerApp::initialize() {
         return false;
     }
 
+    // 默认启用无边框模式
+    m_renderer->toggleBorderless();
+
     // 创建播放器
     m_player = std::make_unique<FFmpegPlayer>();
     
