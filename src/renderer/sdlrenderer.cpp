@@ -1061,11 +1061,6 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         closeAllMenus(false);
     }
 
-    // 无边框模式下始终渲染菜单栏（不随控制栏隐藏）
-    if (!m_showControls && m_borderless) {
-        renderMenuBar();
-    }
-
     // 渲染字幕（始终显示，不受控制栏影响）
     if (!subtitle.empty()) {
         renderSubtitle(subtitle);
