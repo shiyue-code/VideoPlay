@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <cstdint>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 namespace VideoPlay {
@@ -23,6 +25,12 @@ struct SubtitleStyle {
     bool hasOutline = true;
     std::string outlineColor = "#000000";
     int outlineWidth = 2;
+};
+
+struct SeriesProgress {
+    std::string seriesKey;      // 文件夹路径+系列名
+    int lastEpisodeIndex = 0;
+    std::unordered_map<std::string, int64_t> episodePositions; // 文件路径->位置
 };
 
 class Settings {
@@ -55,6 +63,11 @@ public:
     bool rememberPosition() const;
     void setLastPosition(const std::string& filePath, int64_t position);
     int64_t lastPosition(const std::string& filePath) const;
+
+    // 剧集进度记忆
+    void setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,
+                           const std::unordered_map<std::string, int64_t>& positions);
+    SeriesProgress seriesProgress(const std::string& seriesKey) const;
 
     // 保存和加载
     void save();

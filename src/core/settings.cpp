@@ -1,5 +1,6 @@
 #include "core/settings.h"
 #include "utils/logger.h"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -71,7 +72,8 @@ void Settings::load() {
                 {"outlineWidth", 2}
             }},
             {"rememberPosition", true},
-            {"positions", nlohmann::json::object()}
+            {"positions", nlohmann::json::object()},
+            {"seriesProgress", nlohmann::json::object()}
         };
         return;
     }
@@ -102,8 +104,10 @@ void Settings::save() {
 }
 
 void Settings::reset() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_config = nlohmann::json::object();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config = nlohmann::json::object();
+    }
     save();
 }
 
@@ -263,6 +267,41 @@ int64_t Settings::lastPosition(const std::string& filePath) const {
         return m_config["positions"][filePath].get<int64_t>();
     }
     return 0;
+}
+
+// 剧集进度记忆
+void Settings::setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,
+                                 const std::unordered_map<std::string, int64_t>& positions) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_config.contains("seriesProgress")) {
+        m_config["seriesProgress"] = nlohmann::json::object();
+    }
+    nlohmann::json j;
+    j["lastEpisodeIndex"] = lastEpisodeIndex;
+    nlohmann::json posJson = nlohmann::json::object();
+    for (const auto& pair : positions) {
+        posJson[pair.first] = pair.second;
+    }
+    j["episodePositions"] = posJson;
+    m_config["seriesProgress"][seriesKey] = j;
+}
+
+SeriesProgress Settings::seriesProgress(const std::string& seriesKey) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    SeriesProgress progress;
+    progress.seriesKey = seriesKey;
+    if (m_config.contains("seriesProgress") && m_config["seriesProgress"].contains(seriesKey)) {
+        const auto& j = m_config["seriesProgress"][seriesKey];
+        progress.lastEpisodeIndex = j.value("lastEpisodeIndex", 0);
+        if (j.contains("episodePositions")) {
+            for (const auto& [key, val] : j["episodePositions"].items()) {
+                if (val.is_number()) {
+                    progress.episodePositions[key] = val.get<int64_t>();
+                }
+            }
+        }
+    }
+    return progress;
 }
 
 } // namespace VideoPlay

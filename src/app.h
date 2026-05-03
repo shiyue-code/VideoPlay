@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/common.h"
+#include "core/episodedetector.h"
 #include "core/ffmpegplayer.h"
 #include "renderer/sdlrenderer.h"
 
@@ -8,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <atomic>
+#include <optional>
 
 namespace VideoPlay {
 
@@ -57,6 +59,15 @@ private:
     void playPrevious();
     void playFromPlaylist(size_t index);
 
+    // 剧集管理
+    void detectSeries(const std::string& path);
+    void playEpisode(size_t index);
+    void playNextEpisode();
+    void playPreviousEpisode();
+    void saveSeriesProgress();
+    void restoreSeriesPosition();
+    void autoAdvanceAfterStop();
+
     // 回调处理
     void onPositionChanged(int64_t position);
     void onDurationChanged(int64_t duration);
@@ -87,6 +98,13 @@ private:
     int m_volume = 100;
     bool m_isMuted = false;
     double m_speed = 1.0;
+
+    // 剧集
+    std::optional<SeriesGroup> m_currentSeries;
+
+    // 手动操作标志（防止 stop/playEpisode 触发自动连播）
+    std::atomic<bool> m_isManualOperation{false};
+    std::atomic<bool> m_pendingAutoAdvance{false};
 
     // 视频帧缓冲
     VideoFrame m_displayFrame;
