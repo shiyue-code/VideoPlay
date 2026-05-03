@@ -189,6 +189,11 @@ public:
     void toggleAlwaysOnTop();
     bool isAlwaysOnTop() const;
 
+    // 窗口最大化状态
+    bool isMaximized() const;
+    void maximizeWindow();
+    void restoreWindow();
+
     // 截图并保存到桌面
     void takeScreenshot();
 
