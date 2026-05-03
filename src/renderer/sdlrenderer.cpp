@@ -605,6 +605,15 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_H:
                         if (m_subtitleSyncCallback) m_subtitleSyncCallback(500);  // 延后 0.5s
                         break;
+                    case SDLK_LEFTBRACKET:
+                        if (m_abLoopCallback) m_abLoopCallback('a');
+                        break;
+                    case SDLK_RIGHTBRACKET:
+                        if (m_abLoopCallback) m_abLoopCallback('b');
+                        break;
+                    case SDLK_BACKSLASH:
+                        if (m_abLoopCallback) m_abLoopCallback('c');
+                        break;
                 }
             }
             break;
@@ -3128,6 +3137,10 @@ void SDLRenderer::setLoopModeCallback(LoopModeCallback callback) {
 
 void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
     m_subtitleSyncCallback = callback;
+}
+
+void SDLRenderer::setABLoopCallback(ABLoopCallback callback) {
+    m_abLoopCallback = callback;
 }
 
 void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
