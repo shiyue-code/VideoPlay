@@ -211,9 +211,16 @@ namespace {
                 break;
 
             case WM_NCACTIVATE: {
-                // 激活/失活时强制刷新非客户区，防止残留原生标题栏
-                RedrawWindow(hwnd, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+                // 不主动请求框架重绘，仅标记客户区失效
+                // 让 DefSubclassProc 正常处理，保留 resize 等默认行为
+                InvalidateRect(hwnd, nullptr, FALSE);
                 break;
+            }
+
+            case WM_NCPAINT: {
+                // 阻止系统绘制任何非客户区内容（标题栏、边框线等）
+                // 由于 WM_NCCALCSIZE 已将非客户区削减为 0，此处直接拦截
+                return 0;
             }
         }
 
@@ -572,6 +579,10 @@ void WindowFrameWin32::applyStyle() {
     newStyle |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU;
     SetWindowLong(m_hwnd, GWL_STYLE, newStyle);
 
+    // 禁用 DWM 非客户区渲染，彻底阻止激活切换等场景下的原生边框/标题栏闪现
+    DWMNCRENDERINGPOLICY ncrp = DWMNCRP_DISABLED;
+    DwmSetWindowAttribute(m_hwnd, DWMWA_NCRENDERING_POLICY, &ncrp, sizeof(ncrp));
+
     // 设置窗口圆角 (Win11 DWM)
     DWM_WINDOW_CORNER_PREFERENCE cornerPref = DWMWCP_ROUND;
     DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
@@ -580,6 +591,10 @@ void WindowFrameWin32::applyStyle() {
 void WindowFrameWin32::restoreStyle() {
     if (!m_hwnd) return;
     SetWindowLong(m_hwnd, GWL_STYLE, m_originalStyle);
+
+    // 恢复 DWM 非客户区渲染
+    DWMNCRENDERINGPOLICY ncrp = DWMNCRP_ENABLED;
+    DwmSetWindowAttribute(m_hwnd, DWMWA_NCRENDERING_POLICY, &ncrp, sizeof(ncrp));
 
     // 恢复窗口圆角为默认
     DWM_WINDOW_CORNER_PREFERENCE cornerPrefRestore = DWMWCP_DEFAULT;
