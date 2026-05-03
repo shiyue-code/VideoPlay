@@ -578,11 +578,24 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             }
             break;
 
-        case SDL_EVENT_MOUSE_WHEEL:
-            if (m_volumeCallback) {
+        case SDL_EVENT_MOUSE_WHEEL: {
+            int mx = static_cast<int>(event.wheel.mouse_x);
+            int my = static_cast<int>(event.wheel.mouse_y);
+            bool overPlaylist = m_showPlaylistPanel && mx >= m_windowWidth - 284 && mx <= m_windowWidth - 24
+                                && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
+            bool overEpisode = m_showEpisodePanel && mx >= 24 && mx <= 284
+                               && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
+            if (overPlaylist) {
+                m_playlistScrollOffset -= static_cast<int>(event.wheel.y);
+                if (m_playlistScrollOffset < 0) m_playlistScrollOffset = 0;
+            } else if (overEpisode) {
+                m_episodeScrollOffset -= static_cast<int>(event.wheel.y);
+                if (m_episodeScrollOffset < 0) m_episodeScrollOffset = 0;
+            } else if (m_volumeCallback) {
                 m_volumeCallback(event.wheel.y > 0.0f ? 5 : -5);
             }
             break;
+        }
     }
 }
 
@@ -1712,12 +1725,25 @@ void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, 
     int maxVisible = (panelY + panelH - 16 - itemStartY) / itemH;
     if (maxVisible < 1) maxVisible = 1;
 
-    // 计算起始索引，保证当前项尽量可见
-    size_t startIndex = 0;
-    if (currentIndex >= static_cast<size_t>(maxVisible)) {
-        startIndex = currentIndex - static_cast<size_t>(maxVisible) + 1;
-    }
+    // 计算起始索引：优先使用手动滚动偏移，同时确保当前项在可视范围内
+    size_t startIndex = static_cast<size_t>(m_playlistScrollOffset);
     size_t endIndex = startIndex + maxVisible;
+    if (endIndex > playlist.size()) {
+        endIndex = playlist.size();
+        if (playlist.size() > static_cast<size_t>(maxVisible)) {
+            startIndex = playlist.size() - maxVisible;
+        } else {
+            startIndex = 0;
+        }
+    }
+    // 确保当前项在可视范围内
+    if (currentIndex < startIndex) {
+        startIndex = currentIndex;
+    } else if (currentIndex >= endIndex) {
+        startIndex = currentIndex - maxVisible + 1;
+    }
+    m_playlistScrollOffset = static_cast<int>(startIndex);
+    endIndex = startIndex + maxVisible;
     if (endIndex > playlist.size()) endIndex = playlist.size();
 
     for (size_t i = startIndex; i < endIndex; ++i) {
@@ -1729,12 +1755,15 @@ void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, 
         if (isCurrent) {
             fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
                                   COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
+            // 当前播放项左侧 3px 竖条指示器
+            fillRoundRect(panelX + 12, itemY + 6, 3, itemH - 12, 2,
+                          255, 255, 255, 220);
         } else if (hovered) {
             fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
                                   COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
         }
 
-        //  记录控件位置用于点击检�?
+        // 记录控件位置用于点击检测
         m_controlRects.push_back({panelX + 12, itemY, panelW - 24, itemH, ControlType::PlaylistItem, static_cast<int>(i)});
 
         //  文件�?
@@ -1855,11 +1884,24 @@ void SDLRenderer::renderEpisodePanel() {
     if (maxVisible < 1) maxVisible = 1;
 
     size_t currentIndex = m_currentEpisodeIndex;
-    size_t startIndex = 0;
-    if (currentIndex >= static_cast<size_t>(maxVisible)) {
-        startIndex = currentIndex - static_cast<size_t>(maxVisible) + 1;
-    }
+    size_t startIndex = static_cast<size_t>(m_episodeScrollOffset);
     size_t endIndex = startIndex + maxVisible;
+    if (endIndex > m_episodeData->size()) {
+        endIndex = m_episodeData->size();
+        if (m_episodeData->size() > static_cast<size_t>(maxVisible)) {
+            startIndex = m_episodeData->size() - maxVisible;
+        } else {
+            startIndex = 0;
+        }
+    }
+    // 确保当前项在可视范围内
+    if (currentIndex < startIndex) {
+        startIndex = currentIndex;
+    } else if (currentIndex >= endIndex) {
+        startIndex = currentIndex - maxVisible + 1;
+    }
+    m_episodeScrollOffset = static_cast<int>(startIndex);
+    endIndex = startIndex + maxVisible;
     if (endIndex > m_episodeData->size()) endIndex = m_episodeData->size();
 
     for (size_t i = startIndex; i < endIndex; ++i) {

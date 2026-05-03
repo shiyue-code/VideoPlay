@@ -598,6 +598,9 @@ void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
         m_currentSubtitle = vttPath.string();
     } else {
         m_currentSubtitle.clear();
+        if (m_subtitleParser) {
+            m_subtitleParser->clear();
+        }
         return;
     }
 
@@ -868,6 +871,11 @@ void VideoPlayerApp::restoreSeriesPosition() {
 }
 
 void VideoPlayerApp::autoAdvanceAfterStop() {
+    // 将刚播完的文件标记为已完成
+    if (!m_currentFile.empty() && m_duration > 0) {
+        Settings::instance().setLastPosition(m_currentFile, m_duration);
+    }
+
     if (m_currentSeries) {
         size_t nextIndex = m_currentSeries->currentIndex + 1;
         if (nextIndex < m_currentSeries->episodes.size()) {
