@@ -9,7 +9,7 @@
 namespace VideoPlay {
 
 SubtitleParser::SubtitleParser()
-    : m_loaded(false) {
+    : m_loaded(false), m_offset(0) {
 }
 
 SubtitleParser::~SubtitleParser() {
@@ -77,8 +77,9 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
 }
 
 std::string SubtitleParser::subtitleAt(int64_t ms) const {
+    int64_t adjustedMs = ms - m_offset;
     for (const auto& entry : m_entries) {
-        if (ms >= entry.startTime && ms <= entry.endTime) {
+        if (adjustedMs >= entry.startTime && adjustedMs <= entry.endTime) {
             return entry.text;
         }
     }
@@ -97,6 +98,18 @@ void SubtitleParser::clear() {
 
 bool SubtitleParser::isLoaded() const {
     return m_loaded;
+}
+
+void SubtitleParser::setOffset(int64_t ms) {
+    m_offset = ms;
+}
+
+int64_t SubtitleParser::offset() const {
+    return m_offset;
+}
+
+void SubtitleParser::adjustOffset(int64_t deltaMs) {
+    m_offset += deltaMs;
 }
 
 std::string SubtitleParser::trim(const std::string& str) {

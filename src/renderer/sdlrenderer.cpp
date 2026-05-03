@@ -599,6 +599,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_T:
                         toggleAlwaysOnTop();
                         break;
+                    case SDLK_G:
+                        if (m_subtitleSyncCallback) m_subtitleSyncCallback(-500); // 提前 0.5s
+                        break;
+                    case SDLK_H:
+                        if (m_subtitleSyncCallback) m_subtitleSyncCallback(500);  // 延后 0.5s
+                        break;
                 }
             }
             break;
@@ -3118,6 +3124,10 @@ void SDLRenderer::setEpisodeNextCallback(EpisodeNextCallback callback) {
 
 void SDLRenderer::setLoopModeCallback(LoopModeCallback callback) {
     m_loopModeCallback = callback;
+}
+
+void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
+    m_subtitleSyncCallback = callback;
 }
 
 void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
