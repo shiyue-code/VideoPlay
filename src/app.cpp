@@ -138,6 +138,10 @@ bool VideoPlayerApp::initialize() {
     // 恢复循环模式设置
     auto loopMode = Settings::instance().loopMode();
     m_renderer->setLoopMode(static_cast<int>(loopMode));
+
+    // 恢复画面比例设置
+    auto aspectMode = Settings::instance().aspectMode();
+    m_renderer->setAspectMode(aspectMode);
     m_renderer->setKeyCallback([this](int key, bool pressed) {
         if (!pressed) return;
         
@@ -1069,6 +1073,22 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 62: // 列表循环
             Settings::instance().setLoopMode(LoopMode::Playlist);
             if (m_renderer) m_renderer->setLoopMode(2);
+            break;
+        case 70: // 原始比例
+            Settings::instance().setAspectMode(AspectMode::Original);
+            if (m_renderer) m_renderer->setAspectMode(AspectMode::Original);
+            break;
+        case 71: // 16:9
+            Settings::instance().setAspectMode(AspectMode::R16_9);
+            if (m_renderer) m_renderer->setAspectMode(AspectMode::R16_9);
+            break;
+        case 72: // 4:3
+            Settings::instance().setAspectMode(AspectMode::R4_3);
+            if (m_renderer) m_renderer->setAspectMode(AspectMode::R4_3);
+            break;
+        case 73: // 铺满
+            Settings::instance().setAspectMode(AspectMode::FillWindow);
+            if (m_renderer) m_renderer->setAspectMode(AspectMode::FillWindow);
             break;
     }
 }

@@ -1,6 +1,8 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include "core/common.h"
+
 #include <string>
 #include <vector>
 #include <mutex>
@@ -64,6 +66,8 @@ public:
     double playbackSpeed() const;
     void setLoopMode(LoopMode mode);
     LoopMode loopMode() const;
+    void setAspectMode(AspectMode mode);
+    AspectMode aspectMode() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);
