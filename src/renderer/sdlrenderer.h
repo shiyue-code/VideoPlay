@@ -270,6 +270,8 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
+    int m_playlistScrollOffset = 0;
+    int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;
