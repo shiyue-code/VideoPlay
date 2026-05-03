@@ -46,7 +46,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 1. 匹配 S01E02 / s01e02 / S1E02
     {
-        std::regex re(R"((.*?)\s*[Ss](\d+)[Ee](\d+)(?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[Ss](\d+)[Ee](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -59,7 +59,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 2. 匹配 1x02 / 01x02
     {
-        std::regex re(R"((.*?)\s*(\d+)[Xx](\d+)(?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*(\d+)[Xx](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -72,7 +72,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 3. 匹配 EP02 / ep02 / Ep02
     {
-        std::regex re(R"((.*?)\s*[Ee][Pp](\d+)(?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[Ee][Pp](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -84,7 +84,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 4. 匹配 第02集 / 第2话 / 第02回
     {
-        std::regex re(R"((.*?)\s*第\s*(\d+)\s*[集话回](?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*第\s*(\d+)\s*[集话回](?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -96,7 +96,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 5. 匹配 [02] / (02) / 【02】 在开头或中间
     {
-        std::regex re(R"((.*?)\s*[\[\(【]\s*(\d+)\s*[\]\)】](?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[\[\(【]\s*(\d+)\s*[\]\)】](?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -109,7 +109,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
     // 6. 匹配末尾纯数字 (至少两位数，避免与年份混淆)
     // 要求前面有非数字内容，且数字不在最后4位（避免是年份如 2024）
     {
-        std::regex re(R"((.*?)\s+(\d{2,3})(?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s+(\d{2,3})(?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -127,7 +127,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 7. 匹配 - 02 / _02 分隔符后的数字
     {
-        std::regex re(R"((.*?)\s*[\-_]\s*(\d{2,3})(?:\s*[\-_].*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[\-_]\s*(\d{2,3})(?:\s+.*)?)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -236,10 +236,15 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
                 continue;
             }
 
-            // 名称匹配：完全匹配或一方包含另一方
-            bool nameMatches = (selfNormalized == otherNormalized) ||
-                               (selfNormalized.find(otherNormalized) != std::string::npos) ||
-                               (otherNormalized.find(selfNormalized) != std::string::npos);
+            // 名称匹配：完全匹配，或子串匹配时长度差异不超过 20%
+            bool nameMatches = (selfNormalized == otherNormalized);
+            if (!nameMatches) {
+                if (selfNormalized.find(otherNormalized) != std::string::npos) {
+                    nameMatches = (otherNormalized.length() >= selfNormalized.length() * 0.8);
+                } else if (otherNormalized.find(selfNormalized) != std::string::npos) {
+                    nameMatches = (selfNormalized.length() >= otherNormalized.length() * 0.8);
+                }
+            }
 
             if (!nameMatches)
             {
