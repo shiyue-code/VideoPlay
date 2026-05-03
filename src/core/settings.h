@@ -33,6 +33,14 @@ struct SeriesProgress {
     std::unordered_map<std::string, int64_t> episodePositions; // 文件路径->位置
 };
 
+struct SessionInfo {
+    std::string filePath;
+    int64_t position = 0;
+    int64_t duration = 0;
+    size_t playlistIndex = 0;
+    bool hasValidSession = false;
+};
+
 class Settings {
 public:
     static Settings& instance();
@@ -70,6 +78,11 @@ public:
     void setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,
                            const std::unordered_map<std::string, int64_t>& positions);
     SeriesProgress seriesProgress(const std::string& seriesKey) const;
+
+    // 意外停止自动恢复
+    void setLastSession(const SessionInfo& session);
+    SessionInfo lastSession() const;
+    void clearLastSession();
 
     // 保存和加载
     void save();

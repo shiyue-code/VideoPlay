@@ -102,9 +102,17 @@ private:
     // 剧集
     std::optional<SeriesGroup> m_currentSeries;
 
+    // 进度缓存（避免 render() 每帧查询 Settings）
+    std::vector<float> m_cachedPlaylistProgress;
+    std::vector<float> m_cachedEpisodeProgress;
+    bool m_progressCacheDirty = true;
+
     // 手动操作标志（防止 stop/playEpisode 触发自动连播）
     std::atomic<bool> m_isManualOperation{false};
     std::atomic<bool> m_pendingAutoAdvance{false};
+
+    // 自动恢复：会话状态定期保存（每 5 秒）
+    uint64_t m_lastSessionSaveTime = 0;
 
     // 视频帧缓冲
     VideoFrame m_displayFrame;

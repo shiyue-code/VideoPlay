@@ -252,14 +252,16 @@ private:
     // 图标纹理
     std::unordered_map<std::string, SDL_Texture*> m_iconTextures;
     
-    // 文字纹理缓存
+    // 文字纹理缓存（LRU 淘汰）
     struct TextCacheEntry {
         SDL_Texture* texture = nullptr;
         int width = 0;
         int height = 0;
+        uint64_t lastUsed = 0;
     };
     std::unordered_map<std::string, TextCacheEntry> m_textCache;
     void clearTextCache();
+    void pruneTextCache(size_t maxEntries = 256);
 
     // 状态
     bool m_initialized = false;

@@ -168,6 +168,9 @@ bool VideoPlayerApp::initialize() {
 void VideoPlayerApp::shutdown() {
     Logger::instance().info("Shutting down VideoPlayerApp...");
 
+    // 正常退出时清除会话标记，避免下次启动误恢复
+    Settings::instance().clearLastSession();
+
     if (m_player) {
         m_player->stop();
     }
@@ -186,6 +189,34 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
 
     m_running = true;
 
+    // 如果没有命令行参数，尝试恢复上次意外停止的会话
+    if (argc <= 1) {
+        auto session = Settings::instance().lastSession();
+        if (session.hasValidSession && !session.filePath.empty() &&
+            std::filesystem::exists(session.filePath)) {
+            Logger::instance().info("Restoring last session: " + session.filePath);
+            // 重建单文件播放列表
+            m_playlist.push_back(session.filePath);
+            m_currentIndex = 0;
+            m_progressCacheDirty = true;
+            if (m_player->loadFile(session.filePath)) {
+                m_currentFile = session.filePath;
+                m_renderer->setWindowTitle(
+                    std::filesystem::path(session.filePath).filename().string() + " - " + APP_TITLE);
+                loadSubtitle(session.filePath);
+                detectSeries(session.filePath);
+                play();
+                // 恢复播放位置（如果记忆位置开启且未接近结尾）
+                if (Settings::instance().rememberPosition() &&
+                    session.duration > 0 && session.position > 0 &&
+                    session.position < session.duration - 5000) {
+                    m_player->seek(session.position);
+                    m_seekTargetPosition = session.position;
+                }
+            }
+        }
+    }
+
     // 处理命令行参数
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -194,8 +225,8 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
         }
     }
 
-    // 自动播放第一个文件
-    if (!m_playlist.empty()) {
+    // 自动播放第一个文件（仅在命令行传入或恢复失败时）
+    if (!m_playlist.empty() && m_currentFile.empty()) {
         playFromPlaylist(0);
     }
 
@@ -318,35 +349,37 @@ void VideoPlayerApp::render() {
 
     bool isPreloading = (m_player && m_player->isPreloading());
 
-    // 构建播放列表进度数据
-    std::vector<float> playlistProgress;
-    playlistProgress.reserve(m_playlist.size());
-    for (const auto& path : m_playlist) {
-        int64_t pos = Settings::instance().lastPosition(path);
-        int64_t dur = Settings::instance().lastDuration(path);
-        if (dur > 0) {
-            playlistProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
-        } else {
-            playlistProgress.push_back(0.0f);
-        }
-    }
-    m_renderer->setPlaylistProgress(playlistProgress);
-
-    // 构建剧集进度数据
-    std::vector<float> episodeProgress;
-    if (m_currentSeries) {
-        episodeProgress.reserve(m_currentSeries->episodes.size());
-        for (const auto& ep : m_currentSeries->episodes) {
-            int64_t pos = Settings::instance().lastPosition(ep.path);
-            int64_t dur = Settings::instance().lastDuration(ep.path);
+    // 更新进度缓存（仅在脏时重建，避免每帧 Settings 加锁）
+    if (m_progressCacheDirty) {
+        m_cachedPlaylistProgress.clear();
+        m_cachedPlaylistProgress.reserve(m_playlist.size());
+        for (const auto& path : m_playlist) {
+            int64_t pos = Settings::instance().lastPosition(path);
+            int64_t dur = Settings::instance().lastDuration(path);
             if (dur > 0) {
-                episodeProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
+                m_cachedPlaylistProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
             } else {
-                episodeProgress.push_back(pos > 0 ? 0.01f : 0.0f); // 有位置但无时长时给一个最小标记
+                m_cachedPlaylistProgress.push_back(0.0f);
             }
         }
+
+        m_cachedEpisodeProgress.clear();
+        if (m_currentSeries) {
+            m_cachedEpisodeProgress.reserve(m_currentSeries->episodes.size());
+            for (const auto& ep : m_currentSeries->episodes) {
+                int64_t pos = Settings::instance().lastPosition(ep.path);
+                int64_t dur = Settings::instance().lastDuration(ep.path);
+                if (dur > 0) {
+                    m_cachedEpisodeProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
+                } else {
+                    m_cachedEpisodeProgress.push_back(pos > 0 ? 0.01f : 0.0f);
+                }
+            }
+        }
+        m_progressCacheDirty = false;
     }
-    m_renderer->setEpisodeProgress(episodeProgress);
+    m_renderer->setPlaylistProgress(m_cachedPlaylistProgress);
+    m_renderer->setEpisodeProgress(m_cachedEpisodeProgress);
 
     // Prev/Next Tooltip 智能语义
     if (m_currentSeries) {
@@ -399,6 +432,21 @@ void VideoPlayerApp::render() {
         renderCount = 0;
         reportStart = Clock::now();
     }
+
+    // 定期保存会话状态（每 5 秒），用于意外停止后的自动恢复
+    if (m_isPlaying && !m_currentFile.empty() && m_duration > 0) {
+        uint64_t now = SDL_GetTicks();
+        if (now - m_lastSessionSaveTime >= 5000) {
+            SessionInfo session;
+            session.filePath = m_currentFile;
+            session.position = m_position;
+            session.duration = m_duration;
+            session.playlistIndex = m_currentIndex;
+            session.hasValidSession = true;
+            Settings::instance().setLastSession(session);
+            m_lastSessionSaveTime = now;
+        }
+    }
 }
 
 void VideoPlayerApp::openFile(const std::string& path) {
@@ -414,11 +462,12 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
     // 添加到播放列表
     addToPlaylist(path);
+    m_progressCacheDirty = true;
 
     // 加载文件
     if (m_player->loadFile(path)) {
         m_currentFile = path;
-        
+
         // 更新窗口标题
         std::string title = std::filesystem::path(path).filename().string() + " - " + APP_TITLE;
         m_renderer->setWindowTitle(title);
@@ -431,6 +480,16 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
         // 开始播放
         play();
+
+        // 立即保存会话，用于意外停止恢复
+        SessionInfo session;
+        session.filePath = path;
+        session.position = 0;
+        session.duration = m_duration;
+        session.playlistIndex = m_currentIndex;
+        session.hasValidSession = true;
+        Settings::instance().setLastSession(session);
+        m_lastSessionSaveTime = SDL_GetTicks();
     } else {
         Logger::instance().error("Failed to load file: " + path);
     }
@@ -496,6 +555,7 @@ void VideoPlayerApp::openFolderDialog() {
         for (const auto& file : mediaFiles) {
             addToPlaylist(file);
         }
+        m_progressCacheDirty = true;
 
         Logger::instance().info("Added " + std::to_string(mediaFiles.size()) + " files from folder");
 
@@ -645,6 +705,7 @@ void VideoPlayerApp::addToPlaylist(const std::string& path) {
     auto it = std::find(m_playlist.begin(), m_playlist.end(), path);
     if (it == m_playlist.end()) {
         m_playlist.push_back(path);
+        m_progressCacheDirty = true;
         Logger::instance().info("Added to playlist: " + path);
     }
 }
@@ -696,12 +757,14 @@ void VideoPlayerApp::playFromPlaylist(size_t index) {
     }
 
     m_currentIndex = index;
+    m_progressCacheDirty = true;
     m_isManualOperation = true;
     openFile(m_playlist[index]);
 }
 
 void VideoPlayerApp::detectSeries(const std::string& path) {
     m_currentSeries = EpisodeDetector::detectFromFile(path);
+    m_progressCacheDirty = true;
     if (m_currentSeries) {
         // 保存 EpisodeDetector 根据 path 计算出的原始索引
         size_t actualIndex = m_currentSeries->currentIndex;
@@ -722,6 +785,7 @@ void VideoPlayerApp::detectSeries(const std::string& path) {
 void VideoPlayerApp::playEpisode(size_t index) {
     if (!m_currentSeries || index >= m_currentSeries->episodes.size()) return;
 
+    m_progressCacheDirty = true;
     // 保存当前集的进度
     saveSeriesProgress();
 
@@ -836,6 +900,7 @@ void VideoPlayerApp::onDurationChanged(int64_t duration) {
     m_duration = duration;
     if (!m_currentFile.empty() && duration > 0) {
         Settings::instance().setLastDuration(m_currentFile, duration);
+        m_progressCacheDirty = true;
     }
     Logger::instance().info("Duration: " + std::to_string(duration) + "ms");
 }

@@ -320,4 +320,41 @@ SeriesProgress Settings::seriesProgress(const std::string& seriesKey) const {
     return progress;
 }
 
+// 意外停止自动恢复
+void Settings::setLastSession(const SessionInfo& session) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["lastSession"] = {
+        {"filePath", session.filePath},
+        {"position", session.position},
+        {"duration", session.duration},
+        {"playlistIndex", session.playlistIndex},
+        {"hasValidSession", session.hasValidSession}
+    };
+}
+
+SessionInfo Settings::lastSession() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    SessionInfo info;
+    if (m_config.contains("lastSession")) {
+        const auto& s = m_config["lastSession"];
+        info.filePath = s.value("filePath", std::string());
+        info.position = s.value("position", 0);
+        info.duration = s.value("duration", 0);
+        info.playlistIndex = s.value("playlistIndex", size_t(0));
+        info.hasValidSession = s.value("hasValidSession", false);
+    }
+    return info;
+}
+
+void Settings::clearLastSession() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["lastSession"] = {
+        {"filePath", std::string()},
+        {"position", 0},
+        {"duration", 0},
+        {"playlistIndex", 0},
+        {"hasValidSession", false}
+    };
+}
+
 } // namespace VideoPlay
