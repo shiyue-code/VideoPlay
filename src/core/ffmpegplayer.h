@@ -78,6 +78,8 @@ public:
 
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
+    std::vector<ChapterInfo> chapters() const;
+
 private:
     struct StreamContext {
         AVStream* stream = nullptr;
@@ -124,6 +126,7 @@ private:
     
     std::string m_filePath;
     int64_t m_duration = 0;
+    std::vector<ChapterInfo> m_chapters;
     std::atomic<int64_t> m_position{0};
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};

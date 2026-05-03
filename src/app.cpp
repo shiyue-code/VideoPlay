@@ -552,6 +552,12 @@ void VideoPlayerApp::openFile(const std::string& path) {
         // 检测剧集
         detectSeries(path);
 
+        // 加载章节信息
+        if (m_renderer) {
+            auto chapters = m_player->chapters();
+            m_renderer->setChapters(chapters);
+        }
+
         // 开始播放
         play();
 
@@ -1173,6 +1179,20 @@ void VideoPlayerApp::handleMenu(int menuId) {
                 Settings::instance().setAlwaysOnTop(m_renderer->isAlwaysOnTop());
             }
             break;
+    }
+
+    // 章节跳转菜单项 ID 范围 200-249
+    if (menuId >= 200 && menuId < 250) {
+        size_t idx = static_cast<size_t>(menuId - 200);
+        auto chapters = m_player->chapters();
+        if (idx < chapters.size()) {
+            int64_t targetPos = chapters[idx].startTime;
+            if (targetPos >= 0 && targetPos < m_duration) {
+                seek(targetPos - m_position); // 相对 seek
+                Logger::instance().info("Chapter seek: " + chapters[idx].title +
+                    " at " + formatTime(targetPos));
+            }
+        }
     }
 }
 

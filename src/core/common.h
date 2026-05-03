@@ -28,6 +28,12 @@ enum class AspectMode {
     FillWindow = 3  // 铺满窗口
 };
 
+struct ChapterInfo {
+    int64_t startTime = 0;  // 毫秒
+    int64_t endTime = 0;    // 毫秒
+    std::string title;
+};
+
 enum class PlaybackSpeed {
     Speed_0_25 = 0,
     Speed_0_5,

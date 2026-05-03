@@ -42,6 +42,7 @@ using EpisodeNextCallback = std::function<void()>;
 using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
+using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
 
 // 控件类型
 enum class ControlType {
@@ -51,6 +52,7 @@ enum class ControlType {
     PrevButton,
     NextButton,
     ProgressBar,
+    ChapterMarker,
     VolumeButton,
     VolumeBar,
     SpeedButton,
@@ -149,6 +151,10 @@ public:
     void setLoopModeCallback(LoopModeCallback callback);
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
     void setABLoopCallback(ABLoopCallback callback);
+    void setChapterSeekCallback(ChapterSeekCallback callback);
+
+    // 章节数据
+    void setChapters(const std::vector<ChapterInfo>& chapters);
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -216,6 +222,7 @@ private:
 
     // 菜单处理
     void initMenus();
+    void updateChapterMenuItems();
     void renderMenuBar();
     void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
     bool handleMenuClick(int x, int y);
@@ -338,6 +345,11 @@ private:
     
     // 菜单
     std::vector<Menu> m_menus;
+    std::vector<ChapterInfo> m_chapters;
+    bool m_hasChapters = false;
+    int64_t m_lastDuration = 0;
+    int m_lastBarX = 0;
+    int m_lastBarW = 0;
     int m_activeMenu = -1;
     bool m_menuBarHovered = false;
 
@@ -359,6 +371,7 @@ private:
     int m_mouseY = 0;
     bool m_mouseDown = false;
     ControlType m_hoveredControl = ControlType::None;
+    int m_hoveredControlValue = 0;
     ControlType m_pressedControl = ControlType::None;
     int m_pressedControlValue = 0;
     uint64_t m_lastMouseMove = 0;
@@ -415,6 +428,7 @@ private:
     LoopModeCallback m_loopModeCallback;
     SubtitleSyncCallback m_subtitleSyncCallback;
     ABLoopCallback m_abLoopCallback;
+    ChapterSeekCallback m_chapterSeekCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;
