@@ -173,6 +173,12 @@ public:
     // 显示消息框
     void showMessageBox(const std::string& title, const std::string& message, bool isError = false);
 
+    // 更新文件菜单中的最近文件列表
+    void updateRecentFilesMenu();
+
+    // 截图并保存到桌面
+    void takeScreenshot();
+
 private:
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);

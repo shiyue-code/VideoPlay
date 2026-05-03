@@ -1,5 +1,6 @@
 #include "renderer/sdlrenderer.h"
 #include "core/episodedetector.h"
+#include "core/settings.h"
 #include "utils/logger.h"
 
 #include "renderer/windowframe.h"
@@ -21,6 +22,8 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "utils/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "utils/stb_image_write.h"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -534,7 +537,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_volumeCallback) m_volumeCallback(-5);
                         break;
                     case SDLK_M:
-                        // 静音切换
+                        if (m_muteCallback) m_muteCallback();
                         break;
                     case SDLK_N:
                         if (m_nextCallback) m_nextCallback();
@@ -544,6 +547,9 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_PERIOD:
                         if (m_speedCallback) m_speedCallback(0); // 循环速度
+                        break;
+                    case SDLK_F12:
+                        takeScreenshot();
                         break;
                 }
             }
@@ -871,29 +877,42 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
     // 如果点击了菜单区域之外，关闭菜单
     if (m_activeMenu >= 0 && y >= m_menuBarHeight) {
         bool inMenu = false;
-        // 检查是否在打开的菜单内
-        int menuX = 0;
-        for (int i = 0; i <= m_activeMenu && i < (int)m_menus.size(); i++) {
-            if (i == m_activeMenu) {
-                int menuWidth = 180;
-                int menuHeight = (int)m_menus[i].items.size() * 24 + 8;
-                if (x >= menuX && x <= menuX + menuWidth && y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
-                    inMenu = true;
-                    //  处理菜单项点�?
-                    int itemIndex = (y - m_menuBarHeight - 4) / 24;
-                    if (itemIndex >= 0 && itemIndex < (int)m_menus[i].items.size()) {
-                        const auto& item = m_menus[i].items[itemIndex];
-                        if (!item.separator && item.enabled && m_menuCallback) {
-                            if (!(m_menuAnimating && m_pendingMenu < 0)) {
-                                m_menuCallback(item.id);
-                            }
-                            closeAllMenus();
-                        }
-                    }
+        // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
+        int menuX = 10;
+        for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
+            menuX += getTextWidth(m_menus[i].label) + 20 + 10;
+        }
+        // 计算实际菜单宽度（与 renderMenu 一致）
+        const Menu& activeMenu = m_menus[m_activeMenu];
+        int labelMaxW = 0;
+        int shortcutMaxW = 0;
+        for (const auto& item : activeMenu.items) {
+            if (!item.separator && item.enabled) {
+                int lw = getTextWidth(item.label, 12);
+                if (lw > labelMaxW) labelMaxW = lw;
+                if (!item.shortcut.empty()) {
+                    int sw = getTextWidth(item.shortcut, 11);
+                    if (sw > shortcutMaxW) shortcutMaxW = sw;
                 }
-                break;
             }
-            menuX += 60;
+        }
+        int menuWidth = 20 + labelMaxW;
+        if (shortcutMaxW > 0) menuWidth += 24 + shortcutMaxW;
+        if (menuWidth < 140) menuWidth = 140;
+        int menuHeight = (int)activeMenu.items.size() * 24 + 8;
+        if (x >= menuX && x <= menuX + menuWidth && y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
+            inMenu = true;
+            // 处理菜单项点击
+            int itemIndex = (y - m_menuBarHeight - 4) / 24;
+            if (itemIndex >= 0 && itemIndex < (int)activeMenu.items.size()) {
+                const auto& item = activeMenu.items[itemIndex];
+                if (!item.separator && item.enabled && m_menuCallback) {
+                    m_menuCallback(item.id);
+                    closeAllMenus();
+                    // 防止 handleMouseButtonUp 触发菜单下方的控件点击
+                    m_pressedControl = ControlType::None;
+                }
+            }
         }
         if (!inMenu) {
             closeAllMenus();
@@ -2768,7 +2787,8 @@ void SDLRenderer::openSubtitleDialog(std::function<void(const std::string&)> cal
         { "字幕文件", "srt;ass;ssa;vtt" }
     };
 
-    SDL_ShowOpenFileDialog(sdlCallback, this, m_window, sdlFilters, 1, nullptr, false);
+    // parent 传 nullptr 避免无边框窗口遮挡对话框
+    SDL_ShowOpenFileDialog(sdlCallback, this, nullptr, sdlFilters, 1, nullptr, false);
 }
 
 void SDLRenderer::openFolderDialog(std::function<void(const std::string&)> callback) {
@@ -2788,7 +2808,8 @@ void SDLRenderer::openFolderDialog(std::function<void(const std::string&)> callb
         renderer->m_dialogResultReady = true;
     };
 
-    SDL_ShowOpenFolderDialog(sdlCallback, this, m_window, nullptr, false);
+    // parent 传 nullptr 避免无边框窗口遮挡对话框
+    SDL_ShowOpenFolderDialog(sdlCallback, this, nullptr, nullptr, false);
 }
 
 void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& /*filters*/) {
@@ -2809,10 +2830,11 @@ void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callbac
     };
 
     SDL_DialogFileFilter sdlFilters[] = {
-        { "媒体文件", "mp4;mkv;avi;mov;wmv;flv;webm;mp3;aac;wav;flac;ogg;srt;ass;vtt" }
+        { "媒体文件", "mp4;mkv;avi;mov;wmv;flv;webm;m4v;ts;m2ts;mpeg;mpg;vob;3gp;ogv;asf;rm;rmvb;mp3;aac;wav;flac;ogg;m4a;wma;opus;ape;ac3;dts;eac3;wv;weba;srt;ass;ssa;vtt" }
     };
 
-    SDL_ShowOpenFileDialog(sdlCallback, this, m_window, sdlFilters, 1, nullptr, false);
+    // parent 传 nullptr 避免无边框窗口遮挡对话框
+    SDL_ShowOpenFileDialog(sdlCallback, this, nullptr, sdlFilters, 1, nullptr, false);
 }
 
 void SDLRenderer::showMessageBox(const std::string& title, const std::string& message, bool isError) {
@@ -2822,6 +2844,86 @@ void SDLRenderer::showMessageBox(const std::string& title, const std::string& me
         message.c_str(),
         m_window
     );
+}
+
+void SDLRenderer::updateRecentFilesMenu() {
+    if (m_menus.empty()) return;
+    Menu& fileMenu = m_menus[0];
+
+    // 保留固定项（ID < 100）
+    std::vector<MenuItem> fixedItems;
+    for (const auto& item : fileMenu.items) {
+        if (item.id < 100) {
+            fixedItems.push_back(item);
+        }
+    }
+
+    auto recent = Settings::instance().recentFiles();
+    if (!recent.empty()) {
+        // 在退出前添加分隔线和最近文件
+        fixedItems.insert(fixedItems.end() - 1, {0, "", "", true}); // 分隔线
+        for (size_t i = 0; i < recent.size() && i < 10; ++i) {
+            std::string label = std::filesystem::path(recent[i]).filename().string();
+            if (label.length() > 40) {
+                label = label.substr(0, 37) + "...";
+            }
+            fixedItems.insert(fixedItems.end() - 1,
+                {static_cast<int>(100 + i), label, "", false, true});
+        }
+    }
+
+    fileMenu.items = std::move(fixedItems);
+}
+
+void SDLRenderer::takeScreenshot() {
+    if (!m_renderer || !m_window) return;
+
+    SDL_Surface* surface = SDL_RenderReadPixels(m_renderer, nullptr);
+    if (!surface) {
+        Logger::instance().error("Failed to read pixels for screenshot");
+        return;
+    }
+
+    // 构造保存路径：桌面 / VideoPlay_Screenshot_YYYYMMDD_HHMMSS.png
+    std::string savePath;
+#ifdef _WIN32
+    const char* userProfile = getenv("USERPROFILE");
+    if (userProfile) {
+        savePath = std::string(userProfile) + "/Desktop/";
+    } else {
+        savePath = "./";
+    }
+#else
+    const char* home = getenv("HOME");
+    savePath = home ? std::string(home) + "/Desktop/" : "./";
+#endif
+
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    std::ostringstream oss;
+    oss << "VideoPlay_Screenshot_"
+        << std::put_time(&tm, "%Y%m%d_%H%M%S")
+        << ".png";
+    savePath += oss.str();
+
+    int result = stbi_write_png(savePath.c_str(), surface->w, surface->h,
+                                surface->format == SDL_PIXELFORMAT_BGRA32 ? 4 : 4,
+                                surface->pixels, surface->pitch);
+    SDL_DestroySurface(surface);
+
+    if (result) {
+        Logger::instance().info("Screenshot saved: " + savePath);
+        showMessageBox("截图已保存", "截图已保存到:\n" + savePath, false);
+    } else {
+        Logger::instance().error("Failed to save screenshot");
+        showMessageBox("截图失败", "无法保存截图", true);
+    }
 }
 
 void SDLRenderer::setFileDropCallback(FileDropCallback callback) {
