@@ -97,6 +97,7 @@ set(SOURCES
     src/core/ffmpegplayer.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
+    src/core/episodedetector.cpp
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
     src/renderer/sdlrenderer.cpp
@@ -115,6 +116,7 @@ set(HEADERS
     src/core/audioplayer.h
     src/core/settings.h
     src/core/common.h
+    src/core/episodedetector.h
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/renderer/sdlrenderer.h

@@ -1,4 +1,5 @@
 #include "app.h"
+#include "core/settings.h"
 #include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
 
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 
 namespace {
     using Clock = std::chrono::high_resolution_clock;
@@ -116,6 +118,15 @@ bool VideoPlayerApp::initialize() {
     m_renderer->setPlaylistItemCallback([this](size_t index) {
         playFromPlaylist(static_cast<int>(index));
     });
+    m_renderer->setEpisodeItemCallback([this](size_t index) {
+        playEpisode(index);
+    });
+    m_renderer->setEpisodePrevCallback([this]() {
+        playPreviousEpisode();
+    });
+    m_renderer->setEpisodeNextCallback([this]() {
+        playNextEpisode();
+    });
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
@@ -128,20 +139,21 @@ bool VideoPlayerApp::initialize() {
                     openFileDialog();
                 }
                 break;
-            case SDLK_N:
-                playNext();
-                break;
-            case SDLK_P:
-                playPrevious();
-                break;
             case SDLK_M:
                 toggleMute();
                 break;
-            case SDLK_PERIOD:
-                cycleSpeed();
-                break;
             case SDLK_F1:
                 showHelp();
+                break;
+            case SDLK_E:
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                    m_renderer->toggleEpisodePanel();
+                }
+                break;
+            case SDLK_L:
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                    m_renderer->togglePlaylistPanel();
+                }
                 break;
         }
     });
@@ -221,6 +233,14 @@ void VideoPlayerApp::runMainLoop() {
 }
 
 void VideoPlayerApp::render() {
+    // 播放开始后重置手动操作标志，确保正常结束能自动连播
+    if (m_isPlaying) {
+        m_isManualOperation = false;
+    }
+    if (m_pendingAutoAdvance.exchange(false)) {
+        autoAdvanceAfterStop();
+    }
+
     auto t0 = Clock::now();
     // 用音频播放进度作为当前显示时间和 UI 时间（考虑倍速）
     if (m_player) {
@@ -369,6 +389,9 @@ void VideoPlayerApp::openFile(const std::string& path) {
         // 尝试加载同名字幕
         loadSubtitle(path);
 
+        // 检测剧集
+        detectSeries(path);
+
         // 开始播放
         play();
     } else {
@@ -500,6 +523,7 @@ void VideoPlayerApp::stop() {
     if (!m_player) return;
 
     Logger::instance().info("Stopping");
+    m_isManualOperation = true;
     m_player->stop();
     m_isPlaying = false;
     m_position = 0;
@@ -589,6 +613,13 @@ void VideoPlayerApp::addToPlaylist(const std::string& path) {
 }
 
 void VideoPlayerApp::playNext() {
+    // 优先剧集维度；若当前文件属于某剧集，则播放下一集
+    if (m_currentSeries) {
+        m_isManualOperation = true;
+        playNextEpisode();
+        return;
+    }
+
     if (m_playlist.empty()) return;
 
     m_currentIndex++;
@@ -596,10 +627,18 @@ void VideoPlayerApp::playNext() {
         m_currentIndex = 0;  // 循环
     }
 
+    m_isManualOperation = true;
     playFromPlaylist(m_currentIndex);
 }
 
 void VideoPlayerApp::playPrevious() {
+    // 优先剧集维度；若当前文件属于某剧集，则播放上一集
+    if (m_currentSeries) {
+        m_isManualOperation = true;
+        playPreviousEpisode();
+        return;
+    }
+
     if (m_playlist.empty()) return;
 
     if (m_currentIndex == 0) {
@@ -608,14 +647,147 @@ void VideoPlayerApp::playPrevious() {
         m_currentIndex--;
     }
 
+    m_isManualOperation = true;
     playFromPlaylist(m_currentIndex);
 }
 
 void VideoPlayerApp::playFromPlaylist(size_t index) {
     if (index >= m_playlist.size()) return;
+    if (!m_currentFile.empty() && m_currentFile == m_playlist[index]) {
+        Logger::instance().debug("Already playing: " + m_playlist[index]);
+        return;
+    }
 
     m_currentIndex = index;
+    m_isManualOperation = true;
     openFile(m_playlist[index]);
+}
+
+void VideoPlayerApp::detectSeries(const std::string& path) {
+    m_currentSeries = EpisodeDetector::detectFromFile(path);
+    if (m_currentSeries) {
+        // 保存 EpisodeDetector 根据 path 计算出的原始索引
+        size_t actualIndex = m_currentSeries->currentIndex;
+        // 更新渲染器
+        m_renderer->setEpisodeData(&m_currentSeries->episodes, m_currentSeries->currentIndex,
+                                   m_currentSeries->seriesName, m_currentSeries->seasonNumber);
+        // 恢复上次播放位置（但不应该覆盖用户显式打开的文件对应的索引）
+        restoreSeriesPosition();
+        // 恢复为实际打开文件对应的索引，确保面板显示和按钮逻辑正确
+        m_currentSeries->currentIndex = actualIndex;
+        m_renderer->setEpisodeData(&m_currentSeries->episodes, m_currentSeries->currentIndex,
+                                   m_currentSeries->seriesName, m_currentSeries->seasonNumber);
+    } else {
+        m_renderer->setEpisodeData(nullptr, 0);
+    }
+}
+
+void VideoPlayerApp::playEpisode(size_t index) {
+    if (!m_currentSeries || index >= m_currentSeries->episodes.size()) return;
+
+    // 保存当前集的进度
+    saveSeriesProgress();
+
+    std::string path = m_currentSeries->episodes[index].path;
+    if (!m_currentFile.empty() && m_currentFile == path) {
+        Logger::instance().debug("Already playing episode: " + path);
+        return;
+    }
+
+    // 同步播放列表索引（若该集已在列表中）
+    auto it = std::find(m_playlist.begin(), m_playlist.end(), path);
+    if (it != m_playlist.end()) {
+        m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
+    }
+
+    // 临时清空剧集数据，防止 openFile -> stop() -> onStateChanged(Stopped)
+    // 触发自动连播，导致递归跳过多集
+    m_currentSeries = std::nullopt;
+    m_renderer->setEpisodeData(nullptr, 0);
+    m_isManualOperation = true;
+    openFile(path);
+}
+
+void VideoPlayerApp::playNextEpisode() {
+    if (!m_currentSeries) return;
+
+    size_t nextIndex = m_currentSeries->currentIndex + 1;
+    if (nextIndex >= m_currentSeries->episodes.size()) {
+        return; // 不循环
+    }
+    playEpisode(nextIndex);
+}
+
+void VideoPlayerApp::playPreviousEpisode() {
+    if (!m_currentSeries) return;
+
+    if (m_currentSeries->currentIndex == 0) {
+        return; // 不循环
+    }
+    playEpisode(m_currentSeries->currentIndex - 1);
+}
+
+void VideoPlayerApp::saveSeriesProgress() {
+    if (!m_currentSeries) return;
+
+    std::string seriesKey = m_currentSeries->episodes[0].path;
+    seriesKey = std::filesystem::path(seriesKey).parent_path().string() + "/" + m_currentSeries->seriesName;
+
+    std::unordered_map<std::string, int64_t> positions;
+    for (const auto& ep : m_currentSeries->episodes) {
+        int64_t pos = Settings::instance().lastPosition(ep.path);
+        if (pos > 0) {
+            positions[ep.path] = pos;
+        }
+    }
+
+    Settings::instance().setSeriesProgress(seriesKey, static_cast<int>(m_currentSeries->currentIndex), positions);
+}
+
+void VideoPlayerApp::restoreSeriesPosition() {
+    if (!m_currentSeries) return;
+
+    std::string seriesKey = m_currentSeries->episodes[0].path;
+    seriesKey = std::filesystem::path(seriesKey).parent_path().string() + "/" + m_currentSeries->seriesName;
+
+    auto progress = Settings::instance().seriesProgress(seriesKey);
+    if (progress.lastEpisodeIndex >= 0 &&
+        static_cast<size_t>(progress.lastEpisodeIndex) < m_currentSeries->episodes.size()) {
+        m_currentSeries->currentIndex = static_cast<size_t>(progress.lastEpisodeIndex);
+    }
+}
+
+void VideoPlayerApp::autoAdvanceAfterStop() {
+    if (m_currentSeries) {
+        size_t nextIndex = m_currentSeries->currentIndex + 1;
+        if (nextIndex < m_currentSeries->episodes.size()) {
+            Logger::instance().info("Auto-playing next episode: " +
+                                    std::to_string(nextIndex + 1));
+            playEpisode(nextIndex);
+            return;
+        }
+        if (!m_playlist.empty()) {
+            size_t nextPlaylistIndex = m_currentIndex + 1;
+            if (nextPlaylistIndex >= m_playlist.size()) {
+                nextPlaylistIndex = 0;
+            }
+            if (m_playlist.size() > 1 || m_playlist[nextPlaylistIndex] != m_currentFile) {
+                Logger::instance().info("Series finished, continuing playlist");
+                playFromPlaylist(nextPlaylistIndex);
+            }
+        }
+        return;
+    }
+
+    if (!m_playlist.empty()) {
+        size_t nextIndex = m_currentIndex + 1;
+        if (nextIndex >= m_playlist.size()) {
+            nextIndex = 0;
+        }
+        if (m_playlist.size() > 1 || m_playlist[nextIndex] != m_currentFile) {
+            playFromPlaylist(nextIndex);
+        }
+    }
 }
 
 void VideoPlayerApp::onPositionChanged(int64_t position) {
@@ -641,6 +813,11 @@ void VideoPlayerApp::onStateChanged(PlaybackState state) {
         case PlaybackState::Stopped:
             m_isPlaying = false;
             Logger::instance().info("State changed: Stopped");
+            // 自动播放下一个（仅当不是手动停止/切换时）
+            if (m_isManualOperation.exchange(false)) {
+                break;
+            }
+            m_pendingAutoAdvance = true;
             break;
     }
 }
@@ -674,6 +851,15 @@ void VideoPlayerApp::handleMenu(int menuId) {
             break;
         case 13: // 下一个
             playNext();
+            break;
+        case 30: // 上一集
+            playPreviousEpisode();
+            break;
+        case 31: // 下一集
+            playNextEpisode();
+            break;
+        case 32: // 切换选集面板
+            m_renderer->toggleEpisodePanel();
             break;
         case 14: // 增加速度
             setSpeed(m_speed * 1.25);
@@ -733,8 +919,12 @@ void VideoPlayerApp::showHelp() {
         "M             - 静音切换\n"
         ".             - 切换播放速度\n"
         "F             - 全屏切换\n"
-        "N             - 下一个文件\n"
-        "P             - 上一个文件\n"
+        "N             - 下一个（优先下一集）\n"
+        "P             - 上一个（优先上一集）\n"
+        "Ctrl+Shift+Right - 下一集\n"
+        "Ctrl+Shift+Left  - 上一集\n"
+        "Ctrl+E        - 切换选集面板\n"
+        "Ctrl+L        - 切换播放列表\n"
         "Ctrl+O        - 打开文件\n"
         "F1            - 显示帮助\n"
         "Esc           - 退出全屏/关闭菜单\n\n"

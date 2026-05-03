@@ -1,4 +1,5 @@
 #include "renderer/sdlrenderer.h"
+#include "core/episodedetector.h"
 #include "utils/logger.h"
 
 #include "renderer/windowframe.h"
@@ -269,6 +270,17 @@ void SDLRenderer::initMenus() {
     };
     m_menus.push_back(playMenu);
 
+    // 剧集菜单
+    Menu episodeMenu;
+    episodeMenu.label = "剧集";
+    episodeMenu.items = {
+        {30, "上一集", "Ctrl+Shift+Left", false, true},
+        {31, "下一集", "Ctrl+Shift+Right", false, true},
+        {0, "", "", true},
+        {32, "切换选集面板", "Ctrl+E", false, true}
+    };
+    m_menus.push_back(episodeMenu);
+
     // 帮助菜单
     Menu helpMenu;
     helpMenu.label = "帮助";
@@ -491,12 +503,24 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_S:
                         if (m_stopCallback) m_stopCallback();
                         break;
-                    case SDLK_LEFT:
-                        if (m_seekCallback) m_seekCallback(-5.0); // 后退5秒
+                    case SDLK_LEFT: {
+                        bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        if (ctrlShift && m_episodePrevCallback) {
+                            m_episodePrevCallback();
+                        } else if (!ctrlShift && m_seekCallback) {
+                            m_seekCallback(-5.0); // 后退5秒
+                        }
                         break;
-                    case SDLK_RIGHT:
-                        if (m_seekCallback) m_seekCallback(5.0);  // 前进5秒
+                    }
+                    case SDLK_RIGHT: {
+                        bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        if (ctrlShift && m_episodeNextCallback) {
+                            m_episodeNextCallback();
+                        } else if (!ctrlShift && m_seekCallback) {
+                            m_seekCallback(5.0);  // 前进5秒
+                        }
                         break;
+                    }
                     case SDLK_UP:
                         if (m_volumeCallback) m_volumeCallback(5);
                         break;
@@ -855,9 +879,6 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         case ControlType::PlaylistButton:
             m_showPlaylistPanel = !m_showPlaylistPanel;
             break;
-        case ControlType::PlaylistItem:
-            if (m_playlistItemCallback) m_playlistItemCallback(static_cast<size_t>(m_pressedControlValue));
-            break;
         default:
             break;
     }
@@ -868,6 +889,31 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
     if (m_draggingProgress && m_seekCallback) {
         m_seekCallback(m_dragProgressRatio * 1000 + 1000); // 传回绝对位置 (1000~2000)
     }
+
+    // 列表/面板项的单击操作在鼠标释放时触发（按下和释放需在同一个控件上）
+    if (!m_draggingProgress && !m_draggingVolume && m_pressedControl != ControlType::None) {
+        int releaseValue = 0;
+        ControlType releaseControl = getControlAt(x, y, &releaseValue);
+        if (releaseControl == m_pressedControl && releaseValue == m_pressedControlValue) {
+            switch (m_pressedControl) {
+                case ControlType::PlaylistItem:
+                    if (m_playlistItemCallback) m_playlistItemCallback(static_cast<size_t>(m_pressedControlValue));
+                    break;
+                case ControlType::EpisodeItem:
+                    if (m_episodeItemCallback) m_episodeItemCallback(static_cast<size_t>(m_pressedControlValue));
+                    break;
+                case ControlType::EpisodePrev:
+                    if (m_episodePrevCallback) m_episodePrevCallback();
+                    break;
+                case ControlType::EpisodeNext:
+                    if (m_episodeNextCallback) m_episodeNextCallback();
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
     m_draggingProgress = false;
     m_draggingVolume = false;
     m_resizingWindow = false;
@@ -1046,10 +1092,6 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         // 渲染菜单栏（悬浮在视频上方，随控制栏一起显隐）
         renderMenuBar();
         renderControls(position, duration, volume, isMuted, isPlaying, speed, isPreloading);
-        // 渲染播放列表
-        if (m_showPlaylistPanel && !playlist.empty()) {
-            renderPlaylistPanel(playlist, currentPlaylistIndex);
-        }
         // 渲染文件名（左上角，随控制栏自动隐藏）
         if (!filename.empty()) {
             renderFilename(filename);
@@ -1059,6 +1101,14 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     } else {
         // 菜单栏随控制栏一起隐藏，确保不遮挡视频
         closeAllMenus(false);
+    }
+
+    // 侧边面板拥有独立生命周期，不受控制栏自动隐藏影响
+    if (m_showPlaylistPanel && !playlist.empty()) {
+        renderPlaylistPanel(playlist, currentPlaylistIndex);
+    }
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        renderEpisodePanel();
     }
 
     // 渲染字幕（始终显示，不受控制栏影响）
@@ -1220,14 +1270,39 @@ void SDLRenderer::renderMenuBar() {
 
 void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     int itemHeight = 24;
-    int menuWidth = 180;
+    int labelMaxW = 0;
+    int shortcutMaxW = 0;
+    const int labelFontSize = 12;
+    const int shortcutFontSize = 11;
+    const int shortcutGap = 24; // 标签与快捷键之间的最小间距
+    const int hPadding = 20;    // 左右总内边距
+
+    // 预先计算所需宽度
+    for (const auto& item : menu.items) {
+        if (!item.separator && item.enabled) {
+            int lw = getTextWidth(item.label, labelFontSize);
+            if (lw > labelMaxW) labelMaxW = lw;
+            if (!item.shortcut.empty()) {
+                int sw = getTextWidth(item.shortcut, shortcutFontSize);
+                if (sw > shortcutMaxW) shortcutMaxW = sw;
+            }
+        }
+    }
+
+    int menuWidth = hPadding + labelMaxW;
+    if (shortcutMaxW > 0) {
+        menuWidth += shortcutGap + shortcutMaxW;
+    }
+    // 最小宽度保证
+    if (menuWidth < 140) menuWidth = 140;
+
     int menuHeight = (int)menu.items.size() * itemHeight + 8;
     uint8_t baseAlpha = static_cast<uint8_t>(240 * alpha);
-    
+
     // 菜单背景
     fillRect(x, y, menuWidth, menuHeight,
              COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
-    
+
     // 菜单项
     int itemY = y + 4;
     for (const auto& item : menu.items) {
@@ -1238,21 +1313,22 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
             // 检测悬浮
             bool hovered = (m_mouseX >= x && m_mouseX <= x + menuWidth &&
                            m_mouseY >= itemY && m_mouseY <= itemY + itemHeight);
-            
+
             if (hovered && item.enabled) {
                 fillRect(x + 2, itemY, menuWidth - 4, itemHeight,
                          COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], static_cast<uint8_t>(COLOR_MENU_ACTIVE[3] * alpha));
             }
-            
+
             // 渲染菜单项文字
             if (item.enabled) {
                 drawText(item.label, x + 10, itemY + 4,
-                        COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 12);
-                
-                // 渲染快捷键
+                        COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+
+                // 渲染快捷键（右对齐）
                 if (!item.shortcut.empty()) {
-                    drawText(item.shortcut, x + menuWidth - 60, itemY + 4,
-                            150, 150, 150, 11);
+                    int sw = getTextWidth(item.shortcut, shortcutFontSize);
+                    drawText(item.shortcut, x + menuWidth - 10 - sw, itemY + 4,
+                            150, 150, 150, shortcutFontSize);
                 }
             }
         }
@@ -1301,6 +1377,8 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
         drawButton(btnX, btnY, m_buttonSize, m_buttonSize, "playlist", hovered, pressed);
         m_controlRects.push_back({btnX, btnY, m_buttonSize, m_buttonSize, ControlType::PlaylistButton, 0});
     }
+
+
     
     // 音量控制
     renderVolumeControl(volume, isMuted, controlY);
@@ -1467,9 +1545,17 @@ void SDLRenderer::renderFilename(const std::string& filename) {
         name = filename.substr(pos + 1);
     }
     
-    // 计算文字宽度，限制为不与右侧播放列表面板重叠（面板左边缘 = m_windowWidth - 284）
+    // 计算文字宽度，限制为不与左右侧面板重叠
     int textW = getTextWidth(name);
     int maxWidth = m_windowWidth - 340; // 留 20px 安全间隙
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        // 左侧选集面板占 260+24=284px
+        maxWidth -= 284;
+    }
+    if (m_showPlaylistPanel) {
+        // 右侧播放列表面板占 260+24=284px
+        maxWidth -= 284;
+    }
     if (maxWidth < 120) maxWidth = 120;
     
     // 截断过长的文件名
@@ -1651,6 +1737,135 @@ void SDLRenderer::renderLoadingAnimation() {
     drawText(text, cx - textW / 2, cy + radius + 20, 200, 200, 200, 14);
 }
 
+void SDLRenderer::renderEpisodePanel() {
+    if (!m_episodeData || m_episodeData->empty()) return;
+
+    int panelW = 260;
+    int panelX = 24; // 左侧，与右侧播放列表面板对称
+    int panelY = m_menuBarHeight + 10;
+    int panelBottomMargin = m_windowHeight - m_controlHeight - 24 - 10;
+    int panelH = panelBottomMargin - panelY;
+    if (panelH < 60) return;
+    int radius = 20;
+
+    // 投影
+    renderSmoothRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    // 白边
+    renderSmoothRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 55);
+    // 背景
+    renderSmoothRoundRect(panelX, panelY, panelW, panelH, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+
+    // 标题
+    int titleY = panelY + 16;
+    std::string panelTitle = "选集";
+    if (!m_episodeSeriesName.empty()) {
+        if (m_episodeSeasonNumber > 0) {
+            panelTitle = m_episodeSeriesName + " S" + std::to_string(m_episodeSeasonNumber);
+        } else {
+            panelTitle = m_episodeSeriesName;
+        }
+    }
+    drawText(panelTitle, panelX + 16, titleY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 13);
+
+    // 底部按钮区域
+    const int buttonAreaH = 44;
+    const int btnW = 90;
+    const int btnH = 30;
+    const int btnGap = 16;
+    int buttonAreaY = panelY + panelH - buttonAreaH;
+
+    int itemStartY = titleY + 28;
+    int itemH = 28;
+    int listBottomY = buttonAreaY - 8;
+    int maxVisible = (listBottomY - itemStartY) / itemH;
+    if (maxVisible < 1) maxVisible = 1;
+
+    size_t currentIndex = m_currentEpisodeIndex;
+    size_t startIndex = 0;
+    if (currentIndex >= static_cast<size_t>(maxVisible)) {
+        startIndex = currentIndex - static_cast<size_t>(maxVisible) + 1;
+    }
+    size_t endIndex = startIndex + maxVisible;
+    if (endIndex > m_episodeData->size()) endIndex = m_episodeData->size();
+
+    for (size_t i = startIndex; i < endIndex; ++i) {
+        int itemY = itemStartY + static_cast<int>(i - startIndex) * itemH;
+        bool isCurrent = (i == currentIndex);
+        bool hovered = (m_mouseX >= panelX + 12 && m_mouseX <= panelX + panelW - 12 &&
+                        m_mouseY >= itemY && m_mouseY <= itemY + itemH);
+
+        if (isCurrent) {
+            renderSmoothRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
+        } else if (hovered) {
+            renderSmoothRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
+        }
+
+        m_controlRects.push_back({panelX + 12, itemY, panelW - 24, itemH, ControlType::EpisodeItem, static_cast<int>(i)});
+
+        const auto& ep = (*m_episodeData)[i];
+        std::string label = ep.title;
+        int maxTextW = panelW - 48;
+        int textW = getTextWidth(label, 12);
+        if (textW > maxTextW) {
+            while (textW > maxTextW - getTextWidth("...", 12) && label.length() > 3) {
+                label = label.substr(0, label.length() - 1);
+                textW = getTextWidth(label + "...", 12);
+            }
+            label += "...";
+        }
+
+        int textColorR = isCurrent ? 255 : COLOR_TEXT[0];
+        int textColorG = isCurrent ? 255 : COLOR_TEXT[1];
+        int textColorB = isCurrent ? 255 : COLOR_TEXT[2];
+        drawText(label, panelX + 20, itemY + (itemH - getFontHeight(12)) / 2, textColorR, textColorG, textColorB, 12);
+    }
+
+    // 绘制分隔线
+    fillRect(panelX + 16, buttonAreaY - 4, panelW - 32, 1, 255, 255, 255, 40);
+
+    // 上一集按钮
+    bool canPrev = (currentIndex > 0);
+    int prevBtnX = panelX + (panelW - btnW * 2 - btnGap) / 2;
+    int prevBtnY = buttonAreaY + (buttonAreaH - btnH) / 2;
+    {
+        bool hovered = canPrev && (m_hoveredControl == ControlType::EpisodePrev);
+        bool pressed = canPrev && (m_pressedControl == ControlType::EpisodePrev);
+        uint8_t bgAlpha = canPrev ? (hovered ? 160 : 100) : 50;
+        uint8_t textAlpha = canPrev ? 255 : 120;
+        renderSmoothRoundRect(prevBtnX, prevBtnY, btnW, btnH, 6,
+                              COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], bgAlpha);
+        std::string txt = "上一集";
+        int tw = getTextWidth(txt, 11);
+        drawText(txt, prevBtnX + (btnW - tw) / 2, prevBtnY + (btnH - getFontHeight(11)) / 2,
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11);
+        if (canPrev) {
+            m_controlRects.push_back({prevBtnX, prevBtnY, btnW, btnH, ControlType::EpisodePrev, 0});
+        }
+    }
+
+    // 下一集按钮
+    bool canNext = (currentIndex + 1 < m_episodeData->size());
+    int nextBtnX = prevBtnX + btnW + btnGap;
+    int nextBtnY = prevBtnY;
+    {
+        bool hovered = canNext && (m_hoveredControl == ControlType::EpisodeNext);
+        bool pressed = canNext && (m_pressedControl == ControlType::EpisodeNext);
+        uint8_t bgAlpha = canNext ? (hovered ? 160 : 100) : 50;
+        renderSmoothRoundRect(nextBtnX, nextBtnY, btnW, btnH, 6,
+                              COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], bgAlpha);
+        std::string txt = "下一集";
+        int tw = getTextWidth(txt, 11);
+        drawText(txt, nextBtnX + (btnW - tw) / 2, nextBtnY + (btnH - getFontHeight(11)) / 2,
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11);
+        if (canNext) {
+            m_controlRects.push_back({nextBtnX, nextBtnY, btnW, btnH, ControlType::EpisodeNext, 0});
+        }
+    }
+}
+
 void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible) {
     // 分三列渲染，每列独立圆角背景，列间留白自然分隔，不使用线条
     // A/V/Diff 固定在右上角，播放列表面板在 y=44 开始，自然垂直错开
@@ -1677,14 +1892,16 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
     
     int totalWidth = COL_A_WIDTH + COL_GAP + COL_V_WIDTH + COL_GAP + COL_DIFF_WIDTH + PADDING * 2;
     
-    // 播放列表面板显示时水平避让，否则固定在标准右上角
-    int panelRight;
+    // 播放列表面板或选集面板显示时水平避让
+    int panelRight = m_windowWidth - RIGHT_MARGIN;
     if (playlistVisible) {
-        int playlistPanelW = 260;
-        int playlistPanelX = m_windowWidth - 24 - playlistPanelW;
-        panelRight = playlistPanelX - 20; // 面板左边缘左侧 20px，避免视觉拥挤
-    } else {
-        panelRight = m_windowWidth - RIGHT_MARGIN;
+        int playlistPanelX = m_windowWidth - 24 - 260;
+        panelRight = std::min(panelRight, playlistPanelX - 20);
+    }
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        int episodePanelRight = 24 + 260;
+        // sync info 在右上角，选集面板在左上角，不冲突，不需要避让
+        (void)episodePanelRight;
     }
     
     int x = panelRight - totalWidth;
@@ -2478,6 +2695,34 @@ void SDLRenderer::setMenuCallback(MenuCallback callback) {
 
 void SDLRenderer::setPlaylistItemCallback(PlaylistItemCallback callback) {
     m_playlistItemCallback = callback;
+}
+
+void SDLRenderer::setEpisodeItemCallback(EpisodeItemCallback callback) {
+    m_episodeItemCallback = callback;
+}
+
+void SDLRenderer::setEpisodePrevCallback(EpisodePrevCallback callback) {
+    m_episodePrevCallback = callback;
+}
+
+void SDLRenderer::setEpisodeNextCallback(EpisodeNextCallback callback) {
+    m_episodeNextCallback = callback;
+}
+
+void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
+                                  const std::string& seriesName, int seasonNumber) {
+    m_episodeData = episodes;
+    m_currentEpisodeIndex = currentIndex;
+    m_episodeSeriesName = seriesName;
+    m_episodeSeasonNumber = seasonNumber;
+}
+
+void SDLRenderer::toggleEpisodePanel() {
+    m_showEpisodePanel = !m_showEpisodePanel;
+}
+
+void SDLRenderer::togglePlaylistPanel() {
+    m_showPlaylistPanel = !m_showPlaylistPanel;
 }
 
 } // namespace VideoPlay

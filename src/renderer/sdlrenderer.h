@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/common.h"
+#include "core/episodedetector.h"
 #include "renderer/windowframe.h"
 
 #include <string>
@@ -35,6 +36,9 @@ using NextCallback = std::function<void()>;
 using FullscreenCallback = std::function<void()>;
 using MenuCallback = std::function<void(int)>;     // menu item id
 using PlaylistItemCallback = std::function<void(size_t)>;
+using EpisodeItemCallback = std::function<void(size_t)>;
+using EpisodePrevCallback = std::function<void()>;
+using EpisodeNextCallback = std::function<void()>;
 
 // 控件类型
 enum class ControlType {
@@ -49,6 +53,10 @@ enum class ControlType {
     SpeedButton,
     PlaylistButton,
     PlaylistItem,
+    EpisodePrev,
+    EpisodeNext,
+    EpisodeItem,
+    EpisodePanelToggle,
     MenuBar,
     MenuItem,
     SysMinButton,
@@ -132,6 +140,15 @@ public:
     void setFullscreenCallback(FullscreenCallback callback);
     void setMenuCallback(MenuCallback callback);
     void setPlaylistItemCallback(PlaylistItemCallback callback);
+    void setEpisodeItemCallback(EpisodeItemCallback callback);
+    void setEpisodePrevCallback(EpisodePrevCallback callback);
+    void setEpisodeNextCallback(EpisodeNextCallback callback);
+
+    // 剧集数据
+    void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
+                        const std::string& seriesName = "", int seasonNumber = 0);
+    void toggleEpisodePanel();
+    void togglePlaylistPanel();
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -188,6 +205,7 @@ private:
     void renderTooltip();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
+    void renderEpisodePanel();
 
     // 创建/更新纹理
     void ensureTexture(int width, int height);
@@ -246,6 +264,11 @@ private:
     bool m_borderless = false;
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
+    bool m_showEpisodePanel = false;
+    const std::vector<EpisodeInfo>* m_episodeData = nullptr;
+    size_t m_currentEpisodeIndex = 0;
+    std::string m_episodeSeriesName;
+    int m_episodeSeasonNumber = 0;
     bool m_draggingProgress = false;
     float m_dragProgressRatio = 0.0f;
     bool m_draggingVolume = false;
@@ -342,6 +365,9 @@ private:
     FullscreenCallback m_fullscreenCallback;
     MenuCallback m_menuCallback;
     PlaylistItemCallback m_playlistItemCallback;
+    EpisodeItemCallback m_episodeItemCallback;
+    EpisodePrevCallback m_episodePrevCallback;
+    EpisodeNextCallback m_episodeNextCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;
