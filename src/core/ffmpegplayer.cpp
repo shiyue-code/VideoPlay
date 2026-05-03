@@ -298,41 +298,42 @@ void FFmpegPlayer::stop() {
             m_abortRequest = true;
         }
     }
-    
-    if (!wasAlreadyStopped) {
-        m_condition.notify_all();
-        m_decodeCondition.notify_all();
-        
-        if (m_decodeThread.joinable()) {
-            m_decodeThread.join();
-        }
+
+    m_condition.notify_all();
+    m_decodeCondition.notify_all();
+
+    if (m_decodeThread.joinable() &&
+        m_decodeThread.get_id() != std::this_thread::get_id()) {
+        m_decodeThread.join();
     }
-    
+
     m_preloading = false;
-    
+
     if (m_audioPlayer) {
         m_audioPlayer->stop();
         m_audioPlayer->reset();
     }
-    
-    // Seek back to beginning so play() restarts from the start
+
+    // Seek back to beginning so play() restarts from the start.
     if (m_formatContext) {
         handleSeek(0);
     }
-    
+
     m_position = 0;
     m_audioBaseMs = 0;
-    
+
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
     }
-    
-    if (m_stateCallback) {
-        m_stateCallback(PlaybackState::Stopped);
-    }
-    if (m_positionCallback) {
-        m_positionCallback(0);
+
+    if (!wasAlreadyStopped) {
+        if (m_stateCallback) {
+            m_stateCallback(PlaybackState::Stopped);
+        }
+        if (m_positionCallback) {
+            m_positionCallback(0);
+        }
     }
 }
 
