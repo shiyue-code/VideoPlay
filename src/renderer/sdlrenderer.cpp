@@ -277,6 +277,11 @@ void SDLRenderer::initMenus() {
         {61, "循环: 单曲循环", "", false, true},
         {62, "循环: 列表循环", "", false, true},
         {0, "", "", true},
+        {70, "比例: 原始", "", false, true},
+        {71, "比例: 16:9", "", false, true},
+        {72, "比例: 4:3", "", false, true},
+        {73, "比例: 铺满", "", false, true},
+        {0, "", "", true},
         {16, "全屏", "F", false, true},
         {0, "", "", true},
         {17, "无边框模式", "B", false, true}
@@ -398,21 +403,35 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
         frame.width * 4  // BGRA stride
     );
 
-    // 计算视频显示区域（保持宽高比，填满整个窗口，UI 悬浮在上层）
+    // 计算目标宽高比
+    float targetAspect;
+    switch (m_aspectMode) {
+        case AspectMode::R16_9:      targetAspect = 16.0f / 9.0f; break;
+        case AspectMode::R4_3:       targetAspect = 4.0f / 3.0f; break;
+        case AspectMode::FillWindow: targetAspect = static_cast<float>(m_windowWidth) / m_windowHeight; break;
+        case AspectMode::Original:
+        default:                     targetAspect = static_cast<float>(frame.width) / frame.height; break;
+    }
+
+    // 计算视频显示区域（保持目标宽高比，UI 悬浮在上层）
     float windowAspect = static_cast<float>(m_windowWidth) / m_windowHeight;
-    float videoAspect = static_cast<float>(frame.width) / frame.height;
 
     SDL_FRect dstRect;
-    if (windowAspect > videoAspect) {
+    if (m_aspectMode == AspectMode::FillWindow) {
+        dstRect.x = 0;
+        dstRect.y = 0;
+        dstRect.w = static_cast<float>(m_windowWidth);
+        dstRect.h = static_cast<float>(m_windowHeight);
+    } else if (windowAspect > targetAspect) {
         // 窗口更宽，以高度为基准
         dstRect.h = static_cast<float>(m_windowHeight);
-        dstRect.w = dstRect.h * videoAspect;
+        dstRect.w = dstRect.h * targetAspect;
         dstRect.x = (m_windowWidth - dstRect.w) / 2.0f;
         dstRect.y = 0;
     } else {
         // 窗口更高，以宽度为基准
         dstRect.w = static_cast<float>(m_windowWidth);
-        dstRect.h = dstRect.w / videoAspect;
+        dstRect.h = dstRect.w / targetAspect;
         dstRect.x = 0;
         dstRect.y = (m_windowHeight - dstRect.h) / 2.0f;
     }
@@ -560,6 +579,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                             // L 键循环切换循环模式
                             m_loopMode = (m_loopMode + 1) % 3;
                             if (m_loopModeCallback) m_loopModeCallback(m_loopMode);
+                        }
+                        break;
+                    case SDLK_A:
+                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                            // A 键循环切换画面比例
+                            int next = (static_cast<int>(m_aspectMode) + 1) % 4;
+                            m_aspectMode = static_cast<AspectMode>(next);
                         }
                         break;
                 }
@@ -1425,6 +1451,17 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 if (item.id >= 60 && item.id <= 62) {
                     int mode = item.id - 60;
                     if (mode == m_loopMode) {
+                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
+                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    } else {
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    }
+                }
+                // 画面比例菜单项：当前选中的前面打勾
+                if (item.id >= 70 && item.id <= 73) {
+                    int mode = item.id - 70;
+                    if (mode == static_cast<int>(m_aspectMode)) {
                         drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
                                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
                         labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
@@ -2873,6 +2910,14 @@ void SDLRenderer::setLoopMode(int mode) {
     if (mode >= 0 && mode <= 2) {
         m_loopMode = mode;
     }
+}
+
+void SDLRenderer::setAspectMode(AspectMode mode) {
+    m_aspectMode = mode;
+}
+
+AspectMode SDLRenderer::aspectMode() const {
+    return m_aspectMode;
 }
 
 void SDLRenderer::updateRecentFilesMenu() {

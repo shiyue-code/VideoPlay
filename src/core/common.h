@@ -21,6 +21,13 @@ enum class PlaybackState {
     Paused = 2
 };
 
+enum class AspectMode {
+    Original = 0,   // 原始比例
+    R16_9 = 1,      // 16:9
+    R4_3 = 2,       // 4:3
+    FillWindow = 3  // 铺满窗口
+};
+
 enum class PlaybackSpeed {
     Speed_0_25 = 0,
     Speed_0_5,

@@ -181,6 +181,10 @@ public:
     // 设置循环模式 (0=None, 1=Single, 2=Playlist)
     void setLoopMode(int mode);
 
+    // 设置画面比例
+    void setAspectMode(AspectMode mode);
+    AspectMode aspectMode() const;
+
     // 截图并保存到桌面
     void takeScreenshot();
 
@@ -285,6 +289,7 @@ private:
     int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
+    AspectMode m_aspectMode = AspectMode::Original;
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;
     const std::vector<EpisodeInfo>* m_episodeData = nullptr;

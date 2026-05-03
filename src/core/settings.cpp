@@ -61,7 +61,8 @@ void Settings::load() {
                 {"volume", 100},
                 {"muted", false},
                 {"speed", 1.0},
-                {"loopMode", 2}
+                {"loopMode", 2},
+                {"aspectMode", 0}
             }},
             {"recentFiles", nlohmann::json::array()},
             {"subtitle", {
@@ -190,6 +191,20 @@ LoopMode Settings::loopMode() const {
         if (val >= 0 && val <= 2) return static_cast<LoopMode>(val);
     }
     return LoopMode::Playlist;
+}
+
+void Settings::setAspectMode(AspectMode mode) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["aspectMode"] = static_cast<int>(mode);
+}
+
+AspectMode Settings::aspectMode() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        int val = m_config["playback"].value("aspectMode", 0);
+        if (val >= 0 && val <= 3) return static_cast<AspectMode>(val);
+    }
+    return AspectMode::Original;
 }
 
 // 最近文件
