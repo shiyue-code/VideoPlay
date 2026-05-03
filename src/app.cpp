@@ -131,6 +131,14 @@ bool VideoPlayerApp::initialize() {
         Settings::instance().setLoopMode(static_cast<LoopMode>(mode));
         m_renderer->setLoopMode(mode);
     });
+    m_renderer->setSubtitleSyncCallback([this](int deltaMs) {
+        if (m_subtitleParser && m_subtitleParser->isLoaded()) {
+            m_subtitleParser->adjustOffset(deltaMs);
+            int64_t offset = m_subtitleParser->offset();
+            std::string sign = offset >= 0 ? "+" : "";
+            Logger::instance().info("Subtitle offset: " + sign + std::to_string(offset) + "ms");
+        }
+    });
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
