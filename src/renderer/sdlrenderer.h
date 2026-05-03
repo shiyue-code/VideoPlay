@@ -41,6 +41,7 @@ using EpisodePrevCallback = std::function<void()>;
 using EpisodeNextCallback = std::function<void()>;
 using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
+using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
 
 // 控件类型
 enum class ControlType {
@@ -147,6 +148,7 @@ public:
     void setEpisodeNextCallback(EpisodeNextCallback callback);
     void setLoopModeCallback(LoopModeCallback callback);
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
+    void setABLoopCallback(ABLoopCallback callback);
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -412,6 +414,7 @@ private:
     EpisodeNextCallback m_episodeNextCallback;
     LoopModeCallback m_loopModeCallback;
     SubtitleSyncCallback m_subtitleSyncCallback;
+    ABLoopCallback m_abLoopCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

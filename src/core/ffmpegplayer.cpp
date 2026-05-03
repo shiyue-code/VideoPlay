@@ -368,6 +368,7 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     
     if (m_audioPlayer) {
         m_audioPlayer->reset();
+        m_audioPlayer->play(); // 确保音频设备在清空后恢复播放
     }
     
     {

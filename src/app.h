@@ -48,6 +48,9 @@ private:
     void setSpeed(double speed);
     void cycleSpeed();
     void toggleAlwaysOnTop();
+    void setLoopPointA();
+    void setLoopPointB();
+    void clearLoop();
 
     // 菜单处理
     void handleMenu(int menuId);
@@ -118,6 +121,11 @@ private:
     // 视频帧缓冲
     VideoFrame m_displayFrame;
     VideoFrame m_pendingFrame;
+
+    // AB 循环
+    int64_t m_loopA = -1;
+    int64_t m_loopB = -1;
+    bool m_loopSeeking = false;
 };
 
 } // namespace VideoPlay

@@ -139,6 +139,13 @@ bool VideoPlayerApp::initialize() {
             Logger::instance().info("Subtitle offset: " + sign + std::to_string(offset) + "ms");
         }
     });
+    m_renderer->setABLoopCallback([this](char action) {
+        switch (action) {
+            case 'a': setLoopPointA(); break;
+            case 'b': setLoopPointB(); break;
+            case 'c': clearLoop(); break;
+        }
+    });
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
@@ -332,6 +339,24 @@ void VideoPlayerApp::render() {
             m_position = m_seekTargetPosition;
         }
     }
+
+    // AB 循环检查（仅在正常播放时触发，防止连续 seek）
+    if (m_loopA >= 0 && m_loopB > m_loopA && !m_loopSeeking && m_position >= m_loopB) {
+        if (m_player && m_isPlaying) {
+            Logger::instance().info("AB loop triggered: seeking from " + formatTime(m_position) +
+                " to " + formatTime(m_loopA));
+            m_player->seek(m_loopA);
+            m_seekTargetPosition = m_loopA;
+            m_position = m_loopA;
+            m_loopSeeking = true;
+            m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
+        }
+    }
+    // AB 循环恢复：当播放位置回到 A 点之后至少 500ms，允许下一次触发
+    if (m_loopSeeking && m_position >= m_loopA + 500) {
+        m_loopSeeking = false;
+    }
+
     double dtPos = elapsedMs(t0);
 
     // 检查预缓冲是否完成
@@ -768,6 +793,32 @@ void VideoPlayerApp::cycleSpeed() {
     
     // 回到第一个
     setSpeed(speeds[0]);
+}
+
+void VideoPlayerApp::setLoopPointA() {
+    m_loopA = m_position;
+    Logger::instance().info("Loop A set: " + formatTime(m_loopA));
+}
+
+void VideoPlayerApp::setLoopPointB() {
+    if (m_loopA < 0) {
+        Logger::instance().warning("Set loop point A first before setting B");
+        return;
+    }
+    m_loopB = m_position;
+    if (m_loopB <= m_loopA) {
+        Logger::instance().warning("Loop B must be after loop A");
+        m_loopB = -1;
+        return;
+    }
+    Logger::instance().info("Loop B set: " + formatTime(m_loopB) + ", AB loop active");
+}
+
+void VideoPlayerApp::clearLoop() {
+    m_loopA = -1;
+    m_loopB = -1;
+    m_loopSeeking = false;
+    Logger::instance().info("AB loop cleared");
 }
 
 void VideoPlayerApp::addToPlaylist(const std::string& path) {
