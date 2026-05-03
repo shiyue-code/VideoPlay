@@ -282,6 +282,8 @@ void SDLRenderer::initMenus() {
         {72, "比例: 4:3", "", false, true},
         {73, "比例: 铺满", "", false, true},
         {0, "", "", true},
+        {80, "始终置顶", "T", false, true},
+        {0, "", "", true},
         {16, "全屏", "F", false, true},
         {0, "", "", true},
         {17, "无边框模式", "B", false, true}
@@ -593,6 +595,9 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                             int next = (static_cast<int>(m_aspectMode) + 1) % 4;
                             m_aspectMode = static_cast<AspectMode>(next);
                         }
+                        break;
+                    case SDLK_T:
+                        toggleAlwaysOnTop();
                         break;
                 }
             }
@@ -1468,6 +1473,16 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 if (item.id >= 70 && item.id <= 73) {
                     int mode = item.id - 70;
                     if (mode == static_cast<int>(m_aspectMode)) {
+                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
+                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    } else {
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    }
+                }
+                // 始终置顶菜单项：启用时前面打勾
+                if (item.id == 80) {
+                    if (m_alwaysOnTop) {
                         drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
                                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
                         labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
@@ -2924,6 +2939,16 @@ void SDLRenderer::setAspectMode(AspectMode mode) {
 
 AspectMode SDLRenderer::aspectMode() const {
     return m_aspectMode;
+}
+
+void SDLRenderer::toggleAlwaysOnTop() {
+    if (!m_window) return;
+    m_alwaysOnTop = !m_alwaysOnTop;
+    SDL_SetWindowAlwaysOnTop(m_window, m_alwaysOnTop);
+}
+
+bool SDLRenderer::isAlwaysOnTop() const {
+    return m_alwaysOnTop;
 }
 
 void SDLRenderer::updateRecentFilesMenu() {

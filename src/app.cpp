@@ -142,6 +142,11 @@ bool VideoPlayerApp::initialize() {
     // 恢复画面比例设置
     auto aspectMode = Settings::instance().aspectMode();
     m_renderer->setAspectMode(aspectMode);
+
+    // 恢复窗口置顶状态
+    if (Settings::instance().alwaysOnTop()) {
+        m_renderer->toggleAlwaysOnTop();
+    }
     m_renderer->setKeyCallback([this](int key, bool pressed) {
         if (!pressed) return;
         
@@ -1089,6 +1094,12 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 73: // 铺满
             Settings::instance().setAspectMode(AspectMode::FillWindow);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::FillWindow);
+            break;
+        case 80: // 始终置顶
+            if (m_renderer) {
+                m_renderer->toggleAlwaysOnTop();
+                Settings::instance().setAlwaysOnTop(m_renderer->isAlwaysOnTop());
+            }
             break;
     }
 }

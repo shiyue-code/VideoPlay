@@ -47,6 +47,7 @@ private:
     void toggleMute();
     void setSpeed(double speed);
     void cycleSpeed();
+    void toggleAlwaysOnTop();
 
     // 菜单处理
     void handleMenu(int menuId);

@@ -62,7 +62,8 @@ void Settings::load() {
                 {"muted", false},
                 {"speed", 1.0},
                 {"loopMode", 2},
-                {"aspectMode", 0}
+                {"aspectMode", 0},
+                {"alwaysOnTop", false}
             }},
             {"recentFiles", nlohmann::json::array()},
             {"subtitle", {
@@ -205,6 +206,19 @@ AspectMode Settings::aspectMode() const {
         if (val >= 0 && val <= 3) return static_cast<AspectMode>(val);
     }
     return AspectMode::Original;
+}
+
+void Settings::setAlwaysOnTop(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["alwaysOnTop"] = enabled;
+}
+
+bool Settings::alwaysOnTop() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("alwaysOnTop", false);
+    }
+    return false;
 }
 
 // 最近文件
