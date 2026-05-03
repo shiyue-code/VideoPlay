@@ -39,6 +39,7 @@ using PlaylistItemCallback = std::function<void(size_t)>;
 using EpisodeItemCallback = std::function<void(size_t)>;
 using EpisodePrevCallback = std::function<void()>;
 using EpisodeNextCallback = std::function<void()>;
+using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
 
 // 控件类型
 enum class ControlType {
@@ -143,6 +144,7 @@ public:
     void setEpisodeItemCallback(EpisodeItemCallback callback);
     void setEpisodePrevCallback(EpisodePrevCallback callback);
     void setEpisodeNextCallback(EpisodeNextCallback callback);
+    void setLoopModeCallback(LoopModeCallback callback);
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -175,6 +177,9 @@ public:
 
     // 更新文件菜单中的最近文件列表
     void updateRecentFilesMenu();
+
+    // 设置循环模式 (0=None, 1=Single, 2=Playlist)
+    void setLoopMode(int mode);
 
     // 截图并保存到桌面
     void takeScreenshot();
@@ -279,6 +284,7 @@ private:
     int m_playlistScrollOffset = 0;
     int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
+    int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;
     const std::vector<EpisodeInfo>* m_episodeData = nullptr;
@@ -387,6 +393,7 @@ private:
     EpisodeItemCallback m_episodeItemCallback;
     EpisodePrevCallback m_episodePrevCallback;
     EpisodeNextCallback m_episodeNextCallback;
+    LoopModeCallback m_loopModeCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

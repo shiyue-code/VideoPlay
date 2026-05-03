@@ -127,9 +127,17 @@ bool VideoPlayerApp::initialize() {
     m_renderer->setEpisodeNextCallback([this]() {
         playNextEpisode();
     });
+    m_renderer->setLoopModeCallback([this](int mode) {
+        Settings::instance().setLoopMode(static_cast<LoopMode>(mode));
+        m_renderer->setLoopMode(mode);
+    });
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
+
+    // 恢复循环模式设置
+    auto loopMode = Settings::instance().loopMode();
+    m_renderer->setLoopMode(static_cast<int>(loopMode));
     m_renderer->setKeyCallback([this](int key, bool pressed) {
         if (!pressed) return;
         
@@ -887,6 +895,25 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
         Settings::instance().setLastPosition(m_currentFile, m_duration);
     }
 
+    auto loopMode = Settings::instance().loopMode();
+
+    // 单曲循环：重新播放当前文件
+    if (loopMode == LoopMode::Single && !m_currentFile.empty()) {
+        Logger::instance().info("Loop mode: Single, replaying current file");
+        if (m_player) {
+            m_player->seek(0);
+            play();
+        }
+        return;
+    }
+
+    // 不循环：播放完就停止
+    if (loopMode == LoopMode::None) {
+        Logger::instance().info("Loop mode: None, stopping after current file");
+        return;
+    }
+
+    // 列表循环（默认行为）
     if (m_currentSeries) {
         size_t nextIndex = m_currentSeries->currentIndex + 1;
         if (nextIndex < m_currentSeries->episodes.size()) {
@@ -1030,6 +1057,18 @@ void VideoPlayerApp::handleMenu(int menuId) {
             break;
         case 51: // 关于
             showAbout();
+            break;
+        case 60: // 不循环
+            Settings::instance().setLoopMode(LoopMode::None);
+            if (m_renderer) m_renderer->setLoopMode(0);
+            break;
+        case 61: // 单曲循环
+            Settings::instance().setLoopMode(LoopMode::Single);
+            if (m_renderer) m_renderer->setLoopMode(1);
+            break;
+        case 62: // 列表循环
+            Settings::instance().setLoopMode(LoopMode::Playlist);
+            if (m_renderer) m_renderer->setLoopMode(2);
             break;
     }
 }

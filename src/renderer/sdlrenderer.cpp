@@ -273,6 +273,10 @@ void SDLRenderer::initMenus() {
         {14, "增加速度", "]", false, true},
         {15, "降低速度", "[", false, true},
         {0, "", "", true},
+        {60, "循环: 不循环", "", false, true},
+        {61, "循环: 单曲循环", "", false, true},
+        {62, "循环: 列表循环", "", false, true},
+        {0, "", "", true},
         {16, "全屏", "F", false, true},
         {0, "", "", true},
         {17, "无边框模式", "B", false, true}
@@ -550,6 +554,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_F12:
                         takeScreenshot();
+                        break;
+                    case SDLK_L:
+                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                            // L 键循环切换循环模式
+                            m_loopMode = (m_loopMode + 1) % 3;
+                            if (m_loopModeCallback) m_loopModeCallback(m_loopMode);
+                        }
                         break;
                 }
             }
@@ -1409,7 +1420,19 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 
             //  渲染菜单项文�?
             if (item.enabled) {
-                drawText(item.label, x + 10, itemY + 4,
+                int labelX = x + 10;
+                // 循环模式菜单项：当前选中的前面打勾
+                if (item.id >= 60 && item.id <= 62) {
+                    int mode = item.id - 60;
+                    if (mode == m_loopMode) {
+                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
+                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    } else {
+                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
+                    }
+                }
+                drawText(item.label, labelX, itemY + 4,
                         COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
 
                 // 渲染快捷键（右对齐）
@@ -2846,6 +2869,12 @@ void SDLRenderer::showMessageBox(const std::string& title, const std::string& me
     );
 }
 
+void SDLRenderer::setLoopMode(int mode) {
+    if (mode >= 0 && mode <= 2) {
+        m_loopMode = mode;
+    }
+}
+
 void SDLRenderer::updateRecentFilesMenu() {
     if (m_menus.empty()) return;
     Menu& fileMenu = m_menus[0];
@@ -2996,6 +3025,10 @@ void SDLRenderer::setEpisodePrevCallback(EpisodePrevCallback callback) {
 
 void SDLRenderer::setEpisodeNextCallback(EpisodeNextCallback callback) {
     m_episodeNextCallback = callback;
+}
+
+void SDLRenderer::setLoopModeCallback(LoopModeCallback callback) {
+    m_loopModeCallback = callback;
 }
 
 void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,

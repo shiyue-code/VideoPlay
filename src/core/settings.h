@@ -33,6 +33,12 @@ struct SeriesProgress {
     std::unordered_map<std::string, int64_t> episodePositions; // 文件路径->位置
 };
 
+enum class LoopMode {
+    None,       // 不循环
+    Single,     // 单曲循环
+    Playlist    // 列表循环
+};
+
 struct SessionInfo {
     std::string filePath;
     int64_t position = 0;
@@ -56,6 +62,8 @@ public:
     bool isMuted() const;
     void setPlaybackSpeed(double speed);
     double playbackSpeed() const;
+    void setLoopMode(LoopMode mode);
+    LoopMode loopMode() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);
