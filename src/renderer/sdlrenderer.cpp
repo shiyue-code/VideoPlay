@@ -2951,6 +2951,19 @@ bool SDLRenderer::isAlwaysOnTop() const {
     return m_alwaysOnTop;
 }
 
+bool SDLRenderer::isMaximized() const {
+    if (!m_window) return false;
+    return (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) != 0;
+}
+
+void SDLRenderer::maximizeWindow() {
+    if (m_window) SDL_MaximizeWindow(m_window);
+}
+
+void SDLRenderer::restoreWindow() {
+    if (m_window) SDL_RestoreWindow(m_window);
+}
+
 void SDLRenderer::updateRecentFilesMenu() {
     if (m_menus.empty()) return;
     Menu& fileMenu = m_menus[0];

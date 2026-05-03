@@ -147,6 +147,12 @@ bool VideoPlayerApp::initialize() {
     if (Settings::instance().alwaysOnTop()) {
         m_renderer->toggleAlwaysOnTop();
     }
+
+    // 恢复最大化状态（在无边框模式启用后应用）
+    auto windowConfig = Settings::instance().windowConfig();
+    if (windowConfig.maximized) {
+        m_renderer->maximizeWindow();
+    }
     m_renderer->setKeyCallback([this](int key, bool pressed) {
         if (!pressed) return;
         
@@ -185,7 +191,14 @@ bool VideoPlayerApp::initialize() {
 void VideoPlayerApp::shutdown() {
     Logger::instance().info("Shutting down VideoPlayerApp...");
 
-    // 正常退出时保存剧集进度、当前进度并清除会话标记
+    // 正常退出时保存窗口状态
+    if (m_renderer) {
+        auto config = Settings::instance().windowConfig();
+        config.maximized = m_renderer->isMaximized();
+        Settings::instance().setWindowConfig(config);
+    }
+
+    // 保存剧集进度、当前进度并清除会话标记
     if (m_currentSeries) {
         saveSeriesProgress();
     }
