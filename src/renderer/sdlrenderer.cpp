@@ -537,19 +537,25 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_LEFT: {
                         bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
                         if (ctrlShift && m_episodePrevCallback) {
                             m_episodePrevCallback();
+                        } else if (shiftOnly && m_seekCallback) {
+                            m_seekCallback(-30.0); // Shift+左: 后退30秒
                         } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(-5.0); // 后退5秒
+                            m_seekCallback(-5.0); // 左: 后退5秒
                         }
                         break;
                     }
                     case SDLK_RIGHT: {
                         bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
                         if (ctrlShift && m_episodeNextCallback) {
                             m_episodeNextCallback();
+                        } else if (shiftOnly && m_seekCallback) {
+                            m_seekCallback(30.0);  // Shift+右: 前进30秒
                         } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(5.0);  // 前进5秒
+                            m_seekCallback(5.0);  // 右: 前进5秒
                         }
                         break;
                     }
