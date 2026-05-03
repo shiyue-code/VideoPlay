@@ -60,7 +60,8 @@ void Settings::load() {
             {"playback", {
                 {"volume", 100},
                 {"muted", false},
-                {"speed", 1.0}
+                {"speed", 1.0},
+                {"loopMode", 2}
             }},
             {"recentFiles", nlohmann::json::array()},
             {"subtitle", {
@@ -175,6 +176,20 @@ double Settings::playbackSpeed() const {
         return m_config["playback"].value("speed", 1.0);
     }
     return 1.0;
+}
+
+void Settings::setLoopMode(LoopMode mode) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["loopMode"] = static_cast<int>(mode);
+}
+
+LoopMode Settings::loopMode() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        int val = m_config["playback"].value("loopMode", 2);
+        if (val >= 0 && val <= 2) return static_cast<LoopMode>(val);
+    }
+    return LoopMode::Playlist;
 }
 
 // 最近文件
