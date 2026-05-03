@@ -290,6 +290,14 @@ void SDLRenderer::initMenus() {
     };
     m_menus.push_back(playMenu);
 
+    // 章节菜单
+    Menu chapterMenu;
+    chapterMenu.label = "章节";
+    chapterMenu.items = {
+        {200, "无可用章节", "", false, false}
+    };
+    m_menus.push_back(chapterMenu);
+
     // 剧集菜单
     Menu episodeMenu;
     episodeMenu.label = "剧集";
@@ -671,7 +679,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 void SDLRenderer::handleMouseMotion(int x, int y) {
     // 检测悬浮的控件
     ControlType lastHovered = m_hoveredControl;
-    m_hoveredControl = getControlAt(x, y);
+    m_hoveredControl = getControlAt(x, y, &m_hoveredControlValue);
 
     // Tooltip 更新（所有可交互控件）
     if (lastHovered != m_hoveredControl) {
@@ -711,6 +719,14 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
             case ControlType::ProgressBar:
                 m_tooltip = "拖动跳转";
                 break;
+            case ControlType::ChapterMarker:
+                if (m_hoveredControlValue >= 0 && m_hoveredControlValue < (int)m_chapters.size()) {
+                    m_tooltip = m_chapters[m_hoveredControlValue].title;
+                    if (m_tooltip.empty()) {
+                        m_tooltip = "Chapter " + std::to_string(m_hoveredControlValue + 1);
+                    }
+                }
+                break;
             default:
                 m_tooltip.clear();
                 m_tooltipShowTime = 0;
@@ -728,6 +744,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
         int menuX = 10;
         for (int i = 0; i < (int)m_menus.size(); i++) {
+            if (m_menus[i].label == "章节" && !m_hasChapters) continue;
             int textW = getTextWidth(m_menus[i].label);
             int itemWidth = textW + 20;
             if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
@@ -943,6 +960,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
         int menuX = 10;
         for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
+            if (m_menus[i].label == "章节" && !m_hasChapters) continue;
             menuX += getTextWidth(m_menus[i].label) + 20 + 10;
         }
         // 计算实际菜单宽度（与 renderMenu 一致）
@@ -1006,6 +1024,13 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                     m_dragProgressRatio = std::max(0.0f, std::min(1.0f, m_dragProgressRatio));
                     break;
                 }
+            }
+            break;
+        case ControlType::ChapterMarker:
+            if (m_seekCallback && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_chapters.size()) {
+                double ratio = static_cast<double>(m_chapters[m_pressedControlValue].startTime) /
+                               static_cast<double>(m_lastDuration);
+                m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
             }
             break;
         case ControlType::VolumeButton:
@@ -1134,6 +1159,7 @@ void SDLRenderer::updateCursorForResize(ResizeMode mode) {
 bool SDLRenderer::handleMenuClick(int x, int y) {
     int menuX = 10;
     for (int i = 0; i < (int)m_menus.size(); i++) {
+        if (m_menus[i].label == "章节" && !m_hasChapters) continue;
         int textW = getTextWidth(m_menus[i].label);
         int menuWidth = textW + 20;
         if (x >= menuX && x <= menuX + menuWidth) {
@@ -1274,6 +1300,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         if (m_menuAnimAlpha > 0.01f) {
             int menuX = 10;
             for (int i = 0; i < m_activeMenu; i++) {
+                if (m_menus[i].label == "章节" && !m_hasChapters) continue;
                 int textW = getTextWidth(m_menus[i].label);
                 menuX += textW + 20 + 10;
             }
@@ -1309,6 +1336,7 @@ void SDLRenderer::renderMenuBar() {
     //  菜单�?
     int x = 10;
     for (int i = 0; i < (int)m_menus.size(); i++) {
+        if (m_menus[i].label == "章节" && !m_hasChapters) continue;
         int textW = getTextWidth(m_menus[i].label);
         int itemWidth = textW + 20;
         
@@ -1590,6 +1618,69 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
     uint8_t bgAlpha = isPreloading ? 180 : (duration > 0 ? COLOR_PROGRESS_BG[3] : 120);
     fillRoundRect(margin, barY, barWidth, barHeight, barHeight / 2,
                           COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], bgAlpha);
+
+    // 存储进度条几何用于事件处理
+    m_lastDuration = duration;
+    m_lastBarX = margin;
+    m_lastBarW = barWidth;
+
+    // 章节标记（进度条上方书签形状）
+    if (duration > 0 && !m_chapters.empty()) {
+        const int markerW = 8;
+        const int markerBodyH = 12;
+        const int markerTipH = 4;
+        const int markerTotalH = markerBodyH + markerTipH;
+        for (size_t i = 0; i < m_chapters.size(); ++i) {
+            int64_t chapterTime = m_chapters[i].startTime;
+            if (chapterTime < 0 || chapterTime > duration) continue;
+            float ratio = static_cast<float>(chapterTime) / static_cast<float>(duration);
+            int markerCenterX = margin + static_cast<int>(barWidth * ratio);
+            int markerX = markerCenterX - markerW / 2;
+            int markerY = barY - markerTotalH + 1; // 底部略插入进度条 1px
+
+            bool hovered = (m_hoveredControl == ControlType::ChapterMarker &&
+                            m_hoveredControlValue == static_cast<int>(i));
+
+            // 基础颜色：青色主题
+            uint8_t mr = hovered ? 60 : 0;
+            uint8_t mg = hovered ? 220 : 180;
+            uint8_t mb = 255;
+            uint8_t alpha = hovered ? 255 : 200;
+
+            // 1. 外发光/阴影层
+            fillRect(markerX - 2, markerY - 1, markerW + 4, markerTotalH + 3,
+                     mr, mg, mb, hovered ? 50 : 25);
+
+            // 2. 帽檐（略宽于主体，顶部圆角效果）
+            fillRect(markerX - 1, markerY, markerW + 2, 3, mr, mg, mb, alpha);
+            // 帽檐圆角
+            fillCircle(markerX, markerY + 1, 1, mr, mg, mb, alpha);
+            fillCircle(markerX + markerW, markerY + 1, 1, mr, mg, mb, alpha);
+
+            // 3. 主体
+            fillRect(markerX, markerY + 3, markerW, markerBodyH - 3, mr, mg, mb, alpha);
+
+            // 4. 顶部高光条
+            fillRect(markerX + 2, markerY + 1, markerW - 4, 1, 255, 255, 255, 120);
+
+            // 5. 底部尖角
+            SDL_Vertex triVerts[3];
+            SDL_FColor c{mr / 255.0f, mg / 255.0f, mb / 255.0f, alpha / 255.0f};
+            triVerts[0] = {{static_cast<float>(markerX), static_cast<float>(markerY + markerBodyH)}, c, {0, 0}};
+            triVerts[1] = {{static_cast<float>(markerX + markerW), static_cast<float>(markerY + markerBodyH)}, c, {0, 0}};
+            triVerts[2] = {{static_cast<float>(markerCenterX), static_cast<float>(markerY + markerTotalH)}, c, {0, 0}};
+            int triIdx[3] = {0, 1, 2};
+            SDL_RenderGeometry(m_renderer, nullptr, triVerts, 3, triIdx, 3);
+
+            // 记录章节标记交互区域（先于 ProgressBar，优先级更高）
+            int hitX = markerCenterX - 8;
+            int hitY = markerY - 4;
+            int hitW = 16;
+            int hitH = markerTotalH + 8 + barHeight;
+            m_controlRects.push_back({hitX, hitY, hitW, hitH,
+                                      ControlType::ChapterMarker, static_cast<int>(i)});
+        }
+    }
 
     // 进度填充 + thumb（停止状态下只保留背景条，和刚启动时一致）
     if (duration > 0 && !isCompletelyStopped) {
@@ -3141,6 +3232,38 @@ void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
 
 void SDLRenderer::setABLoopCallback(ABLoopCallback callback) {
     m_abLoopCallback = callback;
+}
+
+void SDLRenderer::setChapterSeekCallback(ChapterSeekCallback callback) {
+    m_chapterSeekCallback = callback;
+}
+
+void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
+    m_chapters = chapters;
+    m_hasChapters = !chapters.empty();
+    updateChapterMenuItems();
+}
+
+void SDLRenderer::updateChapterMenuItems() {
+    if (m_menus.size() < 3) return; // Chapter menu is index 2
+    Menu& chapterMenu = m_menus[2];
+    
+    chapterMenu.items.clear();
+    
+    if (m_chapters.empty()) {
+        chapterMenu.items.push_back({200, "无可用章节", "", false, false});
+    } else {
+        for (size_t i = 0; i < m_chapters.size() && i < 50; ++i) {
+            std::string label = m_chapters[i].title;
+            if (label.empty()) {
+                label = "Chapter " + std::to_string(i + 1);
+            }
+            if (label.length() > 30) {
+                label = label.substr(0, 27) + "...";
+            }
+            chapterMenu.items.push_back({static_cast<int>(200 + i), label, "", false, true});
+        }
+    }
 }
 
 void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,

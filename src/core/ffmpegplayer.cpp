@@ -89,6 +89,25 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     
     m_filePath = filePath;
     
+    // 读取章节信息
+    m_chapters.clear();
+    if (m_formatContext->nb_chapters > 0) {
+        for (unsigned int i = 0; i < m_formatContext->nb_chapters; i++) {
+            AVChapter* ch = m_formatContext->chapters[i];
+            VideoPlay::ChapterInfo info;
+            info.startTime = av_rescale_q(ch->start, ch->time_base, {1, 1000});
+            info.endTime = av_rescale_q(ch->end, ch->time_base, {1, 1000});
+            AVDictionaryEntry* entry = av_dict_get(ch->metadata, "title", nullptr, 0);
+            if (entry) {
+                info.title = entry->value;
+            } else {
+                info.title = "Chapter " + std::to_string(i + 1);
+            }
+            m_chapters.push_back(info);
+        }
+        Logger::instance().info("Found " + std::to_string(m_chapters.size()) + " chapters");
+    }
+    
     for (unsigned int i = 0; i < m_formatContext->nb_streams; i++) {
         AVStream* stream = m_formatContext->streams[i];
         AVCodecParameters* codecPar = stream->codecpar;
@@ -178,6 +197,7 @@ void FFmpegPlayer::closeFile() {
     m_duration = 0;
     m_position = 0;
     m_state = PlaybackState::Stopped;
+    m_chapters.clear();
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
@@ -952,6 +972,11 @@ void FFmpegPlayer::pushVideoFrame(VideoFrame&& frame) {
         m_videoFrameQueue.pop_front();
     }
     m_videoFrameQueue.push_back(std::move(frame));
+}
+
+std::vector<ChapterInfo> FFmpegPlayer::chapters() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_chapters;
 }
 
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
