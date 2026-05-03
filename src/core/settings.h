@@ -63,6 +63,8 @@ public:
     bool rememberPosition() const;
     void setLastPosition(const std::string& filePath, int64_t position);
     int64_t lastPosition(const std::string& filePath) const;
+    void setLastDuration(const std::string& filePath, int64_t duration);
+    int64_t lastDuration(const std::string& filePath) const;
 
     // 剧集进度记忆
     void setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,

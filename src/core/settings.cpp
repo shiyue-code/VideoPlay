@@ -269,6 +269,22 @@ int64_t Settings::lastPosition(const std::string& filePath) const {
     return 0;
 }
 
+void Settings::setLastDuration(const std::string& filePath, int64_t duration) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_config.contains("durations")) {
+        m_config["durations"] = nlohmann::json::object();
+    }
+    m_config["durations"][filePath] = duration;
+}
+
+int64_t Settings::lastDuration(const std::string& filePath) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("durations") && m_config["durations"].contains(filePath)) {
+        return m_config["durations"][filePath].get<int64_t>();
+    }
+    return 0;
+}
+
 // 剧集进度记忆
 void Settings::setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,
                                  const std::unordered_map<std::string, int64_t>& positions) {

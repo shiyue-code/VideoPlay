@@ -26,6 +26,13 @@ enum DWM_WINDOW_CORNER_PREFERENCE {
 namespace VideoPlay {
 
 namespace {
+#ifndef WM_NCUAHDRAWCAPTION
+    constexpr UINT WM_NCUAHDRAWCAPTION = 0x00AE;
+#endif
+
+#ifndef WM_NCUAHDRAWFRAME
+    constexpr UINT WM_NCUAHDRAWFRAME = 0x00AF;
+#endif
 
     // ShadowWindow HWND -> ContentWindow HWND 映射
     std::unordered_map<HWND, HWND> g_shadowToContent;
@@ -211,16 +218,23 @@ namespace {
                 break;
 
             case WM_NCACTIVATE: {
-                // 不主动请求框架重绘，仅标记客户区失效
-                // 让 DefSubclassProc 正常处理，保留 resize 等默认行为
+                // 激活切换时不要让 DefSubclassProc 重画原生标题栏。
                 InvalidateRect(hwnd, nullptr, FALSE);
-                break;
+                return TRUE;
             }
 
-            case WM_NCPAINT: {
-                // 阻止系统绘制任何非客户区内容（标题栏、边框线等）
-                // 由于 WM_NCCALCSIZE 已将非客户区削减为 0，此处直接拦截
+            case WM_NCPAINT:
+            case WM_NCUAHDRAWCAPTION:
+            case WM_NCUAHDRAWFRAME: {
+                // 阻止系统和 UxTheme 绘制任何非客户区内容（标题栏、边框线等）。
                 return 0;
+            }
+
+            case WM_SETTEXT: {
+                // 更新窗口标题会触发非客户区刷新；先让标题入系统，再只刷新客户区。
+                LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return result;
             }
         }
 
@@ -574,31 +588,57 @@ void WindowFrameWin32::updateFrame() {
 
 void WindowFrameWin32::applyStyle() {
     if (!m_hwnd) return;
+
+    SendMessage(m_hwnd, WM_SETREDRAW, FALSE, 0);
     LONG newStyle = m_originalStyle;
     newStyle &= ~WS_CAPTION;
     newStyle |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU;
     SetWindowLong(m_hwnd, GWL_STYLE, newStyle);
+    SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                 SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 
     // 禁用 DWM 非客户区渲染，彻底阻止激活切换等场景下的原生边框/标题栏闪现
     DWMNCRENDERINGPOLICY ncrp = DWMNCRP_DISABLED;
     DwmSetWindowAttribute(m_hwnd, DWMWA_NCRENDERING_POLICY, &ncrp, sizeof(ncrp));
 
+    BOOL transitionsDisabled = TRUE;
+    DwmSetWindowAttribute(m_hwnd, DWMWA_TRANSITIONS_FORCEDISABLED,
+                          &transitionsDisabled, sizeof(transitionsDisabled));
+
     // 设置窗口圆角 (Win11 DWM)
     DWM_WINDOW_CORNER_PREFERENCE cornerPref = DWMWCP_ROUND;
     DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
+
+    SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
+    RedrawWindow(m_hwnd, nullptr, nullptr,
+                 RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOFRAME | RDW_ALLCHILDREN);
 }
 
 void WindowFrameWin32::restoreStyle() {
     if (!m_hwnd) return;
+
+    SendMessage(m_hwnd, WM_SETREDRAW, FALSE, 0);
     SetWindowLong(m_hwnd, GWL_STYLE, m_originalStyle);
+    SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                 SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 
     // 恢复 DWM 非客户区渲染
     DWMNCRENDERINGPOLICY ncrp = DWMNCRP_ENABLED;
     DwmSetWindowAttribute(m_hwnd, DWMWA_NCRENDERING_POLICY, &ncrp, sizeof(ncrp));
 
+    BOOL transitionsDisabled = FALSE;
+    DwmSetWindowAttribute(m_hwnd, DWMWA_TRANSITIONS_FORCEDISABLED,
+                          &transitionsDisabled, sizeof(transitionsDisabled));
+
     // 恢复窗口圆角为默认
     DWM_WINDOW_CORNER_PREFERENCE cornerPrefRestore = DWMWCP_DEFAULT;
     DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPrefRestore, sizeof(cornerPrefRestore));
+
+    SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
+    RedrawWindow(m_hwnd, nullptr, nullptr,
+                 RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME | RDW_ALLCHILDREN);
 }
 
 void WindowFrameWin32::refreshWindow() {
