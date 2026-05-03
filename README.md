@@ -33,6 +33,7 @@
 - 📺 剧集自动识别与选集面板
 - 📌 播放进度记忆与恢复
 - ⏭️ 自动连播下一集/下一个文件
+- 🔖 章节支持：MKV/MP4 章节自动解析，进度条书签标记
 
 ### UI 与交互
 - 🖱️ 无边框窗口，支持自定义标题栏和拖拽调整大小
@@ -125,28 +126,41 @@ cmake --build build --config Release
 ```
 VideoPlay/
 ├── src/
-│   ├── main.cpp              # 程序入口
-│   ├── app.h/cpp             # 主应用类 (播放控制、菜单处理)
+│   ├── main.cpp                   # 程序入口
+│   ├── app.h                      # 主应用类声明
+│   ├── app.cpp                    # 核心: 初始化、主循环、渲染调度
+│   ├── app_playback.cpp           # 播放控制: play/pause/seek/volume/speed
+│   ├── app_playlist.cpp           # 播放列表、剧集识别、自动连播
+│   ├── app_events.cpp             # 事件与菜单回调处理
 │   ├── core/
-│   │   ├── ffmpegplayer.h/cpp   # FFmpeg 解码和播放核心
-│   │   ├── audioplayer.h/cpp    # SDL3 音频输出封装
-│   │   ├── settings.h/cpp       # JSON 配置管理 (单例)
-│   │   ├── episodedetector.cpp  # 剧集自动识别
-│   │   └── common.h             # 公共定义、枚举、时间格式化
+│   │   ├── ffmpegplayer.h/cpp     # FFmpeg 解码和播放核心
+│   │   ├── audioplayer.h/cpp      # SDL3 音频输出封装
+│   │   ├── settings.h/cpp         # JSON 配置管理 (单例)
+│   │   ├── episodedetector.h/cpp  # 剧集自动识别
+│   │   └── common.h               # 公共定义、枚举、时间格式化
 │   ├── renderer/
-│   │   ├── sdlrenderer.h/cpp    # SDL3 统一渲染器 (视频+字幕+UI)
-│   │   └── windowframe.h/cpp    # 无边框窗口框架 (Win32)
+│   │   ├── sdlrenderer.h          # 统一渲染器接口
+│   │   ├── sdlrenderer.cpp        # 核心: 构造/初始化/视频纹理
+│   │   ├── sdlrenderer_events.cpp # 事件处理: 鼠标/键盘/命中检测
+│   │   ├── sdlrenderer_menus.cpp  # 菜单逻辑与动画
+│   │   ├── sdlrenderer_ui.cpp     # UI 渲染: 控制栏/进度条/书签
+│   │   ├── sdlrenderer_draw.cpp   # 底层绘图原语
+│   │   ├── sdlrenderer_internal.h # 共享常量
+│   │   ├── windowframe.h/cpp      # 无边框窗口框架
+│   │   ├── windowframe_win32.cpp  # Win32 实现
+│   │   └── windowframe_linux.cpp  # Linux 实现
 │   ├── subtitles/
-│   │   └── subtitleparser.h/cpp # SRT/ASS/VTT 字幕解析
+│   │   └── subtitleparser.h/cpp   # SRT/ASS/VTT 字幕解析
 │   └── utils/
-│       ├── logger.h/cpp         # 单例日志系统
-│       └── stb_image_write.h    # PNG 截图输出
+│       ├── logger.h/cpp           # 单例日志系统
+│       ├── stb_image.h            # 图片加载
+│       └── stb_image_write.h      # PNG 截图输出
 ├── 3rdparty/
-│   ├── SDL3/                 # SDL3 (submodule)
-│   ├── SDL3_ttf/             # SDL3_ttf (submodule)
-│   └── nlohmann/             # JSON 库 (头文件)
+│   ├── SDL3/                      # SDL3 (submodule)
+│   ├── SDL3_ttf/                  # SDL3_ttf (submodule)
+│   └── nlohmann/                  # JSON 库 (头文件)
 ├── cmake/
-│   ├── FindFFmpeg.cmake      # FFmpeg 查找模块
+│   ├── FindFFmpeg.cmake           # FFmpeg 查找模块
 │   └── VideoPlayConfig.cmake.in
 ├── tests/
 │   └── test_playbackcontroller.cpp
