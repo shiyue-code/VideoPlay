@@ -318,6 +318,43 @@ void VideoPlayerApp::render() {
 
     bool isPreloading = (m_player && m_player->isPreloading());
 
+    // 构建播放列表进度数据
+    std::vector<float> playlistProgress;
+    playlistProgress.reserve(m_playlist.size());
+    for (const auto& path : m_playlist) {
+        int64_t pos = Settings::instance().lastPosition(path);
+        int64_t dur = Settings::instance().lastDuration(path);
+        if (dur > 0) {
+            playlistProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
+        } else {
+            playlistProgress.push_back(0.0f);
+        }
+    }
+    m_renderer->setPlaylistProgress(playlistProgress);
+
+    // 构建剧集进度数据
+    std::vector<float> episodeProgress;
+    if (m_currentSeries) {
+        episodeProgress.reserve(m_currentSeries->episodes.size());
+        for (const auto& ep : m_currentSeries->episodes) {
+            int64_t pos = Settings::instance().lastPosition(ep.path);
+            int64_t dur = Settings::instance().lastDuration(ep.path);
+            if (dur > 0) {
+                episodeProgress.push_back(std::min(1.0f, static_cast<float>(pos) / static_cast<float>(dur)));
+            } else {
+                episodeProgress.push_back(pos > 0 ? 0.01f : 0.0f); // 有位置但无时长时给一个最小标记
+            }
+        }
+    }
+    m_renderer->setEpisodeProgress(episodeProgress);
+
+    // Prev/Next Tooltip 智能语义
+    if (m_currentSeries) {
+        m_renderer->setPrevNextTooltip("上一集", "下一集");
+    } else {
+        m_renderer->setPrevNextTooltip("上一个", "下一个");
+    }
+
     // 渲染 UI
     m_renderer->renderUI(
         m_position,
@@ -797,6 +834,9 @@ void VideoPlayerApp::onPositionChanged(int64_t position) {
 
 void VideoPlayerApp::onDurationChanged(int64_t duration) {
     m_duration = duration;
+    if (!m_currentFile.empty() && duration > 0) {
+        Settings::instance().setLastDuration(m_currentFile, duration);
+    }
     Logger::instance().info("Duration: " + std::to_string(duration) + "ms");
 }
 
@@ -852,6 +892,15 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 13: // 下一个
             playNext();
             break;
+        case 18: // 播放列表
+            m_renderer->togglePlaylistPanel();
+            break;
+        case 19: // 上一集（播放菜单就近入口）
+            playPreviousEpisode();
+            break;
+        case 22: // 下一集（播放菜单就近入口）
+            playNextEpisode();
+            break;
         case 30: // 上一集
             playPreviousEpisode();
             break;
@@ -873,10 +922,10 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 17: // 无边框模式
             if (m_renderer) m_renderer->toggleBorderless();
             break;
-        case 20: // 快捷键
+        case 50: // 快捷键
             showHelp();
             break;
-        case 21: // 关于
+        case 51: // 关于
             showAbout();
             break;
     }

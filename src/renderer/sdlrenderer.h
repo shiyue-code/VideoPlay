@@ -147,6 +147,9 @@ public:
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
                         const std::string& seriesName = "", int seasonNumber = 0);
+    void setEpisodeProgress(const std::vector<float>& progress);
+    void setPlaylistProgress(const std::vector<float>& progress);
+    void setPrevNextTooltip(const std::string& prevTooltip, const std::string& nextTooltip);
     void toggleEpisodePanel();
     void togglePlaylistPanel();
 
@@ -265,6 +268,9 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
+    bool m_isPlaying = false;
+    std::vector<float> m_episodeProgress;
+    std::vector<float> m_playlistProgress;
     const std::vector<EpisodeInfo>* m_episodeData = nullptr;
     size_t m_currentEpisodeIndex = 0;
     std::string m_episodeSeriesName;
@@ -347,7 +353,10 @@ private:
     int m_lastClickX = 0;
     int m_lastClickY = 0;
     std::string m_tooltip;
+    std::string m_tooltipPrev;
+    std::string m_tooltipNext;
     uint64_t m_tooltipTime = 0;
+    uint64_t m_tooltipShowTime = 0;
 
     // 回调
     FileDropCallback m_fileDropCallback;
