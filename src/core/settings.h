@@ -68,6 +68,8 @@ public:
     LoopMode loopMode() const;
     void setAspectMode(AspectMode mode);
     AspectMode aspectMode() const;
+    void setAlwaysOnTop(bool enabled);
+    bool alwaysOnTop() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);

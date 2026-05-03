@@ -185,6 +185,10 @@ public:
     void setAspectMode(AspectMode mode);
     AspectMode aspectMode() const;
 
+    // 窗口置顶
+    void toggleAlwaysOnTop();
+    bool isAlwaysOnTop() const;
+
     // 截图并保存到桌面
     void takeScreenshot();
 
@@ -290,6 +294,7 @@ private:
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     AspectMode m_aspectMode = AspectMode::Original;
+    bool m_alwaysOnTop = false;
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;
     const std::vector<EpisodeInfo>* m_episodeData = nullptr;
