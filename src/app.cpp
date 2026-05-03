@@ -168,7 +168,10 @@ bool VideoPlayerApp::initialize() {
 void VideoPlayerApp::shutdown() {
     Logger::instance().info("Shutting down VideoPlayerApp...");
 
-    // 正常退出时清除会话标记，避免下次启动误恢复
+    // 正常退出时保存当前进度并清除会话标记
+    if (!m_currentFile.empty() && m_position > 0) {
+        Settings::instance().setLastPosition(m_currentFile, m_position);
+    }
     Settings::instance().clearLastSession();
 
     if (m_player) {
@@ -433,7 +436,7 @@ void VideoPlayerApp::render() {
         reportStart = Clock::now();
     }
 
-    // 定期保存会话状态（每 5 秒），用于意外停止后的自动恢复
+    // 定期保存会话状态和播放位置（每 5 秒），并刷新进度缓存
     if (m_isPlaying && !m_currentFile.empty() && m_duration > 0) {
         uint64_t now = SDL_GetTicks();
         if (now - m_lastSessionSaveTime >= 5000) {
@@ -444,6 +447,8 @@ void VideoPlayerApp::render() {
             session.playlistIndex = m_currentIndex;
             session.hasValidSession = true;
             Settings::instance().setLastSession(session);
+            Settings::instance().setLastPosition(m_currentFile, m_position);
+            m_progressCacheDirty = true; // 刷新剧集/播放列表面板的进度显示
             m_lastSessionSaveTime = now;
         }
     }
@@ -480,6 +485,16 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
         // 开始播放
         play();
+
+        // 恢复上次观看位置（如果记忆位置开启且未接近结尾）
+        if (Settings::instance().rememberPosition()) {
+            int64_t lastPos = Settings::instance().lastPosition(path);
+            int64_t lastDur = Settings::instance().lastDuration(path);
+            if (lastPos > 0 && lastDur > 0 && lastPos < lastDur - 5000) {
+                m_player->seek(lastPos);
+                m_seekTargetPosition = lastPos;
+            }
+        }
 
         // 立即保存会话，用于意外停止恢复
         SessionInfo session;
