@@ -476,6 +476,9 @@ void VideoPlayerApp::openFile(const std::string& path) {
     if (m_player->loadFile(path)) {
         m_currentFile = path;
 
+        // 添加到最近文件
+        Settings::instance().addRecentFile(path);
+
         // 更新窗口标题
         std::string title = std::filesystem::path(path).filename().string() + " - " + APP_TITLE;
         m_renderer->setWindowTitle(title);
@@ -508,8 +511,16 @@ void VideoPlayerApp::openFile(const std::string& path) {
         session.hasValidSession = true;
         Settings::instance().setLastSession(session);
         m_lastSessionSaveTime = SDL_GetTicks();
+
+        // 更新菜单中的最近文件列表
+        if (m_renderer) {
+            m_renderer->updateRecentFilesMenu();
+        }
     } else {
         Logger::instance().error("Failed to load file: " + path);
+        if (m_renderer) {
+            m_renderer->showMessageBox("打开文件失败", "无法加载文件: " + path + "\n请检查文件格式是否受支持。", true);
+        }
     }
 }
 
@@ -949,6 +960,16 @@ void VideoPlayerApp::onError(const std::string& error) {
 }
 
 void VideoPlayerApp::handleMenu(int menuId) {
+    // 最近文件菜单项 ID 范围 100-109
+    if (menuId >= 100 && menuId < 110) {
+        auto recent = Settings::instance().recentFiles();
+        size_t idx = static_cast<size_t>(menuId - 100);
+        if (idx < recent.size()) {
+            openFile(recent[idx]);
+        }
+        return;
+    }
+
     switch (menuId) {
         case 1: // 打开文件
             openFileDialog();
