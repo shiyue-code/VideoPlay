@@ -216,7 +216,7 @@ private:
     // 字体和文字渲染
     bool loadFont(const std::string& fontPath, int fontSize);
     void closeFont();
-    void drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize = 0);
+    void drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize = 0, uint8_t alpha = 255);
     int getTextWidth(const std::string& text, int fontSize = 0);
     int getFontHeight(int fontSize = 0);
 

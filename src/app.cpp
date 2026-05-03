@@ -168,7 +168,10 @@ bool VideoPlayerApp::initialize() {
 void VideoPlayerApp::shutdown() {
     Logger::instance().info("Shutting down VideoPlayerApp...");
 
-    // 正常退出时保存当前进度并清除会话标记
+    // 正常退出时保存剧集进度、当前进度并清除会话标记
+    if (m_currentSeries) {
+        saveSeriesProgress();
+    }
     if (!m_currentFile.empty() && m_position > 0) {
         Settings::instance().setLastPosition(m_currentFile, m_position);
     }
@@ -781,15 +784,6 @@ void VideoPlayerApp::detectSeries(const std::string& path) {
     m_currentSeries = EpisodeDetector::detectFromFile(path);
     m_progressCacheDirty = true;
     if (m_currentSeries) {
-        // 保存 EpisodeDetector 根据 path 计算出的原始索引
-        size_t actualIndex = m_currentSeries->currentIndex;
-        // 更新渲染器
-        m_renderer->setEpisodeData(&m_currentSeries->episodes, m_currentSeries->currentIndex,
-                                   m_currentSeries->seriesName, m_currentSeries->seasonNumber);
-        // 恢复上次播放位置（但不应该覆盖用户显式打开的文件对应的索引）
-        restoreSeriesPosition();
-        // 恢复为实际打开文件对应的索引，确保面板显示和按钮逻辑正确
-        m_currentSeries->currentIndex = actualIndex;
         m_renderer->setEpisodeData(&m_currentSeries->episodes, m_currentSeries->currentIndex,
                                    m_currentSeries->seriesName, m_currentSeries->seasonNumber);
     } else {

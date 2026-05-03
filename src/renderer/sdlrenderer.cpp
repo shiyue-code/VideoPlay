@@ -514,8 +514,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (ctrlShift && m_episodePrevCallback) {
                             m_episodePrevCallback();
                         } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(-5.0); //  后退5�?
-                            m_seekCallback(-5.0); }
+                            m_seekCallback(-5.0); // 后退5秒
+                        }
                         break;
                     }
                     case SDLK_RIGHT: {
@@ -523,8 +523,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (ctrlShift && m_episodeNextCallback) {
                             m_episodeNextCallback();
                         } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(5.0);  //  前进5�?
-                            m_seekCallback(5.0);  }
+                            m_seekCallback(5.0);  // 前进5秒
+                        }
                         break;
                     }
                     case SDLK_UP:
@@ -1941,13 +1941,13 @@ void SDLRenderer::renderEpisodePanel() {
         std::string txt = "上一集";
         int tw = getTextWidth(txt, 11);
         drawText(txt, prevBtnX + (btnW - tw) / 2, prevBtnY + (btnH - getFontHeight(11)) / 2,
-                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11);
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11, textAlpha);
         if (canPrev) {
             m_controlRects.push_back({prevBtnX, prevBtnY, btnW, btnH, ControlType::EpisodePrev, 0});
         }
     }
 
-    //  下一集按�?
+    // 下一集按钮
     bool canNext = (currentIndex + 1 < m_episodeData->size());
     int nextBtnX = prevBtnX + btnW + btnGap;
     int nextBtnY = prevBtnY;
@@ -1955,12 +1955,13 @@ void SDLRenderer::renderEpisodePanel() {
         bool hovered = canNext && (m_hoveredControl == ControlType::EpisodeNext);
         bool pressed = canNext && (m_pressedControl == ControlType::EpisodeNext);
         uint8_t bgAlpha = canNext ? (hovered ? 160 : 100) : 50;
+        uint8_t textAlpha = canNext ? 255 : 120;
         fillRoundRect(nextBtnX, nextBtnY, btnW, btnH, 6,
                               COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], bgAlpha);
         std::string txt = "下一集";
         int tw = getTextWidth(txt, 11);
         drawText(txt, nextBtnX + (btnW - tw) / 2, nextBtnY + (btnH - getFontHeight(11)) / 2,
-                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11);
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11, textAlpha);
         if (canNext) {
             m_controlRects.push_back({nextBtnX, nextBtnY, btnW, btnH, ControlType::EpisodeNext, 0});
         }
@@ -2124,11 +2125,11 @@ void SDLRenderer::closeFont() {
 #endif
 }
 
-void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize) {
+void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize, uint8_t alpha) {
 #ifdef HAS_SDL_TTF
     if (!m_font || !m_renderer || text.empty()) return;
 
-    std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
+    std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b) + "," + std::to_string(alpha);
     auto it = m_textCache.find(cacheKey);
     if (it != m_textCache.end()) {
         SDL_FRect dstRect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(it->second.width), static_cast<float>(it->second.height) };
@@ -2142,7 +2143,7 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
 
-    SDL_Color color = { r, g, b, 255 };
+    SDL_Color color = { r, g, b, alpha };
     SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), 0, color);
     if (!surface) return;
 
