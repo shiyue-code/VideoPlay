@@ -391,19 +391,21 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
         frame.width * 4  // BGRA stride
     );
 
-    // 计算视频显示区域 (保持宽高比，铺满整个窗口，UI 悬浮在上�?
+    // 计算视频显示区域（保持宽高比，填满整个窗口，UI 悬浮在上层）
     float windowAspect = static_cast<float>(m_windowWidth) / m_windowHeight;
     float videoAspect = static_cast<float>(frame.width) / frame.height;
 
     SDL_FRect dstRect;
     if (windowAspect > videoAspect) {
-        // 窗口更宽，以高度为基�?        dstRect.h = static_cast<float>(m_windowHeight);
-        dstRect.w = static_cast<float>(m_windowHeight) * videoAspect;
+        // 窗口更宽，以高度为基准
+        dstRect.h = static_cast<float>(m_windowHeight);
+        dstRect.w = dstRect.h * videoAspect;
         dstRect.x = (m_windowWidth - dstRect.w) / 2.0f;
         dstRect.y = 0;
     } else {
-        // 窗口更高，以宽度为基�?        dstRect.w = static_cast<float>(m_windowWidth);
-        dstRect.h = static_cast<float>(m_windowWidth) / videoAspect;
+        // 窗口更高，以宽度为基准
+        dstRect.w = static_cast<float>(m_windowWidth);
+        dstRect.h = dstRect.w / videoAspect;
         dstRect.x = 0;
         dstRect.y = (m_windowHeight - dstRect.h) / 2.0f;
     }
@@ -1135,15 +1137,14 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         }
     }
 
-    // 自动隐藏控制栏（3秒无鼠标操作）
-    if (m_showControls && SDL_GetTicks() - m_lastMouseMove > 3000) {
+    // 自动隐藏控制栏（仅在播放状态下，3秒无鼠标操作）
+    if (m_showControls && isPlaying && SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
     }
 
-    // 菜单栏始终显示（不受控制栏自动隐藏影响）
-    renderMenuBar();
-
     if (m_showControls) {
+        // 菜单栏随控制栏一起显隐
+        renderMenuBar();
         // 底部渐变遮罩，让控制栏自然融入视频
         drawGradientVignette();
         renderControls(position, duration, volume, isMuted, isPlaying, speed, isPreloading);
@@ -1153,25 +1154,17 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         }
         // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏）
         renderSyncInfo(audioPts, videoPts, avDiff, m_showPlaylistPanel && !playlist.empty());
+
+        // 侧边面板随控制栏一起显隐
+        if (m_showPlaylistPanel && !playlist.empty()) {
+            renderPlaylistPanel(playlist, currentPlaylistIndex);
+        }
+        if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+            renderEpisodePanel();
+        }
     } else {
         // 控制栏隐藏时关闭已打开的菜单
         closeAllMenus(false);
-    }
-
-    // 小窗口保护：宽度不足时自动关闭剧集面板（播放列表优先级更高）
-    const int MIN_VIDEO_WIDTH = 400;
-    const int PANEL_WIDTH = 284; // 260 + 24 padding
-    bool canShowBoth = m_windowWidth >= MIN_VIDEO_WIDTH + PANEL_WIDTH * 2;
-    if (!canShowBoth && m_showPlaylistPanel && m_showEpisodePanel) {
-        m_showEpisodePanel = false;
-    }
-
-    // 侧边面板拥有独立生命周期，不受控制栏自动隐藏影响
-    if (m_showPlaylistPanel && !playlist.empty()) {
-        renderPlaylistPanel(playlist, currentPlaylistIndex);
-    }
-    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
-        renderEpisodePanel();
     }
 
     // 渲染字幕（始终显示，不受控制栏影响）
@@ -1891,8 +1884,24 @@ void SDLRenderer::renderEpisodePanel() {
         const auto& ep = (*m_episodeData)[i];
         std::string label = ep.title;
 
-        // 已播放小圆点（右侧）
+        // 播放进度：底部细进度条 + 右侧小圆点
         bool hasProgress = (i < m_episodeProgress.size() && m_episodeProgress[i] > 0.0f);
+        float progress = hasProgress ? m_episodeProgress[i] : 0.0f;
+
+        // 底部进度条（2px 高）
+        if (hasProgress) {
+            int barY = itemY + itemH - 2;
+            int barX = panelX + 12;
+            int barW = panelW - 24;
+            int fillW = static_cast<int>(barW * progress);
+            if (fillW < 1) fillW = 1;
+            // 背景
+            fillRect(barX, barY, barW, 2, 255, 255, 255, 30);
+            // 已播放部分
+            fillRect(barX, barY, fillW, 2, 0, 170, 255, 200);
+        }
+
+        // 已播放小圆点（右侧）
         int dotX = panelX + panelW - 28;
         int dotY = itemY + itemH / 2;
         if (hasProgress) {
