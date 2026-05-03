@@ -70,23 +70,17 @@ inline PlaybackSpeed doubleToPlaybackSpeed(double rate) {
     return PlaybackSpeed::Speed_4_0;
 }
 
-inline std::string formatTime(int64_t ms) {
-    int64_t seconds = ms / 1000;
-    int64_t minutes = seconds / 60;
-    int64_t hours = minutes / 60;
-    seconds %= 60;
-    minutes %= 60;
+inline std::string formatTime(int64_t milliseconds) {
+    int totalSeconds = static_cast<int>(milliseconds / 1000);
+    int hours = totalSeconds / 3600;
+    int minutes = (totalSeconds % 3600) / 60;
+    int seconds = totalSeconds % 60;
 
-    char buffer[16];
+    char buffer[32];
     if (hours > 0) {
-        snprintf(buffer, sizeof(buffer), "%lld:%02lld:%02lld", 
-                 static_cast<long long>(hours),
-                 static_cast<long long>(minutes), 
-                 static_cast<long long>(seconds));
+        snprintf(buffer, sizeof(buffer), "%d:%02d:%02d", hours, minutes, seconds);
     } else {
-        snprintf(buffer, sizeof(buffer), "%lld:%02lld",
-                 static_cast<long long>(minutes),
-                 static_cast<long long>(seconds));
+        snprintf(buffer, sizeof(buffer), "%d:%02d", minutes, seconds);
     }
     return std::string(buffer);
 }

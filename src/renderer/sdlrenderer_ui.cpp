@@ -1,0 +1,900 @@
+#include "renderer/sdlrenderer.h"
+#include "renderer/sdlrenderer_internal.h"
+#include "utils/logger.h"
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
+#include <sstream>
+#include <iomanip>
+
+namespace VideoPlay {
+
+
+void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
+                           bool isPlaying, double speed, const std::string& filename,
+                           const std::string& subtitle,
+                           const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
+                           int64_t audioPts, int64_t videoPts, double avDiff,
+                           bool isPreloading) {
+    // 清空控件区域
+    m_controlRects.clear();
+    m_isPlaying = isPlaying;
+
+    // 更新进度条宽度动画（无论控制栏是否显示都更新，保证平滑）
+    {
+        uint64_t now = SDL_GetTicks();
+        float dt = 0.0f;
+        if (m_lastProgressAnimTime > 0) {
+            dt = std::min((now - m_lastProgressAnimTime) / 1000.0f, 0.05f);
+        }
+        m_lastProgressAnimTime = now;
+
+        bool isStopped = !isPlaying && !isPreloading && position == 0;
+        float targetScale = (duration > 0 && !isStopped) ? 1.0f : 0.0f;
+        float diff = targetScale - m_progressBarScale;
+        if (std::abs(diff) > 0.0005f) {
+            // 指数衰减插值：越接近目标速度越慢，天�?ease-out 效果
+            m_progressBarScale += diff * std::min(1.0f, PROGRESS_BAR_ANIM_SPEED * dt);
+        } else {
+            m_progressBarScale = targetScale;
+        }
+    }
+
+    // 自动隐藏控制栏（仅在播放状态下，3秒无鼠标操作）
+    if (m_showControls && isPlaying && SDL_GetTicks() - m_lastMouseMove > 3000) {
+        m_showControls = false;
+    }
+
+    if (m_showControls) {
+        // 菜单栏随控制栏一起显隐
+        renderMenuBar();
+        // 底部渐变遮罩，让控制栏自然融入视频
+        drawGradientVignette();
+        renderControls(position, duration, volume, isMuted, isPlaying, speed, isPreloading);
+        // 渲染文件名（左上角，随控制栏自动隐藏）
+        if (!filename.empty()) {
+            renderFilename(filename);
+        }
+        // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏）
+        renderSyncInfo(audioPts, videoPts, avDiff, m_showPlaylistPanel && !playlist.empty());
+
+        // 侧边面板随控制栏一起显隐
+        if (m_showPlaylistPanel && !playlist.empty()) {
+            renderPlaylistPanel(playlist, currentPlaylistIndex);
+        }
+        if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+            renderEpisodePanel();
+        }
+    } else {
+        // 控制栏隐藏时关闭已打开的菜单
+        closeAllMenus(false);
+    }
+
+    // 渲染字幕（始终显示，不受控制栏影响）
+    if (!subtitle.empty()) {
+        renderSubtitle(subtitle);
+    }
+
+    // 预缓冲加载动画已集成到进度条�?    
+    //  渲染打开的菜�?
+    updateMenuAnimation();
+    if ((m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) || m_menuAnimating) {
+        if (m_menuAnimAlpha > 0.01f) {
+            int menuX = 10;
+            for (int i = 0; i < m_activeMenu; i++) {
+                if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+                int textW = getTextWidth(m_menus[i].label);
+                menuX += textW + 20 + 10;
+            }
+            renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
+        }
+    }
+
+    // 渲染 Tooltip
+    renderTooltip();
+
+    // 自绘 1px 边框，确�?Win10 �?Win11 显示效果完全一�?    // （Win11 �?DWMWA_BORDER_COLOR 是独占特性，Win10 不支持，因此统一�?SDL 自绘�?    // 圆角窗口下不绘制四边直边框，�?DWM 圆角自然呈现
+    if (m_borderless && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {
+        uint8_t br = COLOR_MENU_BG[0];
+        uint8_t bg = COLOR_MENU_BG[1];
+        uint8_t bb = COLOR_MENU_BG[2];
+        const int r = 8; // 圆角半径
+        //  上边框（避开圆角区域�?
+        fillRect(r, 0, m_windowWidth - r * 2, 1, br, bg, bb, 255);
+        //  下边�?
+        fillRect(r, m_windowHeight - 1, m_windowWidth - r * 2, 1, br, bg, bb, 255);
+        //  左边框（避开圆角区域�?
+        fillRect(0, r, 1, m_windowHeight - r * 2, br, bg, bb, 255);
+        //  右边框（避开圆角区域�?
+        fillRect(m_windowWidth - 1, r, 1, m_windowHeight - r * 2, br, bg, bb, 255);
+    }
+}
+
+void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
+                                 bool isPlaying, double speed, bool isPreloading) {
+    int marginX = 24;
+    int marginBottom = 24;
+    int controlY = m_windowHeight - m_controlHeight - marginBottom;
+    int controlW = m_windowWidth - marginX * 2;
+    int radius = 20;
+    
+    //  底部投影（增加悬浮感�?
+    fillRoundRect(marginX + 2, controlY + 4, controlW, m_controlHeight, radius,
+                          0, 0, 0, 80);
+
+    // 外层细白边框（玻璃拟态边框效果）
+    fillRoundRect(marginX - 1, controlY - 1, controlW + 2, m_controlHeight + 2, radius + 1,
+                          255, 255, 255, 55);
+
+    //  内层主背�?
+    fillRoundRect(marginX, controlY, controlW, m_controlHeight, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+    
+    //  进度条（在最上面�?
+    renderProgressBar(position, duration, controlY, isPreloading, isPlaying);
+    
+    // 播放控制按钮
+    renderPlaybackControls(isPlaying, controlY);
+    
+    // 速度按钮
+    renderSpeedButton(speed, controlY);
+    
+    // 时间显示
+    renderTimeDisplay(position, duration, controlY);
+
+    // 播放列表切换按钮
+    {
+        int btnX = m_windowWidth - 44 - m_volumeWidth - 40 - 42;
+        int btnY = controlY + 32;
+        bool hovered = (m_hoveredControl == ControlType::PlaylistButton);
+        bool pressed = (m_pressedControl == ControlType::PlaylistButton);
+        drawButton(btnX, btnY, m_buttonSize, m_buttonSize, "playlist", hovered, pressed);
+        m_controlRects.push_back({btnX, btnY, m_buttonSize, m_buttonSize, ControlType::PlaylistButton, 0});
+    }
+
+
+    
+    // 音量控制
+    renderVolumeControl(volume, isMuted, controlY);
+}
+
+void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying) {
+    int barY = controlY + 14;
+    int barHeight = 6;
+
+    //  根据动画状态计算进度条宽度和边�?
+    int fullBarWidth = m_windowWidth - 44 * 2;
+    int compactBarWidth = m_windowWidth / 3;
+    int barWidth = static_cast<int>(fullBarWidth * m_progressBarScale + compactBarWidth * (1.0f - m_progressBarScale));
+    int margin = (m_windowWidth - barWidth) / 2;
+
+    //  检测悬�?
+    bool hovered = (m_mouseY >= barY && m_mouseY <= barY + barHeight &&
+                   m_mouseX >= margin && m_mouseX <= margin + barWidth);
+    bool pressed = m_draggingProgress;
+
+    //  完全停止状态：刚启动或停止播放后（position=0，不播放，不预载�?
+    bool isCompletelyStopped = !isPlaying && !isPreloading && position == 0;
+
+    // 背景（圆角）
+    uint8_t bgAlpha = isPreloading ? 180 : (duration > 0 ? COLOR_PROGRESS_BG[3] : 120);
+    fillRoundRect(margin, barY, barWidth, barHeight, barHeight / 2,
+                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], bgAlpha);
+
+    // 存储进度条几何用于事件处理
+    m_lastDuration = duration;
+    m_lastBarX = margin;
+    m_lastBarW = barWidth;
+
+    // 章节标记（进度条上方书签形状）
+    if (duration > 0 && !m_chapters.empty()) {
+        const int markerW = 8;
+        const int markerBodyH = 12;
+        const int markerTipH = 4;
+        const int markerTotalH = markerBodyH + markerTipH;
+        for (size_t i = 0; i < m_chapters.size(); ++i) {
+            int64_t chapterTime = m_chapters[i].startTime;
+            if (chapterTime < 0 || chapterTime > duration) continue;
+            float ratio = static_cast<float>(chapterTime) / static_cast<float>(duration);
+            int markerCenterX = margin + static_cast<int>(barWidth * ratio);
+            int markerX = markerCenterX - markerW / 2;
+            int markerY = barY - markerTotalH + 1; // 底部略插入进度条 1px
+
+            bool hovered = (m_hoveredControl == ControlType::ChapterMarker &&
+                            m_hoveredControlValue == static_cast<int>(i));
+
+            // 基础颜色：青色主题
+            uint8_t mr = hovered ? 60 : 0;
+            uint8_t mg = hovered ? 220 : 180;
+            uint8_t mb = 255;
+            uint8_t alpha = hovered ? 255 : 200;
+
+            // 1. 外发光/阴影层
+            fillRect(markerX - 2, markerY - 1, markerW + 4, markerTotalH + 3,
+                     mr, mg, mb, hovered ? 50 : 25);
+
+            // 2. 帽檐（略宽于主体，顶部圆角效果）
+            fillRect(markerX - 1, markerY, markerW + 2, 3, mr, mg, mb, alpha);
+            // 帽檐圆角
+            fillCircle(markerX, markerY + 1, 1, mr, mg, mb, alpha);
+            fillCircle(markerX + markerW, markerY + 1, 1, mr, mg, mb, alpha);
+
+            // 3. 主体
+            fillRect(markerX, markerY + 3, markerW, markerBodyH - 3, mr, mg, mb, alpha);
+
+            // 4. 顶部高光条
+            fillRect(markerX + 2, markerY + 1, markerW - 4, 1, 255, 255, 255, 120);
+
+            // 5. 底部尖角
+            SDL_Vertex triVerts[3];
+            SDL_FColor c{mr / 255.0f, mg / 255.0f, mb / 255.0f, alpha / 255.0f};
+            triVerts[0] = {{static_cast<float>(markerX), static_cast<float>(markerY + markerBodyH)}, c, {0, 0}};
+            triVerts[1] = {{static_cast<float>(markerX + markerW), static_cast<float>(markerY + markerBodyH)}, c, {0, 0}};
+            triVerts[2] = {{static_cast<float>(markerCenterX), static_cast<float>(markerY + markerTotalH)}, c, {0, 0}};
+            int triIdx[3] = {0, 1, 2};
+            SDL_RenderGeometry(m_renderer, nullptr, triVerts, 3, triIdx, 3);
+
+            // 记录章节标记交互区域（先于 ProgressBar，优先级更高）
+            int hitX = markerCenterX - 8;
+            int hitY = markerY - 4;
+            int hitW = 16;
+            int hitH = markerTotalH + 8 + barHeight;
+            m_controlRects.push_back({hitX, hitY, hitW, hitH,
+                                      ControlType::ChapterMarker, static_cast<int>(i)});
+        }
+    }
+
+    // 进度填充 + thumb（停止状态下只保留背景条，和刚启动时一致）
+    if (duration > 0 && !isCompletelyStopped) {
+        float progress = m_draggingProgress ? m_dragProgressRatio
+                                            : static_cast<float>(position) / duration;
+        progress = std::max(0.0f, std::min(1.0f, progress));
+
+        const uint8_t* fillColor = pressed ? COLOR_PROGRESS_HOVER :
+                                   (hovered ? COLOR_PROGRESS_HOVER : COLOR_PROGRESS_FILL);
+
+        int fillW = static_cast<int>(barWidth * progress);
+        if (fillW < barHeight) fillW = barHeight;
+
+        uint8_t fillAlpha = isPreloading ? 70 : fillColor[3];
+        fillRoundRect(margin, barY, fillW, barHeight, barHeight / 2,
+                              fillColor[0], fillColor[1], fillColor[2], fillAlpha);
+
+        //  圆形进度 thumb（预载期间用蓝色，播放时白色，避免半透明发灰�?
+        int knobX = margin + static_cast<int>(barWidth * progress);
+        int knobY = barY + barHeight / 2;
+        int thumbRadius = (hovered || pressed) ? 7 : 5;
+        if (isPreloading) {
+            fillCircle(knobX, knobY, thumbRadius,
+                               COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], 255);
+        } else {
+            fillCircle(knobX, knobY, thumbRadius, 255, 255, 255, 255);
+        }
+    }
+
+    // 记录控件位置
+    m_controlRects.push_back({margin, barY, barWidth, barHeight,
+                              ControlType::ProgressBar, 0});
+}
+
+void SDLRenderer::renderPlaybackControls(bool isPlaying, int controlY) {
+    int buttonY = controlY + 26;
+    int x = 44;
+    
+    //  上一首按�?
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, "prev",
+               m_hoveredControl == ControlType::PrevButton, false);
+    m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::PrevButton, 0});
+    x += m_buttonSize + 10;
+    
+    // 播放/暂停按钮
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, isPlaying ? "pause" : "play",
+               m_hoveredControl == ControlType::PlayButton, m_pressedControl == ControlType::PlayButton);
+    m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::PlayButton, 0});
+    x += m_buttonSize + 10;
+    
+    // 停止按钮
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, "stop",
+               m_hoveredControl == ControlType::StopButton, m_pressedControl == ControlType::StopButton);
+    m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::StopButton, 0});
+    x += m_buttonSize + 10;
+    
+    //  下一首按�?
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, "next",
+               m_hoveredControl == ControlType::NextButton, false);
+    m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::NextButton, 0});
+}
+
+void SDLRenderer::renderSpeedButton(double speed, int controlY) {
+    int buttonY = controlY + 32;
+    int x = 240;
+    
+    bool hovered = (m_hoveredControl == ControlType::SpeedButton);
+    
+    // 圆角按钮背景
+    const uint8_t* bgColor = hovered ? COLOR_BUTTON_BG_HOVER : COLOR_BUTTON_BG;
+    fillRoundRect(x, buttonY, 50, m_buttonSize, 8, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
+    
+    // 速度文字
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(2) << speed << "x";
+    std::string speedText = oss.str();
+    int textW = getTextWidth(speedText, 11);
+    int textX = x + (50 - textW) / 2;
+    int textY = buttonY + (m_buttonSize - getFontHeight(11)) / 2;
+    drawText(speedText, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11);
+    
+    m_controlRects.push_back({x, buttonY, 50, m_buttonSize, ControlType::SpeedButton, 0});
+}
+
+void SDLRenderer::renderVolumeControl(int volume, bool isMuted, int controlY) {
+    int buttonY = controlY + 32;
+    int x = m_windowWidth - 44 - m_volumeWidth - 40;
+    
+    // 音量图标按钮
+    bool volHovered = (m_hoveredControl == ControlType::VolumeButton);
+    drawButton(x, buttonY, m_buttonSize, m_buttonSize, isMuted ? "mute" : "volume", volHovered, false);
+    m_controlRects.push_back({x, buttonY, m_buttonSize, m_buttonSize, ControlType::VolumeButton, 0});
+    x += m_buttonSize + 5;
+    
+    //  音量�?
+    int volBarWidth = m_volumeWidth;
+    int volBarHeight = 6;
+    int volBarY = buttonY + (m_buttonSize - volBarHeight) / 2;
+    
+    fillRoundRect(x, volBarY, volBarWidth, volBarHeight, volBarHeight / 2,
+                          COLOR_PROGRESS_BG[0], COLOR_PROGRESS_BG[1], COLOR_PROGRESS_BG[2], COLOR_PROGRESS_BG[3]);
+
+    if (!isMuted) {
+        float vol = std::max(0, std::min(100, volume)) / 100.0f;
+        int fillW = static_cast<int>(volBarWidth * vol);
+        if (fillW < volBarHeight) fillW = volBarHeight;
+        fillRoundRect(x, volBarY, fillW, volBarHeight, volBarHeight / 2,
+                              COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], COLOR_PROGRESS_FILL[3]);
+    }
+
+    // 记录控件位置
+    m_controlRects.push_back({x, volBarY, volBarWidth, volBarHeight, ControlType::VolumeBar, 0});
+}
+
+void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration, int controlY) {
+    int x = 310;
+    int y = controlY + 32;
+    
+    //  格式化时�?
+    std::string timeText = VideoPlay::formatTime(position) + " / " + VideoPlay::formatTime(duration);
+    
+    // 渲染时间文字
+    drawText(timeText, x, y + (m_buttonSize - getFontHeight()) / 2,
+             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+}
+
+void SDLRenderer::renderFilename(const std::string& filename) {
+    if (filename.empty()) return;
+    
+    // 在视频区域顶部显示文件名
+    int y = m_menuBarHeight + 5;
+    
+    //  获取文件名（不含路径�?
+    std::string name = filename;
+    size_t pos = filename.find_last_of("/\\");
+    if (pos != std::string::npos) {
+        name = filename.substr(pos + 1);
+    }
+    
+    //  计算文字宽度，限制为不与左右侧面板重�?
+    int textW = getTextWidth(name);
+    int maxWidth = m_windowWidth - 340; // �?20px 安全间隙
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        // 左侧选集面板�?260+24=284px
+        maxWidth -= 284;
+    }
+    if (m_showPlaylistPanel) {
+        // 右侧播放列表面板�?260+24=284px
+        maxWidth -= 284;
+    }
+    if (maxWidth < 120) maxWidth = 120;
+    
+    // 截断过长的文件名
+    if (textW > maxWidth) {
+        while (textW > maxWidth - getTextWidth("...") && name.length() > 3) {
+            name = name.substr(0, name.length() - 1);
+            textW = getTextWidth(name + "...");
+        }
+        name += "...";
+        textW = getTextWidth(name);
+    }
+    
+    //  背景�?
+    int bgWidth = textW + 20;
+    fillRect(10, y, bgWidth, 25, 0, 0, 0, 150);
+    
+    //  渲染文件�?
+    drawText(name, 20, y + 5, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+}
+
+void SDLRenderer::renderSubtitle(const std::string& subtitle) {
+#ifdef HAS_SDL_TTF
+    if (!m_font || subtitle.empty()) return;
+
+    // 按换行符分割字幕文本
+    std::vector<std::string> lines;
+    std::string current;
+    for (char c : subtitle) {
+        if (c == '\n') {
+            lines.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) {
+        lines.push_back(current);
+    }
+    if (lines.empty()) return;
+
+    int fontSize = 16;
+    int maxWidth = 0;
+    int lineHeight = getFontHeight(fontSize);
+    for (const auto& line : lines) {
+        int w = getTextWidth(line, fontSize);
+        if (w > maxWidth) maxWidth = w;
+    }
+
+    int paddingX = 24;
+    int paddingY = 12;
+    int totalWidth = maxWidth + paddingX * 2;
+    int totalHeight = lines.size() * lineHeight + paddingY * 2;
+
+    //  底部边距：控制栏显示时在其上方，否则留一定边�?
+    int bottomMargin = m_showControls ? m_controlHeight + 20 : 60;
+    int x = (m_windowWidth - totalWidth) / 2;
+    int y = m_windowHeight - bottomMargin - totalHeight;
+    if (y < m_menuBarHeight + 10) y = m_menuBarHeight + 10;
+
+    // 绘制半透明背景
+    fillRoundRect(x, y, totalWidth, totalHeight, 8, 0, 0, 0, 180);
+
+    //  绘制字幕文字（白色带轻微描边效果通过背景实现�?
+    int textY = y + paddingY;
+    for (const auto& line : lines) {
+        int textW = getTextWidth(line, fontSize);
+        int textX = x + (totalWidth - textW) / 2;
+        drawText(line, textX, textY, 255, 255, 255, fontSize);
+        textY += lineHeight;
+    }
+#endif
+}
+
+void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex) {
+    int panelW = 260;
+    int panelX = m_windowWidth - 24 - panelW;
+    int panelY = m_menuBarHeight + 10; // 上边�?10px，与下方控制栏间距一�?    // 控制栏底部有 24px 边距，其顶部�?m_windowHeight - m_controlHeight - 24
+    // 播放列表面板底部需位于控制栏上方，�?10px 安全间隙
+    int panelBottomMargin = m_windowHeight - m_controlHeight - 24 - 10;
+    int panelH = panelBottomMargin - panelY;
+    if (panelH < 60) return;
+    int radius = 20;
+
+    // 投影
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    // 白边
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 55);
+    // 背景
+    fillRoundRect(panelX, panelY, panelW, panelH, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+
+    // 标题
+    int titleY = panelY + 16;
+    drawText("播放列表", panelX + 16, titleY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 13);
+
+    int itemStartY = titleY + 28;
+    int itemH = 28;
+    int maxVisible = (panelY + panelH - 16 - itemStartY) / itemH;
+    if (maxVisible < 1) maxVisible = 1;
+
+    // 计算起始索引：优先使用手动滚动偏移，同时确保当前项在可视范围内
+    size_t startIndex = static_cast<size_t>(m_playlistScrollOffset);
+    size_t endIndex = startIndex + maxVisible;
+    if (endIndex > playlist.size()) {
+        endIndex = playlist.size();
+        if (playlist.size() > static_cast<size_t>(maxVisible)) {
+            startIndex = playlist.size() - maxVisible;
+        } else {
+            startIndex = 0;
+        }
+    }
+    // 确保当前项在可视范围内
+    if (currentIndex < startIndex) {
+        startIndex = currentIndex;
+    } else if (currentIndex >= endIndex) {
+        startIndex = currentIndex - maxVisible + 1;
+    }
+    m_playlistScrollOffset = static_cast<int>(startIndex);
+    endIndex = startIndex + maxVisible;
+    if (endIndex > playlist.size()) endIndex = playlist.size();
+
+    for (size_t i = startIndex; i < endIndex; ++i) {
+        int itemY = itemStartY + static_cast<int>(i - startIndex) * itemH;
+        bool isCurrent = (i == currentIndex);
+        bool hovered = (m_mouseX >= panelX + 12 && m_mouseX <= panelX + panelW - 12 &&
+                        m_mouseY >= itemY && m_mouseY <= itemY + itemH);
+
+        if (isCurrent) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
+            // 当前播放项左侧 3px 竖条指示器
+            fillRoundRect(panelX + 12, itemY + 6, 3, itemH - 12, 2,
+                          255, 255, 255, 220);
+        } else if (hovered) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
+        }
+
+        // 记录控件位置用于点击检测
+        m_controlRects.push_back({panelX + 12, itemY, panelW - 24, itemH, ControlType::PlaylistItem, static_cast<int>(i)});
+
+        //  文件�?
+        std::string name = playlist[i];
+        size_t pos = name.find_last_of("/\\");
+        if (pos != std::string::npos) {
+            name = name.substr(pos + 1);
+        }
+
+        // 悬浮时显示进度百分比
+        bool showProgress = hovered && i < m_playlistProgress.size() && m_playlistProgress[i] > 0.0f;
+        std::string progressText;
+        int progressTextW = 0;
+        if (showProgress) {
+            std::ostringstream pss;
+            pss << static_cast<int>(m_playlistProgress[i] * 100.0f) << "%";
+            progressText = pss.str();
+            progressTextW = getTextWidth(progressText, 10) + 8;
+        }
+
+        // 截断
+        int maxTextW = panelW - 48 - progressTextW;
+        int textW = getTextWidth(name, 12);
+        if (textW > maxTextW) {
+            while (textW > maxTextW - getTextWidth("...", 12) && name.length() > 3) {
+                name = name.substr(0, name.length() - 1);
+                textW = getTextWidth(name + "...", 12);
+            }
+            name += "...";
+        }
+
+        int textColorR = isCurrent ? 255 : COLOR_TEXT[0];
+        int textColorG = isCurrent ? 255 : COLOR_TEXT[1];
+        int textColorB = isCurrent ? 255 : COLOR_TEXT[2];
+        drawText(name, panelX + 20, itemY + (itemH - getFontHeight(12)) / 2, textColorR, textColorG, textColorB, 12);
+
+        // 悬浮时右侧显示进度百分比
+        if (showProgress) {
+            int ptY = itemY + (itemH - getFontHeight(10)) / 2;
+            drawText(progressText, panelX + panelW - 24 - progressTextW + 4, ptY, 150, 150, 150, 10);
+        }
+    }
+}
+
+void SDLRenderer::renderLoadingAnimation() {
+    if (!m_renderer) return;
+
+    int cx = m_windowWidth / 2;
+    int cy = m_windowHeight / 2;
+    int radius = 36;
+    int dotCount = 8;
+    
+    // 基于时间计算旋转角度
+    uint64_t now = SDL_GetTicks();
+    float rotation = (now % 1500) / 1500.0f * 2.0f * 3.14159265f;
+    
+    for (int i = 0; i < dotCount; ++i) {
+        float angle = rotation + i * (2.0f * 3.14159265f / dotCount);
+        int dx = static_cast<int>(cx + std::cos(angle) * radius);
+        int dy = static_cast<int>(cy + std::sin(angle) * radius);
+        
+        // 渐隐效果：前面的点更透明
+        uint8_t alpha = static_cast<uint8_t>(255 * (1.0f - i / static_cast<float>(dotCount)));
+        int dotRadius = 5 - i / 3;
+        if (dotRadius < 2) dotRadius = 2;
+        
+        fillCircle(dx, dy, dotRadius, 0, 170, 255, alpha);
+    }
+    
+    // 绘制 "加载中.." 文字
+    std::string text = "加载中..";
+    int textW = getTextWidth(text, 14);
+    drawText(text, cx - textW / 2, cy + radius + 20, 200, 200, 200, 14);
+}
+
+void SDLRenderer::renderEpisodePanel() {
+    if (!m_episodeData || m_episodeData->empty()) return;
+
+    int panelW = 260;
+    int panelX = 24; // 左侧，与右侧播放列表面板对称
+    int panelY = m_menuBarHeight + 10;
+    int panelBottomMargin = m_windowHeight - m_controlHeight - 24 - 10;
+    int panelH = panelBottomMargin - panelY;
+    if (panelH < 60) return;
+    int radius = 20;
+
+    // 投影
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    // 白边
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 55);
+    // 背景
+    fillRoundRect(panelX, panelY, panelW, panelH, radius,
+                          COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+
+    // 标题
+    int titleY = panelY + 16;
+    std::string panelTitle = "选集";
+    if (!m_episodeSeriesName.empty()) {
+        if (m_episodeSeasonNumber > 0) {
+            panelTitle = m_episodeSeriesName + " S" + std::to_string(m_episodeSeasonNumber);
+        } else {
+            panelTitle = m_episodeSeriesName;
+        }
+    }
+    drawText(panelTitle, panelX + 16, titleY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 13);
+
+    // 底部按钮区域
+    const int buttonAreaH = 44;
+    const int btnW = 90;
+    const int btnH = 30;
+    const int btnGap = 16;
+    int buttonAreaY = panelY + panelH - buttonAreaH;
+
+    int itemStartY = titleY + 28;
+    int itemH = 28;
+    int listBottomY = buttonAreaY - 8;
+    int maxVisible = (listBottomY - itemStartY) / itemH;
+    if (maxVisible < 1) maxVisible = 1;
+
+    size_t currentIndex = m_currentEpisodeIndex;
+    size_t startIndex = static_cast<size_t>(m_episodeScrollOffset);
+    size_t endIndex = startIndex + maxVisible;
+    if (endIndex > m_episodeData->size()) {
+        endIndex = m_episodeData->size();
+        if (m_episodeData->size() > static_cast<size_t>(maxVisible)) {
+            startIndex = m_episodeData->size() - maxVisible;
+        } else {
+            startIndex = 0;
+        }
+    }
+    // 确保当前项在可视范围内
+    if (currentIndex < startIndex) {
+        startIndex = currentIndex;
+    } else if (currentIndex >= endIndex) {
+        startIndex = currentIndex - maxVisible + 1;
+    }
+    m_episodeScrollOffset = static_cast<int>(startIndex);
+    endIndex = startIndex + maxVisible;
+    if (endIndex > m_episodeData->size()) endIndex = m_episodeData->size();
+
+    for (size_t i = startIndex; i < endIndex; ++i) {
+        int itemY = itemStartY + static_cast<int>(i - startIndex) * itemH;
+        bool isCurrent = (i == currentIndex);
+        bool hovered = (m_mouseX >= panelX + 12 && m_mouseX <= panelX + panelW - 12 &&
+                        m_mouseY >= itemY && m_mouseY <= itemY + itemH);
+
+        if (isCurrent) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
+            //  当前集左�?3px 竖条指示�?
+            fillRoundRect(panelX + 12, itemY + 6, 3, itemH - 12, 2,
+                          255, 255, 255, 220);
+        } else if (hovered) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
+        }
+
+        m_controlRects.push_back({panelX + 12, itemY, panelW - 24, itemH, ControlType::EpisodeItem, static_cast<int>(i)});
+
+        const auto& ep = (*m_episodeData)[i];
+        std::string label = ep.title;
+
+        // 播放进度：底部细进度条 + 右侧小圆点
+        bool hasProgress = (i < m_episodeProgress.size() && m_episodeProgress[i] > 0.0f);
+        float progress = hasProgress ? m_episodeProgress[i] : 0.0f;
+
+        // 底部进度条（2px 高）
+        if (hasProgress) {
+            int barY = itemY + itemH - 2;
+            int barX = panelX + 12;
+            int barW = panelW - 24;
+            int fillW = static_cast<int>(barW * progress);
+            if (fillW < 1) fillW = 1;
+            // 背景
+            fillRect(barX, barY, barW, 2, 255, 255, 255, 30);
+            // 已播放部分
+            fillRect(barX, barY, fillW, 2, 0, 170, 255, 200);
+        }
+
+        // 已播放小圆点（右侧）
+        int dotX = panelX + panelW - 28;
+        int dotY = itemY + itemH / 2;
+        if (hasProgress) {
+            fillCircle(dotX, dotY, 3, 0, 170, 255, 200);
+        }
+
+        int maxTextW = panelW - (hasProgress ? 56 : 48);
+        int textW = getTextWidth(label, 12);
+        if (textW > maxTextW) {
+            while (textW > maxTextW - getTextWidth("...", 12) && label.length() > 3) {
+                label = label.substr(0, label.length() - 1);
+                textW = getTextWidth(label + "...", 12);
+            }
+            label += "...";
+        }
+
+        int textColorR = isCurrent ? 255 : COLOR_TEXT[0];
+        int textColorG = isCurrent ? 255 : COLOR_TEXT[1];
+        int textColorB = isCurrent ? 255 : COLOR_TEXT[2];
+        drawText(label, panelX + 20, itemY + (itemH - getFontHeight(12)) / 2, textColorR, textColorG, textColorB, 12);
+    }
+
+    //  绘制分隔�?
+    fillRect(panelX + 16, buttonAreaY - 4, panelW - 32, 1, 255, 255, 255, 40);
+
+    //  上一集按�?
+    bool canPrev = (currentIndex > 0);
+    int prevBtnX = panelX + (panelW - btnW * 2 - btnGap) / 2;
+    int prevBtnY = buttonAreaY + (buttonAreaH - btnH) / 2;
+    {
+        bool hovered = canPrev && (m_hoveredControl == ControlType::EpisodePrev);
+        bool pressed = canPrev && (m_pressedControl == ControlType::EpisodePrev);
+        uint8_t bgAlpha = canPrev ? (hovered ? 160 : 100) : 50;
+        uint8_t textAlpha = canPrev ? 255 : 120;
+        fillRoundRect(prevBtnX, prevBtnY, btnW, btnH, 6,
+                              COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], bgAlpha);
+        std::string txt = "上一集";
+        int tw = getTextWidth(txt, 11);
+        drawText(txt, prevBtnX + (btnW - tw) / 2, prevBtnY + (btnH - getFontHeight(11)) / 2,
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11, textAlpha);
+        if (canPrev) {
+            m_controlRects.push_back({prevBtnX, prevBtnY, btnW, btnH, ControlType::EpisodePrev, 0});
+        }
+    }
+
+    // 下一集按钮
+    bool canNext = (currentIndex + 1 < m_episodeData->size());
+    int nextBtnX = prevBtnX + btnW + btnGap;
+    int nextBtnY = prevBtnY;
+    {
+        bool hovered = canNext && (m_hoveredControl == ControlType::EpisodeNext);
+        bool pressed = canNext && (m_pressedControl == ControlType::EpisodeNext);
+        uint8_t bgAlpha = canNext ? (hovered ? 160 : 100) : 50;
+        uint8_t textAlpha = canNext ? 255 : 120;
+        fillRoundRect(nextBtnX, nextBtnY, btnW, btnH, 6,
+                              COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], bgAlpha);
+        std::string txt = "下一集";
+        int tw = getTextWidth(txt, 11);
+        drawText(txt, nextBtnX + (btnW - tw) / 2, nextBtnY + (btnH - getFontHeight(11)) / 2,
+                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 11, textAlpha);
+        if (canNext) {
+            m_controlRects.push_back({nextBtnX, nextBtnY, btnW, btnH, ControlType::EpisodeNext, 0});
+        }
+    }
+}
+
+void SDLRenderer::renderTooltip() {
+    if (m_tooltip.empty() || m_tooltipTime == 0) return;
+
+    // 延迟 400ms 显示，避免鼠标快速滑过时闪烁
+    uint64_t elapsed = SDL_GetTicks() - m_tooltipTime;
+    if (elapsed < 400) return;
+
+    int fontSize = 11;
+    int textW = getTextWidth(m_tooltip, fontSize);
+    int textH = getFontHeight(fontSize);
+    int paddingX = 10;
+    int paddingY = 6;
+    int bgW = textW + paddingX * 2;
+    int bgH = textH + paddingY * 2 + 2; // +2 给底部蓝色条
+
+    // Tooltip 位于鼠标上方，带 10px 间距
+    int tx = m_mouseX - bgW / 2;
+    int ty = m_mouseY - bgH - 10;
+    if (tx < 6) tx = 6;
+    if (tx + bgW > m_windowWidth - 6) tx = m_windowWidth - 6 - bgW;
+    if (ty < 6) ty = m_mouseY + 18; // 如果上方空间不足则显示在下方
+
+    //  1px 圆角边框�?
+    fillRoundRect(tx, ty, bgW, bgH, 6, 120, 120, 130, 255);
+    // 背景：更深更实心的底色，缩进 1px 形成圆角边框效果
+    fillRoundRect(tx + 1, ty + 1, bgW - 2, bgH - 2, 5, 28, 30, 36, 250);
+    // 底部蓝色胶囊装饰（主题色），用圆+矩形拼接确保圆角绝对可见
+    {
+        int barH = 4;
+        int barW = std::max(20, static_cast<int>(bgW * 0.30f));
+        int barX = tx + (bgW - barW) / 2;
+        int barY = ty + bgH - barH - 2;
+        int r = barH / 2; // 2
+        int cy = barY + r;
+        //  左半�?
+        fillCircle(barX + r, cy, r, 0, 170, 255, 255);
+        //  右半�?
+        fillCircle(barX + barW - r - 1, cy, r, 0, 170, 255, 255);
+        // 中间矩形连接
+        fillRect(barX + r, barY, barW - barH, barH, 0, 170, 255, 255);
+    }
+    //  文字：纯白色，高对比�?
+    drawText(m_tooltip, tx + paddingX, ty + paddingY, 255, 255, 255, fontSize);
+}
+
+void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible) {
+    // 分三列渲染，每列独立圆角背景，列间留白自然分隔，不使用线�?    // A/V/Diff 固定在右上角，播放列表面板在 y=44 开始，自然垂直错开
+    const int COL_A_WIDTH = 65;
+    const int COL_V_WIDTH = 65;
+    const int COL_DIFF_WIDTH = 80;
+    const int COL_GAP = 10;
+    const int PADDING = 8;
+    const int RIGHT_MARGIN = 15;
+    const int fontSize = 11;
+    
+    std::string aTime = VideoPlay::formatTime(audioPts);
+    std::string vTime = VideoPlay::formatTime(videoPts);
+    std::ostringstream diffOss;
+    diffOss << std::fixed << std::setprecision(0) << (avDiff * 1000.0);
+    std::string diffVal = diffOss.str() + "ms";
+    
+    int aTimeW = getTextWidth(aTime, fontSize);
+    int vTimeW = getTextWidth(vTime, fontSize);
+    int diffValW = getTextWidth(diffVal, fontSize);
+    int aLabelW = getTextWidth("A:", fontSize);
+    int vLabelW = getTextWidth("V:", fontSize);
+    int diffLabelW = getTextWidth("Diff:", fontSize);
+    
+    int totalWidth = COL_A_WIDTH + COL_GAP + COL_V_WIDTH + COL_GAP + COL_DIFF_WIDTH + PADDING * 2;
+    
+    //  播放列表面板或选集面板显示时水平避�?
+    int panelRight = m_windowWidth - RIGHT_MARGIN;
+    if (playlistVisible) {
+        int playlistPanelX = m_windowWidth - 24 - 260;
+        panelRight = std::min(panelRight, playlistPanelX - 20);
+    }
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        int episodePanelRight = 24 + 260;
+        // sync info 在右上角，选集面板在左上角，不冲突，不需要避�?        (void)episodePanelRight;
+    }
+    
+    int x = panelRight - totalWidth;
+    // 固定在菜单栏下方，与播放列表面板顶部对齐，上边距 10px
+    int y = m_menuBarHeight + 10;
+    
+    // 根据 diff 大小改变颜色
+    uint8_t r = 0, g = 255, b = 0;
+    double absDiff = std::abs(avDiff);
+    if (absDiff > 0.080) {
+        r = 255; g = 0; b = 0;
+    } else if (absDiff > 0.040) {
+        r = 255; g = 255; b = 0;
+    }
+    
+    //  每列左边缘固定（从右向左推导，确保整体右对齐�?
+    int diffColX = panelRight - PADDING - COL_DIFF_WIDTH;
+    int vColX = diffColX - COL_GAP - COL_V_WIDTH;
+    int aColX = vColX - COL_GAP - COL_A_WIDTH;
+    
+    //  每列独立圆角高亮背景，自然分隔三�?
+    fillRoundRect(aColX, y, COL_A_WIDTH, 22, 4, 40, 40, 40, 160);
+    fillRoundRect(vColX, y, COL_V_WIDTH, 22, 4, 40, 40, 40, 160);
+    fillRoundRect(diffColX, y, COL_DIFF_WIDTH, 22, 4, 40, 40, 40, 160);
+    
+    // A 列：标签左对齐，时间右对齐（与标签保持最小间距）
+    drawText("A:", aColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(aTime, std::max(aColX + aLabelW + 8, aColX + COL_A_WIDTH - aTimeW - 4), y + 3,
+             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    
+    //  V 列：标签左对齐，时间右对�?
+    drawText("V:", vColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(vTime, std::max(vColX + vLabelW + 8, vColX + COL_V_WIDTH - vTimeW - 4), y + 3,
+             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    
+    // Diff 列：标签左对齐，数值右对齐
+    drawText("Diff:", diffColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
+    drawText(diffVal, std::max(diffColX + diffLabelW + 8, diffColX + COL_DIFF_WIDTH - diffValW - 4), y + 3,
+             r, g, b, fontSize);
+}
+
+} // namespace VideoPlay

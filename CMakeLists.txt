@@ -94,6 +94,9 @@ find_package(OpenGL QUIET)
 set(SOURCES
     src/main.cpp
     src/app.cpp
+    src/app_playback.cpp
+    src/app_playlist.cpp
+    src/app_events.cpp
     src/core/ffmpegplayer.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
@@ -101,6 +104,10 @@ set(SOURCES
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
     src/renderer/sdlrenderer.cpp
+    src/renderer/sdlrenderer_events.cpp
+    src/renderer/sdlrenderer_menus.cpp
+    src/renderer/sdlrenderer_ui.cpp
+    src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
 )
 
@@ -120,6 +127,7 @@ set(HEADERS
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/renderer/sdlrenderer.h
+    src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
 )
 
