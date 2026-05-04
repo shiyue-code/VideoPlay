@@ -39,7 +39,7 @@ private:
 
     std::vector<SubtitleEntry> m_entries;
     std::string m_filePath;
-    bool m_loaded;
+    bool m_loaded = false;
     int64_t m_offset = 0;
 };
 
