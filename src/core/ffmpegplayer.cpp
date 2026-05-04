@@ -988,6 +988,12 @@ std::vector<ChapterInfo> FFmpegPlayer::chapters() const {
     return m_chapters;
 }
 
+void FFmpegPlayer::setChapters(const std::vector<ChapterInfo>& chapters) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_chapters = chapters;
+    Logger::instance().info("[FFmpeg] Chapters set: " + std::to_string(chapters.size()));
+}
+
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
     if (m_videoFrameQueue.empty()) {

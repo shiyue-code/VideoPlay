@@ -205,6 +205,16 @@ bool VideoPlayerApp::initialize() {
     // 创建字幕解析器
     m_subtitleParser = std::make_unique<SubtitleParser>();
 
+    // 初始化 AI 功能
+    m_aiAnalyzer = std::make_unique<AIAnalyzer>();
+    m_searchEngine = std::make_unique<SearchEngine>();
+    
+    // 配置 AI 分析器
+    AIConfig aiConfig = Settings::instance().aiConfig();
+    if (!aiConfig.cacheDir.empty()) {
+        m_aiAnalyzer->configure(aiConfig);
+    }
+
     Logger::instance().info("VideoPlayerApp initialized successfully");
     return true;
 }

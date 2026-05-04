@@ -79,6 +79,7 @@ public:
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
     std::vector<ChapterInfo> chapters() const;
+    void setChapters(const std::vector<ChapterInfo>& chapters);
 
 private:
     struct StreamContext {
