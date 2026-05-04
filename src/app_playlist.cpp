@@ -172,6 +172,8 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
     if (loopMode == LoopMode::Single && !m_currentFile.empty()) {
         Logger::instance().info("Loop mode: Single, replaying current file");
         if (m_player) {
+            // Clear display frame to avoid showing last frame briefly
+            m_displayFrame = VideoFrame();
             m_player->seek(0);
             play();
         }

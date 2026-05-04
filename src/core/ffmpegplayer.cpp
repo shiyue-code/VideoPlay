@@ -787,9 +787,9 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
 
     result.width = width;
     result.height = height;
-    // Move buffer ownership instead of copying ~N bytes per frame.
-    // swsBuffer will be resized on next call if dimensions change.
-    result.data = std::move(m_videoCtx.swsBuffer);
+    // Copy buffer data to preserve swsBuffer for reuse.
+    // This avoids reallocating ~8MB per frame when move leaves swsBuffer empty.
+    result.data.assign(m_videoCtx.swsBuffer.data(), m_videoCtx.swsBuffer.data() + dstBufferSize);
     
     return result;
 }

@@ -85,8 +85,16 @@ std::string Logger::getCurrentTimestamp() {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()) % 1000;
     
+    // Use thread-safe localtime
+    struct tm tm_buf;
+#if defined(_WIN32)
+    localtime_s(&tm_buf, &time_t_now);
+#else
+    localtime_r(&time_t_now, &tm_buf);
+#endif
+    
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d %H:%M:%S");
+    ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
     ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
     return ss.str();
 }

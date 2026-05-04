@@ -77,12 +77,24 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
 }
 
 std::string SubtitleParser::subtitleAt(int64_t ms) const {
+    if (m_entries.empty()) return "";
+    
     int64_t adjustedMs = ms - m_offset;
-    for (const auto& entry : m_entries) {
-        if (adjustedMs >= entry.startTime && adjustedMs <= entry.endTime) {
-            return entry.text;
+    
+    // Binary search: find the first entry whose startTime > adjustedMs
+    auto it = std::lower_bound(m_entries.begin(), m_entries.end(), adjustedMs,
+        [](const SubtitleEntry& entry, int64_t time) {
+            return entry.startTime <= time;
+        });
+    
+    // Check the entry before (if exists) - it's the most likely candidate
+    if (it != m_entries.begin()) {
+        --it;
+        if (adjustedMs >= it->startTime && adjustedMs <= it->endTime) {
+            return it->text;
         }
     }
+    
     return "";
 }
 
