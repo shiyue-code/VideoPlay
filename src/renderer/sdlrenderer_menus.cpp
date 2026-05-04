@@ -76,6 +76,19 @@ void SDLRenderer::initMenus() {
     };
     m_menus.push_back(episodeMenu);
 
+    // AI 菜单
+    Menu aiMenu;
+    aiMenu.label = "AI";
+    aiMenu.items = {
+        {300, "AI 分析当前视频", "", false, true},
+        {301, "显示摘要", "", false, true},
+        {0, "", "", true},
+        {302, "搜索内容", "Ctrl+F", false, true},
+        {0, "", "", true},
+        {303, "清除 AI 缓存", "", false, true}
+    };
+    m_menus.push_back(aiMenu);
+
     // 帮助菜单
     Menu helpMenu;
     helpMenu.label = "帮助";
@@ -100,6 +113,9 @@ void SDLRenderer::initMenus() {
         {90, "AB循环: 设置A点", "[", false, true},
         {91, "AB循环: 设置B点", "]", false, true},
         {92, "AB循环: 清除", "\\", false, true},
+        {0, "", "", true},
+        {300, "AI 分析当前视频", "", false, true},
+        {302, "搜索内容", "Ctrl+F", false, true},
         {0, "", "", true},
         {16, "全屏", "F", false, true},
         {80, "始终置顶", "T", false, true}

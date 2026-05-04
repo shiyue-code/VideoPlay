@@ -96,4 +96,29 @@ inline double elapsedMs(HRClock::time_point start) {
     return std::chrono::duration<double, std::milli>(HRClock::now() - start).count();
 }
 
+// AI 相关数据结构
+struct TranscriptSegment {
+    int64_t startTime = 0;  // 毫秒
+    int64_t endTime = 0;    // 毫秒
+    std::string text;
+    float confidence = 0.0f;
+};
+
+struct SearchResult {
+    int64_t timestamp = 0;  // 毫秒
+    std::string text;       // 匹配的文本
+    std::string context;    // 上下文
+    float relevance = 0.0f;
+    int source = 0;         // 0=转录, 1=外挂字幕
+};
+
+struct AIAnalysisResult {
+    std::string summary;
+    std::vector<ChapterInfo> chapters;
+    std::vector<TranscriptSegment> transcript;
+    std::string language;
+    int64_t analyzedAt = 0;
+    bool valid = false;
+};
+
 } // namespace VideoPlay

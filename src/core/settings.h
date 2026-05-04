@@ -49,6 +49,15 @@ struct SessionInfo {
     bool hasValidSession = false;
 };
 
+struct AIConfig {
+    std::string baseUrl = "https://api.openai.com/v1";
+    std::string apiKey;
+    std::string whisperModel = "whisper-1";
+    std::string gptModel = "gpt-4o-mini";
+    std::string cacheDir;
+    bool autoAnalyze = false;
+};
+
 class Settings {
 public:
     static Settings& instance();
@@ -97,6 +106,10 @@ public:
     void setLastSession(const SessionInfo& session);
     SessionInfo lastSession() const;
     void clearLastSession();
+
+    // AI 配置
+    void setAIConfig(const AIConfig& config);
+    AIConfig aiConfig() const;
 
     // 保存和加载
     void save();

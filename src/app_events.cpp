@@ -125,6 +125,18 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 92: // AB循环: 清除
             clearLoop();
             break;
+        case 300: // AI 分析当前视频
+            startAIAnalysis();
+            break;
+        case 301: // 显示摘要
+            showAISummary();
+            break;
+        case 302: // 搜索内容
+            showSearchPanel();
+            break;
+        case 303: // 清除 AI 缓存
+            clearAICache();
+            break;
     }
 
     // 章节跳转菜单项 ID 范围 200-249
@@ -217,11 +229,172 @@ void VideoPlayerApp::showAbout() {
         "- 支持多种视频格式\n"
         "- 变速播放 (0.25x - 4x)\n"
         "- 字幕支持 (SRT/ASS/VTT)\n"
-        "- 播放列表管理\n\n"
+        "- 播放列表管理\n"
+        "- AI 视频摘要与章节自动划分\n"
+        "- 智能内容搜索\n\n"
         "License: GPLv3";
     
     if (m_renderer) {
         m_renderer->showMessageBox("关于", aboutText, false);
+    }
+}
+
+void VideoPlayerApp::startAIAnalysis() {
+    if (m_currentFile.empty()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("AI 分析", "请先打开一个视频文件", false);
+        }
+        return;
+    }
+
+    if (!m_aiAnalyzer->isConfigured()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("AI 分析", 
+                "请先配置 AI API Key\n\n"
+                "在设置中配置 API 地址和 Key", false);
+        }
+        return;
+    }
+
+    if (m_aiAnalyzing) {
+        Logger::instance().info("AI analysis already in progress");
+        return;
+    }
+
+    m_aiAnalyzing = true;
+    m_aiProgress = 0.0f;
+    m_aiStatus = "开始分析...";
+
+    Logger::instance().info("[AI] Starting analysis for: " + m_currentFile);
+
+    m_aiAnalyzer->analyze(m_currentFile,
+        [this](const AIAnalysisResult& result) {
+            m_aiResult = result;
+            m_aiAnalyzing = false;
+            m_aiProgress = 1.0f;
+            m_aiStatus = "分析完成";
+
+            if (!result.chapters.empty() && m_player) {
+                m_player->setChapters(result.chapters);
+                m_renderer->setChapters(result.chapters);
+            }
+
+            if (m_searchEngine) {
+                m_searchEngine->buildIndex(m_currentFile, result.transcript, result.chapters);
+            }
+
+            Logger::instance().info("[AI] Analysis complete: " + 
+                std::to_string(result.chapters.size()) + " chapters");
+        },
+        [this](float progress, const std::string& status) {
+            m_aiProgress = progress;
+            m_aiStatus = status;
+        },
+        [this](const std::string& error) {
+            m_aiAnalyzing = false;
+            m_aiStatus = "分析失败: " + error;
+            Logger::instance().error("[AI] Analysis failed: " + error);
+        }
+    );
+}
+
+void VideoPlayerApp::showAISummary() {
+    if (m_currentFile.empty()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("AI 摘要", "请先打开一个视频文件", false);
+        }
+        return;
+    }
+
+    if (!m_aiResult.valid) {
+        if (m_aiAnalyzer->hasCache(m_currentFile)) {
+            m_aiResult = m_aiAnalyzer->loadCache(m_currentFile);
+            if (m_aiResult.valid && m_searchEngine) {
+                m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
+            }
+        }
+    }
+
+    if (!m_aiResult.valid) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("AI 摘要", 
+                "当前视频尚未进行 AI 分析\n\n"
+                "请先执行 \"AI 分析当前视频\"", false);
+        }
+        return;
+    }
+
+    std::string summaryText = "AI 摘要\n\n" + m_aiResult.summary + "\n\n自动生成的章节：\n";
+    for (const auto& chapter : m_aiResult.chapters) {
+        summaryText += "[" + formatTime(chapter.startTime) + "] " + chapter.title + "\n";
+    }
+
+    if (m_renderer) {
+        m_renderer->showMessageBox("AI 摘要", summaryText, false);
+    }
+}
+
+void VideoPlayerApp::showSearchPanel() {
+    if (m_currentFile.empty()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("搜索", "请先打开一个视频文件", false);
+        }
+        return;
+    }
+
+    if (!m_searchEngine->hasIndex()) {
+        if (m_aiResult.valid) {
+            m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
+        } else if (m_aiAnalyzer->hasCache(m_currentFile)) {
+            m_aiResult = m_aiAnalyzer->loadCache(m_currentFile);
+            if (m_aiResult.valid) {
+                m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
+            }
+        }
+    }
+
+    if (!m_searchEngine->hasIndex()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("搜索", 
+                "当前视频没有可搜索的内容\n\n"
+                "请先执行 \"AI 分析当前视频\"", false);
+        }
+        return;
+    }
+
+    Logger::instance().info("[Search] Search panel requested");
+}
+
+void VideoPlayerApp::clearAICache() {
+    if (m_currentFile.empty()) {
+        if (m_renderer) {
+            m_renderer->showMessageBox("清除缓存", "请先打开一个视频文件", false);
+        }
+        return;
+    }
+
+    m_aiAnalyzer->clearCache(m_currentFile);
+    m_aiResult = AIAnalysisResult();
+    if (m_searchEngine) {
+        m_searchEngine->clearIndex();
+    }
+
+    if (m_renderer) {
+        m_renderer->showMessageBox("清除缓存", "AI 缓存已清除", false);
+    }
+    Logger::instance().info("[AI] Cache cleared for: " + m_currentFile);
+}
+
+void VideoPlayerApp::performSearch(const std::string& query) {
+    if (!m_searchEngine || !m_searchEngine->hasIndex() || query.empty()) {
+        return;
+    }
+
+    auto results = m_searchEngine->search(query, 20);
+    Logger::instance().info("[Search] Query: " + query + " Results: " + std::to_string(results.size()));
+
+    if (!results.empty()) {
+        seek(results[0].timestamp - m_position);
     }
 }
 

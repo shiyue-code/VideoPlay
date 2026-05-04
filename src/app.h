@@ -4,6 +4,8 @@
 #include "core/episodedetector.h"
 #include "core/ffmpegplayer.h"
 #include "renderer/sdlrenderer.h"
+#include "ai/aianalyzer.h"
+#include "ai/searchengine.h"
 
 #include <string>
 #include <vector>
@@ -56,6 +58,13 @@ private:
     void handleMenu(int menuId);
     void showHelp();
     void showAbout();
+
+    // AI 功能
+    void startAIAnalysis();
+    void showAISummary();
+    void showSearchPanel();
+    void clearAICache();
+    void performSearch(const std::string& query);
 
     // 播放列表
     void addToPlaylist(const std::string& path);
@@ -126,6 +135,14 @@ private:
     int64_t m_loopA = -1;
     int64_t m_loopB = -1;
     bool m_loopSeeking = false;
+
+    // AI 功能
+    std::unique_ptr<AIAnalyzer> m_aiAnalyzer;
+    std::unique_ptr<SearchEngine> m_searchEngine;
+    AIAnalysisResult m_aiResult;
+    bool m_aiAnalyzing = false;
+    float m_aiProgress = 0.0f;
+    std::string m_aiStatus;
 };
 
 } // namespace VideoPlay

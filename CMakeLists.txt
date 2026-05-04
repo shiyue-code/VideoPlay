@@ -90,6 +90,14 @@ endif()
 # 查找 OpenGL (可选，用于高级渲染)
 find_package(OpenGL QUIET)
 
+# 引入 cpp-httplib (HTTP 客户端)
+include(FetchContent)
+FetchContent_Declare(httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.14.3
+)
+FetchContent_MakeAvailable(httplib)
+
 # 源文件
 set(SOURCES
     src/main.cpp
@@ -109,6 +117,9 @@ set(SOURCES
     src/renderer/sdlrenderer_ui.cpp
     src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
+    src/ai/httpclient.cpp
+    src/ai/aianalyzer.cpp
+    src/ai/searchengine.cpp
 )
 
 if(WIN32)
@@ -129,6 +140,9 @@ set(HEADERS
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
+    src/ai/httpclient.h
+    src/ai/aianalyzer.h
+    src/ai/searchengine.h
 )
 
 # 创建可执行文件
@@ -154,6 +168,7 @@ endif()
 # 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${FFMPEG_LIBRARIES}
+    httplib::httplib
 )
 
 if(TARGET SDL3::SDL3)

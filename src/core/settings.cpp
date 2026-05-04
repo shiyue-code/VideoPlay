@@ -401,4 +401,32 @@ void Settings::clearLastSession() {
     };
 }
 
+// AI 配置
+void Settings::setAIConfig(const AIConfig& config) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["ai"] = {
+        {"baseUrl", config.baseUrl},
+        {"apiKey", config.apiKey},
+        {"whisperModel", config.whisperModel},
+        {"gptModel", config.gptModel},
+        {"cacheDir", config.cacheDir},
+        {"autoAnalyze", config.autoAnalyze}
+    };
+}
+
+AIConfig Settings::aiConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    AIConfig config;
+    if (m_config.contains("ai")) {
+        const auto& ai = m_config["ai"];
+        config.baseUrl = ai.value("baseUrl", "https://api.openai.com/v1");
+        config.apiKey = ai.value("apiKey", std::string());
+        config.whisperModel = ai.value("whisperModel", "whisper-1");
+        config.gptModel = ai.value("gptModel", "gpt-4o-mini");
+        config.cacheDir = ai.value("cacheDir", std::string());
+        config.autoAnalyze = ai.value("autoAnalyze", false);
+    }
+    return config;
+}
+
 } // namespace VideoPlay
