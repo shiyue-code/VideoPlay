@@ -92,6 +92,9 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     // 渲染 Tooltip
     renderTooltip();
 
+    // 渲染右键上下文菜单
+    renderContextMenu();
+
     // 自绘 1px 边框，确�?Win10 �?Win11 显示效果完全一�?    // （Win11 �?DWMWA_BORDER_COLOR 是独占特性，Win10 不支持，因此统一�?SDL 自绘�?    // 圆角窗口下不绘制四边直边框，�?DWM 圆角自然呈现
     if (m_borderless && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {
         uint8_t br = COLOR_MENU_BG[0];

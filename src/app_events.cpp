@@ -116,6 +116,15 @@ void VideoPlayerApp::handleMenu(int menuId) {
                 Settings::instance().setAlwaysOnTop(m_renderer->isAlwaysOnTop());
             }
             break;
+        case 90: // AB循环: 设置A点
+            setLoopPointA();
+            break;
+        case 91: // AB循环: 设置B点
+            setLoopPointB();
+            break;
+        case 92: // AB循环: 清除
+            clearLoop();
+            break;
     }
 
     // 章节跳转菜单项 ID 范围 200-249

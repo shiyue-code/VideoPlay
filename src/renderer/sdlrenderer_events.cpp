@@ -53,6 +53,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_ESCAPE:
                         if (m_fullscreen) toggleFullscreen();
                         closeAllMenus();
+                        hideContextMenu();
                         break;
                     case SDLK_F:
                         toggleFullscreen();
@@ -152,9 +153,15 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             m_mouseY = static_cast<int>(event.button.y);
             if (event.button.button == SDL_BUTTON_LEFT) {
                 m_mouseDown = true;
+                // 先检查右键菜单点击
+                if (m_showContextMenu) {
+                    handleContextMenuClick(m_mouseX, m_mouseY);
+                    break;
+                }
                 handleMouseButtonDown(m_mouseX, m_mouseY);
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 // 右键菜单
+                showContextMenu(m_mouseX, m_mouseY);
             }
             break;
 
