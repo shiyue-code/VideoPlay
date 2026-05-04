@@ -90,9 +90,6 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_DOWN:
                         if (m_volumeCallback) m_volumeCallback(-5);
                         break;
-                    case SDLK_M:
-                        if (m_muteCallback) m_muteCallback();
-                        break;
                     case SDLK_N:
                         if (m_nextCallback) m_nextCallback();
                         break;

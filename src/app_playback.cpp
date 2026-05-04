@@ -107,7 +107,7 @@ void VideoPlayerApp::setSpeed(double speed) {
 }
 
 void VideoPlayerApp::cycleSpeed() {
-    const double speeds[] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+    const double speeds[] = { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0 };
     const int count = sizeof(speeds) / sizeof(speeds[0]);
     
     // 找到下一个速度

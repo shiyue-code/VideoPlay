@@ -91,6 +91,11 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
     }
 
     SDL_DestroySurface(surface);
+    
+    // Periodically prune the text cache to prevent memory leaks
+    if (m_textCache.size() > 512) {
+        pruneTextCache();
+    }
 #endif
 }
 
@@ -101,6 +106,20 @@ void SDLRenderer::clearTextCache() {
         }
     }
     m_textCache.clear();
+}
+
+void SDLRenderer::pruneTextCache(size_t maxEntries) {
+    if (m_textCache.size() <= maxEntries) return;
+    
+    // Remove oldest entries (simple approach: clear half the cache)
+    size_t toRemove = m_textCache.size() - maxEntries / 2;
+    auto it = m_textCache.begin();
+    for (size_t i = 0; i < toRemove && it != m_textCache.end(); ++i) {
+        if (it->second.texture) {
+            SDL_DestroyTexture(it->second.texture);
+        }
+        it = m_textCache.erase(it);
+    }
 }
 
 int SDLRenderer::getTextWidth(const std::string& text, int fontSize) {
@@ -159,7 +178,12 @@ void SDLRenderer::fillRoundRect(int x, int y, int w, int h, int radius, uint8_t 
     }
     int r = std::min(radius, std::min(w / 2, h / 2));
 
-    std::vector<SDL_Vertex> vertices;
+    // Reuse static buffers to avoid per-frame allocations
+    static thread_local std::vector<SDL_Vertex> vertices;
+    static thread_local std::vector<int> indices;
+    vertices.clear();
+    indices.clear();
+
     auto addPoint = [&](float px, float py) {
         SDL_Vertex v;
         v.position.x = px;
@@ -177,7 +201,7 @@ void SDLRenderer::fillRoundRect(int x, int y, int w, int h, int radius, uint8_t 
     addPoint(x + w / 2.0f, y + h / 2.0f);
 
     const float PI = 3.14159265f;
-    const int segments = 64;
+    const int segments = 32; // Reduced from 64 to 32 for better performance
     // top-left arc
     for (int i = 0; i <= segments; ++i) {
         float angle = PI + PI / 2.0f * i / segments;
@@ -200,8 +224,8 @@ void SDLRenderer::fillRoundRect(int x, int y, int w, int h, int radius, uint8_t 
     }
 
     // Generate triangle list indices for a fan from center
-    std::vector<int> indices;
     size_t boundaryCount = vertices.size() - 1;
+    indices.reserve(boundaryCount * 3);
     for (size_t i = 0; i < boundaryCount; ++i) {
         indices.push_back(0);
         indices.push_back(static_cast<int>(1 + i));

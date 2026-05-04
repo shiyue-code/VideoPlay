@@ -32,11 +32,6 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "utils/stb_image_write.h"
 
-#ifdef _WIN32
-#define NOMINMAX
-#include <windows.h>
-#endif
-
 namespace {
     std::string getExecutableDir() {
 #ifdef _WIN32
@@ -65,23 +60,23 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     m_windowWidth = width;
     m_windowHeight = height;
 
-    // 初始�?SDL
+    // 初始化 SDL
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         Logger::instance().error("SDL_Init failed: " + std::string(SDL_GetError()));
         return false;
     }
 
-    // 开�?OpenGL 多重采样（若后端�?OpenGL 则生效）
+    // 开启 OpenGL 多重采样（若后端是 OpenGL 则生效）
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 16);
 
-    //  调试 D3D11 渲染后端（仅在调试时有用�?
+    // 调试 D3D11 渲染后端（仅在调试时有用）
     SDL_SetHint(SDL_HINT_RENDER_DIRECT3D11_DEBUG, "1");
 
 #ifdef HAS_SDL_TTF
-    // 初始�?SDL_ttf
+    // 初始化 SDL_ttf
     if (!TTF_Init()) {
         Logger::instance().error("TTF_Init failed: " + std::string(SDL_GetError()));
-        //  继续运行，只是没有文�?
+        // 继续运行，只是没有文字
         } else {
         // 加载字体
         std::vector<std::string> fontPaths = {
