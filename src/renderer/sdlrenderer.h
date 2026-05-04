@@ -229,6 +229,16 @@ private:
     void closeAllMenus(bool animate = true);
     bool isMenuOpen() const;
 
+    // 右键上下文菜单
+    void showContextMenu(int x, int y);
+    void hideContextMenu();
+    void renderContextMenu();
+    bool handleContextMenuClick(int x, int y);
+    Menu m_contextMenu;
+    bool m_showContextMenu = false;
+    int m_contextMenuX = 0;
+    int m_contextMenuY = 0;
+
     // 渲染各个部分
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
                         bool isPlaying, double speed, bool isPreloading);

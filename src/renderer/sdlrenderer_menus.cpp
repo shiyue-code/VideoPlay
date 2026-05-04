@@ -38,6 +38,10 @@ void SDLRenderer::initMenus() {
         {14, "增加速度", "", false, true},
         {15, "降低速度", "", false, true},
         {0, "", "", true},
+        {90, "AB循环: 设置A点", "[", false, true},
+        {91, "AB循环: 设置B点", "]", false, true},
+        {92, "AB循环: 清除", "\\", false, true},
+        {0, "", "", true},
         {60, "循环: 不循环", "", false, true},
         {61, "循环: 单曲循环", "", false, true},
         {62, "循环: 列表循环", "", false, true},
@@ -49,9 +53,7 @@ void SDLRenderer::initMenus() {
         {0, "", "", true},
         {80, "始终置顶", "T", false, true},
         {0, "", "", true},
-        {16, "全屏", "F", false, true},
-        {0, "", "", true},
-        {17, "无边框模式", "B", false, true}
+        {16, "全屏", "F", false, true}
     };
     m_menus.push_back(playMenu);
 
@@ -82,9 +84,32 @@ void SDLRenderer::initMenus() {
         {51, "关于", "", false, true}
     };
     m_menus.push_back(helpMenu);
+
+    // 初始化右键上下文菜单
+    m_contextMenu.label = "";
+    m_contextMenu.items = {
+        {10, "播放/暂停", "Space", false, true},
+        {11, "停止", "S", false, true},
+        {0, "", "", true},
+        {1, "打开文件...", "Ctrl+O", false, true},
+        {4, "导入字幕...", "", false, true},
+        {0, "", "", true},
+        {14, "增加速度", "", false, true},
+        {15, "降低速度", "", false, true},
+        {0, "", "", true},
+        {90, "AB循环: 设置A点", "[", false, true},
+        {91, "AB循环: 设置B点", "]", false, true},
+        {92, "AB循环: 清除", "\\", false, true},
+        {0, "", "", true},
+        {16, "全屏", "F", false, true},
+        {80, "始终置顶", "T", false, true}
+    };
 }
 
 bool SDLRenderer::handleMenuClick(int x, int y) {
+    // 隐藏右键菜单
+    hideContextMenu();
+    
     int menuX = 10;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         if (m_menus[i].label == "章节" && !m_hasChapters) continue;
@@ -376,5 +401,126 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     }
 }
 
+void SDLRenderer::showContextMenu(int x, int y) {
+    m_contextMenuX = x;
+    m_contextMenuY = y;
+    m_showContextMenu = true;
+    // 关闭顶部菜单栏
+    closeAllMenus(false);
+}
+
+void SDLRenderer::hideContextMenu() {
+    m_showContextMenu = false;
+}
+
+void SDLRenderer::renderContextMenu() {
+    if (!m_showContextMenu) return;
+
+    int itemHeight = 28;
+    int hPadding = 20;
+    int labelFontSize = 14;
+    int shortcutFontSize = 12;
+    int labelMaxW = 0;
+    int shortcutMaxW = 0;
+    int shortcutGap = 30;
+
+    for (const auto& item : m_contextMenu.items) {
+        if (item.separator) continue;
+        int lw = getTextWidth(item.label, labelFontSize);
+        if (lw > labelMaxW) labelMaxW = lw;
+        if (!item.shortcut.empty()) {
+            int sw = getTextWidth(item.shortcut, shortcutFontSize);
+            if (sw > shortcutMaxW) shortcutMaxW = sw;
+        }
+    }
+
+    int menuWidth = hPadding + labelMaxW;
+    if (shortcutMaxW > 0) {
+        menuWidth += shortcutGap + shortcutMaxW;
+    }
+    if (menuWidth < 160) menuWidth = 160;
+
+    int menuHeight = (int)m_contextMenu.items.size() * itemHeight + 8;
+
+    // 确保菜单不超出窗口右边界和下边界
+    int renderX = m_contextMenuX;
+    int renderY = m_contextMenuY;
+    if (renderX + menuWidth > m_windowWidth) {
+        renderX = m_windowWidth - menuWidth - 5;
+    }
+    if (renderY + menuHeight > m_windowHeight) {
+        renderY = m_windowHeight - menuHeight - 5;
+    }
+    if (renderX < 0) renderX = 0;
+    if (renderY < 0) renderY = 0;
+
+    // 菜单背景
+    fillRect(renderX, renderY, menuWidth, menuHeight,
+             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], 240);
+
+    // 菜单项
+    int itemY = renderY + 4;
+    for (const auto& item : m_contextMenu.items) {
+        if (item.separator) {
+            fillRect(renderX + 5, itemY + itemHeight/2 - 1, menuWidth - 10, 2, 100, 100, 100, 255);
+        } else {
+            bool hovered = (m_mouseX >= renderX && m_mouseX <= renderX + menuWidth &&
+                           m_mouseY >= itemY && m_mouseY <= itemY + itemHeight);
+
+            if (hovered && item.enabled) {
+                fillRect(renderX + 2, itemY, menuWidth - 4, itemHeight,
+                         COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], COLOR_MENU_ACTIVE[3]);
+            }
+
+            if (item.enabled) {
+                int labelX = renderX + 10;
+                drawText(item.label, labelX, itemY + 4,
+                        COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+
+                if (!item.shortcut.empty()) {
+                    int sw = getTextWidth(item.shortcut, shortcutFontSize);
+                    drawText(item.shortcut, renderX + menuWidth - 10 - sw, itemY + 4,
+                            150, 150, 150, shortcutFontSize);
+                }
+            }
+        }
+        itemY += itemHeight;
+    }
+}
+
+bool SDLRenderer::handleContextMenuClick(int x, int y) {
+    if (!m_showContextMenu) return false;
+
+    int itemHeight = 28;
+    int menuWidth = 200; // 估算值，与 renderContextMenu 保持一致
+
+    // 计算实际渲染位置
+    int renderX = m_contextMenuX;
+    int renderY = m_contextMenuY;
+    if (renderX + menuWidth > m_windowWidth) {
+        renderX = m_windowWidth - menuWidth - 5;
+    }
+
+    int itemY = renderY + 4;
+    for (const auto& item : m_contextMenu.items) {
+        if (item.separator) {
+            itemY += itemHeight;
+            continue;
+        }
+
+        if (x >= renderX && x <= renderX + menuWidth &&
+            y >= itemY && y <= itemY + itemHeight && item.enabled) {
+            hideContextMenu();
+            if (m_menuCallback) {
+                m_menuCallback(item.id);
+            }
+            return true;
+        }
+        itemY += itemHeight;
+    }
+
+    hideContextMenu();
+    return true;
+}
 
 } // namespace VideoPlay
