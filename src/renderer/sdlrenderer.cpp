@@ -500,7 +500,7 @@ void SDLRenderer::updateRecentFilesMenu() {
     if (m_menus.empty()) return;
     Menu& fileMenu = m_menus[0];
 
-    // 保留固定项（ID < 100）
+    // 保留固定项（ID < 100），过滤掉空的分隔线
     std::vector<MenuItem> fixedItems;
     for (const auto& item : fileMenu.items) {
         if (item.id < 100) {
@@ -522,7 +522,26 @@ void SDLRenderer::updateRecentFilesMenu() {
         }
     }
 
-    fileMenu.items = std::move(fixedItems);
+    // 清理连续的空分隔线
+    std::vector<MenuItem> cleanedItems;
+    bool lastWasSeparator = false;
+    for (const auto& item : fixedItems) {
+        if (item.separator) {
+            if (!lastWasSeparator) {
+                cleanedItems.push_back(item);
+                lastWasSeparator = true;
+            }
+        } else {
+            cleanedItems.push_back(item);
+            lastWasSeparator = false;
+        }
+    }
+    // 移除末尾的分隔线
+    while (!cleanedItems.empty() && cleanedItems.back().separator) {
+        cleanedItems.pop_back();
+    }
+
+    fileMenu.items = std::move(cleanedItems);
 }
 
 void SDLRenderer::takeScreenshot() {
