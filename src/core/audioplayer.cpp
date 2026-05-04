@@ -37,6 +37,9 @@ bool AudioPlayer::initialize(const AudioFormat& format) {
     m_basePlayedMs = 0.0;
     m_timerRunning = false;
 
+    // Apply initial volume/mute state to stream gain
+    applyStreamGain();
+
     Logger::instance().info("Audio stream initialized: " +
                            std::to_string(format.sampleRate) + "Hz, " +
                            std::to_string(format.channels) + " channels");
@@ -127,6 +130,7 @@ void AudioPlayer::reset() {
 
 void AudioPlayer::setVolume(int volume) {
     m_volume = std::clamp(volume, 0, 100);
+    applyStreamGain();
 }
 
 int AudioPlayer::volume() const {
@@ -135,10 +139,17 @@ int AudioPlayer::volume() const {
 
 void AudioPlayer::setMuted(bool muted) {
     m_muted = muted;
+    applyStreamGain();
 }
 
 bool AudioPlayer::isMuted() const {
     return m_muted.load();
+}
+
+void AudioPlayer::applyStreamGain() {
+    if (!m_stream) return;
+    float gain = m_muted ? 0.0f : (m_volume.load() / 100.0f);
+    SDL_SetAudioStreamGain(m_stream, gain);
 }
 
 void AudioPlayer::setPlaybackSpeed(double speed) {
@@ -159,34 +170,18 @@ double AudioPlayer::playbackSpeed() const {
 void AudioPlayer::enqueue(const std::vector<float>& audioData) {
     if (audioData.empty() || !m_stream) return;
 
-    float volumeScale = m_muted ? 0.0f : (m_volume.load() / 100.0f);
-    if (volumeScale != 1.0f) {
-        std::vector<float> scaled(audioData);
-        for (auto& sample : scaled) {
-            sample *= volumeScale;
-        }
-        if (!SDL_PutAudioStreamData(m_stream, scaled.data(), static_cast<int>(scaled.size() * sizeof(float)))) {
-            Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
-        }
-    } else {
-        if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
-            Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
-        }
+    // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
+    if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
+        Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
     }
 }
 
 void AudioPlayer::enqueue(const float* data, size_t sampleCount) {
     if (!data || sampleCount == 0 || !m_stream) return;
 
-    float volumeScale = m_muted ? 0.0f : (m_volume.load() / 100.0f);
-    if (volumeScale != 1.0f) {
-        std::vector<float> scaled(data, data + sampleCount);
-        for (auto& sample : scaled) {
-            sample *= volumeScale;
-        }
-        SDL_PutAudioStreamData(m_stream, scaled.data(), static_cast<int>(scaled.size() * sizeof(float)));
-    } else {
-        SDL_PutAudioStreamData(m_stream, data, static_cast<int>(sampleCount * sizeof(float)));
+    // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
+    if (!SDL_PutAudioStreamData(m_stream, data, static_cast<int>(sampleCount * sizeof(float)))) {
+        Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
     }
 }
 

@@ -3,6 +3,7 @@
 #include <string>
 #include <cstdint>
 #include <functional>
+#include <chrono>
 #include <vector>
 
 namespace VideoPlay {
@@ -87,5 +88,12 @@ inline std::string formatTime(int64_t milliseconds) {
 
 template<typename... Args>
 using Callback = std::function<void(Args...)>;
+
+// High-resolution timing helper
+using HRClock = std::chrono::high_resolution_clock;
+
+inline double elapsedMs(HRClock::time_point start) {
+    return std::chrono::duration<double, std::milli>(HRClock::now() - start).count();
+}
 
 } // namespace VideoPlay

@@ -70,6 +70,9 @@ private:
     AudioFormat m_format;
     DataCallback m_dataCallback;
 
+    // Apply volume/mute to SDL stream gain
+    void applyStreamGain();
+
     // Timing state for playedMs()
     double m_basePlayedMs = 0.0;
     Clock::time_point m_timerStart;

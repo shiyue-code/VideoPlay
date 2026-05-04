@@ -1,13 +1,3 @@
-# Qt
-*.pro.user
-*.pro.user.*
-*.autosave
-*.qws
-.qmake.stash
-moc_*.cpp
-qrc_*.cpp
-ui_*.h
-
 # Build directories
 build/
 Build/
@@ -17,8 +7,6 @@ x86/
 bin/
 lib/
 libs/
-*.cbp
-*.workspace
 
 # CMake
 CMakeCache.txt
@@ -62,11 +50,6 @@ tmp/
 ffmpeg/
 libav/
 libsw/
-libavcodec/
-libavformat/
-libavutil/
-libswscale/
-libswresample/
 
 # Dependencies
 thirdparty/
@@ -104,7 +87,6 @@ $RECYCLE.BIN/
 # Linux specific
 *#
 .#*
-*~
 
 # macOS specific
 .AppleDouble
@@ -118,4 +100,3 @@ Icon
 .Trashes
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
-.DS_Store

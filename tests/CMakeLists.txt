@@ -1,23 +1,24 @@
-# 测试目录的CMakeLists.txt
+# 测试目录的 CMakeLists.txt
 
-# 确保测试可以访问主项目的包含目录
-include_directories(${CMAKE_SOURCE_DIR}/include)
-
-# 测试核心功能 - 只包含实际存在的测试文件
-add_executable(test_core
-    test_playbackcontroller.cpp
+add_executable(test_subtitleparser
+    test_subtitleparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/subtitles/subtitleparser.cpp
 )
 
-target_include_directories(test_core
-    PRIVATE ${CMAKE_SOURCE_DIR}
-    PUBLIC ${CMAKE_SOURCE_DIR}/include
+target_include_directories(test_subtitleparser
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 
-target_link_libraries(test_core
-    PRIVATE video_core
-    PRIVATE video_plugins
-    PRIVATE Qt6::Core Qt6::Test
+target_link_libraries(test_subtitleparser
+    PRIVATE ${FFMPEG_LIBRARIES}
 )
 
-# 添加测试
-add_test(NAME PlaybackControllerTest COMMAND test_core)
+if(TARGET SDL3::SDL3)
+    target_link_libraries(test_subtitleparser PRIVATE SDL3::SDL3)
+endif()
+
+target_compile_definitions(test_subtitleparser PRIVATE
+    APP_VERSION="${PROJECT_VERSION}"
+)
+
+add_test(NAME SubtitleParserTest COMMAND test_subtitleparser)

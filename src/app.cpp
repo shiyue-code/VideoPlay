@@ -5,37 +5,23 @@
 #include "utils/logger.h"
 #include "subtitles/subtitleparser.h"
 #include "core/episodedetector.h"
+
 #include <SDL3/SDL.h>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <iomanip>
-#include <filesystem>
 #include <thread>
-#include <chrono>
+#include <unordered_map>
+
 #if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
 #endif
-
-#include "app.h"
-#include "core/settings.h"
-#include "subtitles/subtitleparser.h"
-#include "utils/logger.h"
-
-#include <SDL3/SDL.h>
-#include <filesystem>
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <unordered_map>
-
-namespace {
-    using Clock = std::chrono::high_resolution_clock;
-    inline double elapsedMs(Clock::time_point start) {
-        return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-    }
-}
 
 namespace VideoPlay {
 
@@ -311,8 +297,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
 void VideoPlayerApp::runMainLoop() {
     Logger::instance().info("Entering main loop");
 
-    using Clock = std::chrono::high_resolution_clock;
-    auto frameStart = Clock::now();
+    auto frameStart = HRClock::now();
 
     while (m_running) {
         // 处理事件
@@ -325,12 +310,12 @@ void VideoPlayerApp::runMainLoop() {
         render();
 
         // 控制帧率 (~60 FPS)，仅在提前完成时补延迟
-        auto frameEnd = Clock::now();
-        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
-        if (elapsedMs < 16) {
-            SDL_Delay(static_cast<Uint32>(16 - elapsedMs));
+        auto frameEnd = HRClock::now();
+        auto frameElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
+        if (frameElapsed < 16) {
+            SDL_Delay(static_cast<Uint32>(16 - frameElapsed));
         }
-        frameStart = Clock::now();
+        frameStart = HRClock::now();
     }
 }
 
@@ -343,7 +328,7 @@ void VideoPlayerApp::render() {
         autoAdvanceAfterStop();
     }
 
-    auto t0 = Clock::now();
+    auto t0 = HRClock::now();
     // 用音频播放进度作为当前显示时间和 UI 时间（考虑倍速）
     if (m_player) {
         int64_t audioPos = m_player->audioPositionMs();
@@ -409,19 +394,19 @@ void VideoPlayerApp::render() {
     
     double dtGet = elapsedMs(t0);
 
-    auto t1 = Clock::now();
+    auto t1 = HRClock::now();
     // 开始渲染
     m_renderer->clear();
     double dtClear = elapsedMs(t1);
 
-    auto t2 = Clock::now();
+    auto t2 = HRClock::now();
     // 渲染视频帧
     if (!m_displayFrame.data.empty()) {
         m_renderer->renderFrame(m_displayFrame);
     }
     double dtRenderFrame = elapsedMs(t2);
 
-    auto t3 = Clock::now();
+    auto t3 = HRClock::now();
     // 计算音视频同步调试信息
     int64_t audioPts = m_position;
     int64_t videoPts = m_displayFrame.pts;
@@ -496,7 +481,7 @@ void VideoPlayerApp::render() {
     );
     double dtRenderUI = elapsedMs(t3);
 
-    auto t4 = Clock::now();
+    auto t4 = HRClock::now();
     // 呈现
     m_renderer->present();
     double dtPresent = elapsedMs(t4);
@@ -513,13 +498,13 @@ void VideoPlayerApp::render() {
             " total=" + std::to_string(total) + "ms");
     }
     
-    static auto reportStart = Clock::now();
+    static auto reportStart = HRClock::now();
     static int renderCount = 0;
     renderCount++;
     if (elapsedMs(reportStart) >= 1000.0) {
         Logger::instance().debug("[PERF] render fps=" + std::to_string(renderCount));
         renderCount = 0;
-        reportStart = Clock::now();
+        reportStart = HRClock::now();
     }
 
     // 定期保存会话状态和播放位置（每 5 秒），并刷新进度缓存

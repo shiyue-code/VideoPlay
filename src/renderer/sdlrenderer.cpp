@@ -1,42 +1,31 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
-#include "core/settings.h"
-#include "utils/logger.h"
-#include "renderer/windowframe.h"
-#include <SDL3/SDL.h>
-#include <SDL3_ttf/SDL_ttf.h>
-#include <algorithm>
-#include <sstream>
-#include <iomanip>
-#include <filesystem>
-#include <chrono>
-#if defined(_WIN32)
-#include <windows.h>
-#include <dwmapi.h>
-#include <shlobj.h>
-#endif
-
-#include "renderer/sdlrenderer.h"
 #include "core/episodedetector.h"
 #include "core/settings.h"
 #include "utils/logger.h"
-
 #include "renderer/windowframe.h"
 
 #include <SDL3/SDL.h>
 #ifdef HAS_SDL_TTF
 #include <SDL3_ttf/SDL_ttf.h>
 #endif
+
 #include <algorithm>
+#include <chrono>
 #include <cmath>
-#include <sstream>
-#include <iomanip>
 #include <cstring>
 #include <filesystem>
-#include <unordered_map>
+#include <iomanip>
 #include <mutex>
-#include <condition_variable>
-#include <chrono>
+#include <sstream>
+#include <unordered_map>
+
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#include <dwmapi.h>
+#include <shlobj.h>
+#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "utils/stb_image.h"

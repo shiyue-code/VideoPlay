@@ -1,17 +1,11 @@
 #include "core/ffmpegplayer.h"
 #include "core/audioplayer.h"
 #include "utils/logger.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
-
-namespace {
-    using Clock = std::chrono::high_resolution_clock;
-    inline double elapsedMs(Clock::time_point start) {
-        return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-    }
-}
 
 extern "C" {
 #include <libavutil/channel_layout.h>
@@ -476,23 +470,36 @@ bool FFmpegPlayer::checkPreloadComplete() {
 
 void FFmpegPlayer::decodeLoop() {
     Logger::instance().debug("Decode thread started");
-    
+
     m_frameTimer = av_gettime() / 1000000.0;
-    
-    auto reportStart = Clock::now();
+
+    // Allocate packet and frames once, reuse throughout the loop
+    AVPacket* packet = av_packet_alloc();
+    AVFrame* vframe = av_frame_alloc();
+    AVFrame* aframe = av_frame_alloc();
+
+    if (!packet || !vframe || !aframe) {
+        Logger::instance().error("Failed to allocate FFmpeg packet/frame");
+        av_packet_free(&packet);
+        av_frame_free(&vframe);
+        av_frame_free(&aframe);
+        return;
+    }
+
+    auto reportStart = HRClock::now();
     int pktCount = 0;
     int vframeCount = 0;
     int aframeCount = 0;
-    
+
     while (!m_abortRequest) {
         std::unique_lock<std::mutex> lock(m_mutex);
-        
+
         while (m_state == PlaybackState::Paused && !m_abortRequest) {
             m_condition.wait(lock);
         }
-        
+
         if (m_abortRequest) break;
-        
+
         if (m_seekRequested) {
             lock.unlock();
             handleSeek(m_seekPosition.load());
@@ -500,14 +507,14 @@ void FFmpegPlayer::decodeLoop() {
             m_seekRequested = false;
             continue;
         }
-        
+
         if (!m_formatContext) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-        
+
         lock.unlock();
-        
+
         // Pacing: don't decode too far ahead of playback time
         {
             std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
@@ -516,16 +523,15 @@ void FFmpegPlayer::decodeLoop() {
             });
             if (m_abortRequest.load()) break;
         }
-        
+
         pktCount++;
-        
-        AVPacket* packet = av_packet_alloc();
-        auto t0 = Clock::now();
+
+        auto t0 = HRClock::now();
         int ret = av_read_frame(m_formatContext, packet);
         double dtRead = elapsedMs(t0);
-        
+
         if (ret < 0) {
-            av_packet_free(&packet);
+            av_packet_unref(packet);
             if (ret == AVERROR_EOF) {
                 std::lock_guard<std::mutex> l(m_mutex);
                 m_state = PlaybackState::Stopped;
@@ -540,124 +546,117 @@ void FFmpegPlayer::decodeLoop() {
             }
             continue;
         }
-        
+
         if (m_videoCtx.stream && packet->stream_index == m_videoCtx.stream->index && m_videoCtx.codecContext) {
-            AVFrame* frame = av_frame_alloc();
+            // Decode all available video frames from this packet
             ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
+            // Process any frames already buffered (EAGAIN case)
             if (ret == AVERROR(EAGAIN)) {
-                while (avcodec_receive_frame(m_videoCtx.codecContext, frame) >= 0) {
-                    auto t1 = Clock::now();
-                    VideoFrame vframe = convertVideoFrame(frame);
+                while (avcodec_receive_frame(m_videoCtx.codecContext, vframe) >= 0) {
+                    auto t1 = HRClock::now();
+                    VideoFrame frame = convertVideoFrame(vframe);
                     double dtConv = elapsedMs(t1);
-                    if (!vframe.data.empty()) {
-                        int64_t pts = frame->pts;
-                        if (pts == AV_NOPTS_VALUE) {
-                            pts = frame->best_effort_timestamp;
-                        }
+                    if (!frame.data.empty()) {
+                        int64_t pts = vframe->pts;
+                        if (pts == AV_NOPTS_VALUE) pts = vframe->best_effort_timestamp;
                         if (pts != AV_NOPTS_VALUE) {
                             int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
-                                vframe.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
+                            frame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
                         }
-                        auto t2 = Clock::now();
-                        pushVideoFrame(std::move(vframe));
+                        auto t2 = HRClock::now();
+                        pushVideoFrame(std::move(frame));
                         vframeCount++;
                         double dtPush = elapsedMs(t2);
                         if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) + 
-                                "ms convert=" + std::to_string(dtConv) + 
+                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) +
+                                "ms convert=" + std::to_string(dtConv) +
                                 "ms push=" + std::to_string(dtPush) + "ms");
                         }
                     }
-                    av_frame_unref(frame);
+                    av_frame_unref(vframe);
                 }
                 ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
             }
-            
             if (ret >= 0) {
-                while (avcodec_receive_frame(m_videoCtx.codecContext, frame) >= 0) {
-                    auto t1 = Clock::now();
-                    VideoFrame vframe = convertVideoFrame(frame);
+                while (avcodec_receive_frame(m_videoCtx.codecContext, vframe) >= 0) {
+                    auto t1 = HRClock::now();
+                    VideoFrame frame = convertVideoFrame(vframe);
                     double dtConv = elapsedMs(t1);
-                    if (!vframe.data.empty()) {
-                        int64_t pts = frame->pts;
-                        if (pts == AV_NOPTS_VALUE) {
-                            pts = frame->best_effort_timestamp;
-                        }
+                    if (!frame.data.empty()) {
+                        int64_t pts = vframe->pts;
+                        if (pts == AV_NOPTS_VALUE) pts = vframe->best_effort_timestamp;
                         if (pts != AV_NOPTS_VALUE) {
                             int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
-                                vframe.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
+                            frame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
                         }
-                        auto t2 = Clock::now();
-                        pushVideoFrame(std::move(vframe));
+                        auto t2 = HRClock::now();
+                        pushVideoFrame(std::move(frame));
                         vframeCount++;
                         double dtPush = elapsedMs(t2);
                         if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) + 
-                                "ms convert=" + std::to_string(dtConv) + 
+                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) +
+                                "ms convert=" + std::to_string(dtConv) +
                                 "ms push=" + std::to_string(dtPush) + "ms");
                         }
                     }
-                    av_frame_unref(frame);
+                    av_frame_unref(vframe);
                 }
             }
-            av_frame_free(&frame);
         }
         else if (m_audioCtx.stream && packet->stream_index == m_audioCtx.stream->index && m_audioCtx.codecContext) {
-            AVFrame* frame = av_frame_alloc();
+            // Decode all available audio frames from this packet
             ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
             if (ret == AVERROR(EAGAIN)) {
-                while (avcodec_receive_frame(m_audioCtx.codecContext, frame) >= 0) {
-                    auto t3 = Clock::now();
-                    auto audioData = resampleAudioFrame(frame);
+                while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
+                    auto t3 = HRClock::now();
+                    auto audioData = resampleAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
-                        if (frame->pts != AV_NOPTS_VALUE) {
+                        if (aframe->pts != AV_NOPTS_VALUE) {
                             int64_t startTime = m_audioCtx.stream->start_time != AV_NOPTS_VALUE ? m_audioCtx.stream->start_time : 0;
-                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (frame->pts - startTime);
+                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (aframe->pts - startTime);
                         }
-                        auto t4 = Clock::now();
+                        auto t4 = HRClock::now();
                         m_audioPlayer->enqueue(audioData);
                         aframeCount++;
                         double dtEnqueue = elapsedMs(t4);
                         if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) + 
-                                "ms resample=" + std::to_string(dtResample) + 
+                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                                "ms resample=" + std::to_string(dtResample) +
                                 "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
                         }
                     }
-                    av_frame_unref(frame);
+                    av_frame_unref(aframe);
                 }
                 ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
             }
-            
             if (ret >= 0) {
-                while (avcodec_receive_frame(m_audioCtx.codecContext, frame) >= 0) {
-                    auto t3 = Clock::now();
-                    auto audioData = resampleAudioFrame(frame);
+                while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
+                    auto t3 = HRClock::now();
+                    auto audioData = resampleAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
-                        if (frame->pts != AV_NOPTS_VALUE) {
+                        if (aframe->pts != AV_NOPTS_VALUE) {
                             int64_t startTime = m_audioCtx.stream->start_time != AV_NOPTS_VALUE ? m_audioCtx.stream->start_time : 0;
-                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (frame->pts - startTime);
+                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (aframe->pts - startTime);
                         }
-                        auto t4 = Clock::now();
+                        auto t4 = HRClock::now();
                         m_audioPlayer->enqueue(audioData);
                         aframeCount++;
                         double dtEnqueue = elapsedMs(t4);
                         if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) + 
-                                "ms resample=" + std::to_string(dtResample) + 
+                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                                "ms resample=" + std::to_string(dtResample) +
                                 "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
                         }
                     }
-                    av_frame_unref(frame);
+                    av_frame_unref(aframe);
                 }
             }
-            av_frame_free(&frame);
         }
-        
-        av_packet_free(&packet);
-        
+
+        av_packet_unref(packet);
+
         if (elapsedMs(reportStart) >= 1000.0) {
             Logger::instance().debug("[PERF] decodeLoop pkt/s=" + std::to_string(pktCount) +
                 " vframe/s=" + std::to_string(vframeCount) +
@@ -665,10 +664,15 @@ void FFmpegPlayer::decodeLoop() {
             pktCount = 0;
             vframeCount = 0;
             aframeCount = 0;
-            reportStart = Clock::now();
+            reportStart = HRClock::now();
         }
     }
-    
+
+    // Free reusable allocations
+    av_packet_free(&packet);
+    av_frame_free(&vframe);
+    av_frame_free(&aframe);
+
     Logger::instance().debug("Decode thread stopped");
 }
 
@@ -776,11 +780,16 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     int dstStride[4] = { dstBytesPerRow, 0, 0, 0 };
     
     int swsRet = sws_scale(m_videoCtx.swsContext, frame->data, frame->linesize, 0, height, dstData, dstStride);
-    (void)swsRet;
-    
+    if (swsRet <= 0) {
+        Logger::instance().warning("sws_scale failed or returned 0 lines");
+        return result;
+    }
+
     result.width = width;
     result.height = height;
-    result.data.assign(m_videoCtx.swsBuffer.data(), m_videoCtx.swsBuffer.data() + dstBufferSize);
+    // Move buffer ownership instead of copying ~N bytes per frame.
+    // swsBuffer will be resized on next call if dimensions change.
+    result.data = std::move(m_videoCtx.swsBuffer);
     
     return result;
 }

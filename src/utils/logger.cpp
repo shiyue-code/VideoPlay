@@ -105,14 +105,17 @@ void Logger::write(LogLevel level, const std::string& message) {
     if (!m_enabled) return;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     std::string timestamp = getCurrentTimestamp();
     std::string levelStr = levelToString(level);
     std::string formatted = "[" + timestamp + "] [" + levelStr + "] " + message;
 
     if (m_file.is_open()) {
-        m_file << formatted << std::endl;
-        m_file.flush();
+        m_file << formatted << '\n';
+        // Only flush for Error/Warning to avoid I/O overhead in hot paths (debug logs)
+        if (level == LogLevel::Error || level == LogLevel::Warning) {
+            m_file.flush();
+        }
     }
 
     if (m_consoleOutput) {
