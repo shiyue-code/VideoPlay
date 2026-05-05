@@ -408,8 +408,7 @@ void Settings::setAIConfig(const AIConfig& config) {
         m_config["ai"] = {
             {"baseUrl", config.baseUrl},
             {"apiKey", config.apiKey},
-            {"whisperModel", config.whisperModel},
-            {"gptModel", config.gptModel},
+            {"model", config.model},
             {"cacheDir", config.cacheDir},
             {"autoAnalyze", config.autoAnalyze}
         };
@@ -422,10 +421,9 @@ AIConfig Settings::aiConfig() const {
     AIConfig config;
     if (m_config.contains("ai")) {
         const auto& ai = m_config["ai"];
-        config.baseUrl = ai.value("baseUrl", "https://api.openai.com/v1");
+        config.baseUrl = ai.value("baseUrl", "https://api.xiaomimimo.com/v1");
         config.apiKey = ai.value("apiKey", std::string());
-        config.whisperModel = ai.value("whisperModel", "whisper-1");
-        config.gptModel = ai.value("gptModel", "gpt-4o-mini");
+        config.model = ai.value("model", "mimo-v2-pro");
         config.cacheDir = ai.value("cacheDir", std::string());
         config.autoAnalyze = ai.value("autoAnalyze", false);
     }

@@ -214,7 +214,7 @@ bool VideoPlayerApp::initialize() {
     m_aiAnalyzer->configure(aiConfig);
     Logger::instance().info("[AI] Initialized with baseUrl: " + aiConfig.baseUrl + 
                            ", apiKey: " + (aiConfig.apiKey.empty() ? "(empty)" : "(set)") +
-                           ", gptModel: " + aiConfig.gptModel);
+                           ", model: " + aiConfig.model);
 
     Logger::instance().info("VideoPlayerApp initialized successfully");
     return true;
@@ -647,7 +647,7 @@ void VideoPlayerApp::openFolderDialog() {
             for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
                 if (entry.is_regular_file()) {
                     std::string ext = entry.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
                     if (std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
                         mediaFiles.push_back(entry.path().string());
                     }

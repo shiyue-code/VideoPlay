@@ -49,6 +49,10 @@ private:
     AIAnalysisResult analyzeWithGPT(const std::vector<TranscriptSegment>& transcript,
                                      const std::string& videoPath,
                                      ProgressCallback onProgress);
+    AIAnalysisResult analyzeWithVideoUnderstanding(const std::string& videoPath,
+                                                    ProgressCallback onProgress);
+    std::string extractVideoForAI(const std::string& videoPath, ProgressCallback onProgress);
+    std::string fileToBase64(const std::string& filePath);
     std::string findSubtitleFile(const std::string& videoPath);
     std::vector<TranscriptSegment> loadSubtitleAsTranscript(const std::string& subtitlePath);
 
