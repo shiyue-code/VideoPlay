@@ -85,6 +85,7 @@ void SDLRenderer::initMenus() {
         {0, "", "", true},
         {302, "搜索内容", "Ctrl+F", false, true},
         {0, "", "", true},
+        {304, "AI 设置...", "", false, true},
         {303, "清除 AI 缓存", "", false, true}
     };
     m_menus.push_back(aiMenu);

@@ -4,6 +4,7 @@
 #include "core/common.h"
 #include "core/settings.h"
 #include "ai/httpclient.h"
+#include "subtitles/subtitleparser.h"
 #include <string>
 #include <functional>
 #include <atomic>
@@ -48,6 +49,8 @@ private:
     AIAnalysisResult analyzeWithGPT(const std::vector<TranscriptSegment>& transcript,
                                      const std::string& videoPath,
                                      ProgressCallback onProgress);
+    std::string findSubtitleFile(const std::string& videoPath);
+    std::vector<TranscriptSegment> loadSubtitleAsTranscript(const std::string& subtitlePath);
 
     std::string getCachePath(const std::string& videoPath) const;
     std::string computeFileHash(const std::string& filePath) const;

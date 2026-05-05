@@ -209,11 +209,12 @@ bool VideoPlayerApp::initialize() {
     m_aiAnalyzer = std::make_unique<AIAnalyzer>();
     m_searchEngine = std::make_unique<SearchEngine>();
     
-    // 配置 AI 分析器
+    // 配置 AI 分析器（始终加载配置，无论 cacheDir 是否为空）
     AIConfig aiConfig = Settings::instance().aiConfig();
-    if (!aiConfig.cacheDir.empty()) {
-        m_aiAnalyzer->configure(aiConfig);
-    }
+    m_aiAnalyzer->configure(aiConfig);
+    Logger::instance().info("[AI] Initialized with baseUrl: " + aiConfig.baseUrl + 
+                           ", apiKey: " + (aiConfig.apiKey.empty() ? "(empty)" : "(set)") +
+                           ", gptModel: " + aiConfig.gptModel);
 
     Logger::instance().info("VideoPlayerApp initialized successfully");
     return true;

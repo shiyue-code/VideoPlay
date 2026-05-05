@@ -137,6 +137,9 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 303: // 清除 AI 缓存
             clearAICache();
             break;
+        case 304: // AI 设置
+            showAISettings();
+            break;
     }
 
     // 章节跳转菜单项 ID 范围 200-249
@@ -383,6 +386,59 @@ void VideoPlayerApp::clearAICache() {
         m_renderer->showMessageBox("清除缓存", "AI 缓存已清除", false);
     }
     Logger::instance().info("[AI] Cache cleared for: " + m_currentFile);
+}
+
+void VideoPlayerApp::showAISettings() {
+    if (!m_renderer) return;
+
+    AIConfig currentConfig = Settings::instance().aiConfig();
+    
+    AISettings settings;
+    settings.baseUrl = currentConfig.baseUrl;
+    settings.apiKey = currentConfig.apiKey;
+    settings.whisperModel = currentConfig.whisperModel;
+    settings.gptModel = currentConfig.gptModel;
+
+    SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont());
+    dialog.show(settings, [this](const AISettings& newSettings) {
+        AIConfig config;
+        config.baseUrl = newSettings.baseUrl;
+        config.apiKey = newSettings.apiKey;
+        config.whisperModel = newSettings.whisperModel;
+        config.gptModel = newSettings.gptModel;
+        
+        // 清理 URL - 移除重复的协议和路径
+        std::string& url = config.baseUrl;
+        
+        // 查找第一个 "https://" 的位置
+        size_t firstHttps = url.find("https://");
+        if (firstHttps != std::string::npos) {
+            // 查找第二个 "https://" 
+            size_t secondHttps = url.find("https://", firstHttps + 1);
+            if (secondHttps != std::string::npos) {
+                // 只保留第一个 URL
+                url = url.substr(0, secondHttps);
+            }
+        }
+        
+        // 移除末尾的斜杠
+        while (!url.empty() && url.back() == '/') {
+            url.pop_back();
+        }
+        
+        // 移除末尾的 /v1（如果存在）
+        if (url.size() >= 3 && url.substr(url.size() - 3) == "/v1") {
+            url = url.substr(0, url.size() - 3);
+        }
+        
+        Settings::instance().setAIConfig(config);
+        
+        if (m_aiAnalyzer) {
+            m_aiAnalyzer->configure(config);
+        }
+        
+        Logger::instance().info("[AI] Settings saved, baseUrl: " + config.baseUrl);
+    });
 }
 
 void VideoPlayerApp::performSearch(const std::string& query) {
