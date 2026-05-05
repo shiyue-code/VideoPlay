@@ -117,6 +117,7 @@ set(SOURCES
     src/renderer/sdlrenderer_ui.cpp
     src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
+    src/renderer/custommessagebox.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
     src/ai/searchengine.cpp
@@ -140,6 +141,7 @@ set(HEADERS
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
+    src/renderer/custommessagebox.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h
     src/ai/searchengine.h
