@@ -396,16 +396,14 @@ void VideoPlayerApp::showAISettings() {
     AISettings settings;
     settings.baseUrl = currentConfig.baseUrl;
     settings.apiKey = currentConfig.apiKey;
-    settings.whisperModel = currentConfig.whisperModel;
-    settings.gptModel = currentConfig.gptModel;
+    settings.model = currentConfig.model;
 
     SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont());
     dialog.show(settings, [this](const AISettings& newSettings) {
         AIConfig config;
         config.baseUrl = newSettings.baseUrl;
         config.apiKey = newSettings.apiKey;
-        config.whisperModel = newSettings.whisperModel;
-        config.gptModel = newSettings.gptModel;
+        config.model = newSettings.model;
         
         // 清理 URL - 移除重复的协议和路径
         std::string& url = config.baseUrl;

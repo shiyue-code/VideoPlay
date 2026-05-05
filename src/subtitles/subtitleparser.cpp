@@ -125,8 +125,8 @@ void SubtitleParser::adjustOffset(int64_t deltaMs) {
 }
 
 std::string SubtitleParser::trim(const std::string& str) {
-    auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
-    auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
+    auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
+    auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char c) { return std::isspace(c); }).base();
     return (start < end) ? std::string(start, end) : "";
 }
 
@@ -207,7 +207,7 @@ bool SubtitleParser::parseSRT(const std::string& content) {
         line = trim(line);
         
         // 跳过空行和序号
-        if (line.empty() || std::all_of(line.begin(), line.end(), ::isdigit)) {
+        if (line.empty() || std::all_of(line.begin(), line.end(), [](unsigned char c) { return std::isdigit(c); })) {
             continue;
         }
         
@@ -225,7 +225,7 @@ bool SubtitleParser::parseSRT(const std::string& content) {
                 if (line.empty()) break;
                 
                 // 检查是否是下一个字幕的序号
-                if (std::all_of(line.begin(), line.end(), ::isdigit)) {
+                if (std::all_of(line.begin(), line.end(), [](unsigned char c) { return std::isdigit(c); })) {
                     // 将行放回？不，直接处理下一个
                     break;
                 }

@@ -13,8 +13,7 @@ namespace VideoPlay {
 struct AISettings {
     std::string baseUrl;
     std::string apiKey;
-    std::string whisperModel;
-    std::string gptModel;
+    std::string model;
 };
 
 class SettingsDialog {
@@ -41,7 +40,7 @@ private:
     int m_dragOffsetY = 0;
 
     int m_windowWidth = 500;
-    int m_windowHeight = 380;
+    int m_windowHeight = 320;
     static constexpr int TITLE_HEIGHT = 40;
     static constexpr int INPUT_HEIGHT = 30;
     static constexpr int PADDING = 15;
@@ -49,8 +48,7 @@ private:
     // 输入框控件
     std::unique_ptr<InputField> m_baseUrlInput;
     std::unique_ptr<InputField> m_apiKeyInput;
-    std::unique_ptr<InputField> m_whisperModelInput;
-    std::unique_ptr<InputField> m_gptModelInput;
+    std::unique_ptr<InputField> m_modelInput;
 
     // 按钮区域
     SDL_FRect m_saveBtnRect;

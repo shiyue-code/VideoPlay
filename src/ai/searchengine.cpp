@@ -91,9 +91,9 @@ std::vector<std::string> SearchEngine::tokenize(const std::string& text) const {
 
     std::string current;
     for (size_t i = 0; i < lower.length(); i++) {
-        char c = lower[i];
-        if (std::isalnum(c) || c >= 0) {
-            current += c;
+        unsigned char c = static_cast<unsigned char>(lower[i]);
+        if (std::isalnum(c) || c < 0x80) {
+            current += static_cast<char>(c);
         } else {
             if (!current.empty()) {
                 tokens.push_back(current);

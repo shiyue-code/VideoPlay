@@ -50,10 +50,9 @@ struct SessionInfo {
 };
 
 struct AIConfig {
-    std::string baseUrl = "https://api.openai.com/v1";
+    std::string baseUrl = "https://api.xiaomimimo.com/v1";
     std::string apiKey;
-    std::string whisperModel = "whisper-1";
-    std::string gptModel = "gpt-4o-mini";
+    std::string model = "mimo-v2-pro";
     std::string cacheDir;
     bool autoAnalyze = false;
 };

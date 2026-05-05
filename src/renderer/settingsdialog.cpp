@@ -50,22 +50,18 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     // 创建输入框控件
     m_baseUrlInput = std::make_unique<InputField>(m_font);
     m_apiKeyInput = std::make_unique<InputField>(m_font);
-    m_whisperModelInput = std::make_unique<InputField>(m_font);
-    m_gptModelInput = std::make_unique<InputField>(m_font);
+    m_modelInput = std::make_unique<InputField>(m_font);
 
     // 设置输入框属性
     m_baseUrlInput->setValue(m_settings.baseUrl);
-    m_baseUrlInput->setPlaceholder("https://api.openai.com");
+    m_baseUrlInput->setPlaceholder("https://api.xiaomimimo.com/v1");
 
     m_apiKeyInput->setValue(m_settings.apiKey);
     m_apiKeyInput->setPassword(true);
-    m_apiKeyInput->setPlaceholder("sk-xxxxx");
+    m_apiKeyInput->setPlaceholder("tp-xxxxx");
 
-    m_whisperModelInput->setValue(m_settings.whisperModel);
-    m_whisperModelInput->setPlaceholder("whisper-1");
-
-    m_gptModelInput->setValue(m_settings.gptModel);
-    m_gptModelInput->setPlaceholder("gpt-4o-mini");
+    m_modelInput->setValue(m_settings.model);
+    m_modelInput->setPlaceholder("mimo-v2-pro");
 
     calculateLayout();
 
@@ -136,12 +132,8 @@ void SettingsDialog::calculateLayout() {
                            static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
     y += INPUT_HEIGHT + PADDING;
 
-    m_whisperModelInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                                 static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
-    y += INPUT_HEIGHT + PADDING;
-
-    m_gptModelInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                             static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
+    m_modelInput->setRect({PADDING + 120.0f, static_cast<float>(y),
+                           static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
     y += INPUT_HEIGHT + PADDING * 2;
 
     int btnWidth = 80;
@@ -200,11 +192,12 @@ void SettingsDialog::render() {
     drawText("API Key:", PADDING, TITLE_HEIGHT + PADDING * 2 + INPUT_HEIGHT + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
     m_apiKeyInput->render(m_renderer, mx, my);
 
-    drawText("Whisper 模型:", PADDING, TITLE_HEIGHT + PADDING * 3 + INPUT_HEIGHT * 2 + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
-    m_whisperModelInput->render(m_renderer, mx, my);
+    drawText("模型:", PADDING, TITLE_HEIGHT + PADDING * 3 + INPUT_HEIGHT * 2 + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    m_modelInput->render(m_renderer, mx, my);
 
-    drawText("GPT 模型:", PADDING, TITLE_HEIGHT + PADDING * 4 + INPUT_HEIGHT * 3 + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
-    m_gptModelInput->render(m_renderer, mx, my);
+    // 模型提示
+    drawText("mimo-v2-pro / mimo-v2.5-pro", PADDING + 120, TITLE_HEIGHT + PADDING * 4 + INPUT_HEIGHT * 3 + 4, 
+             COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
 
     // 按钮
     bool saveHovered = isPointInRect(mx, my, m_saveBtnRect);
@@ -243,8 +236,7 @@ void SettingsDialog::handleEvents() {
                         // 更新设置
                         m_settings.baseUrl = m_baseUrlInput->getValue();
                         m_settings.apiKey = m_apiKeyInput->getValue();
-                        m_settings.whisperModel = m_whisperModelInput->getValue();
-                        m_settings.gptModel = m_gptModelInput->getValue();
+                        m_settings.model = m_modelInput->getValue();
 
                         if (m_saveCallback) {
                             m_saveCallback(m_settings);
@@ -262,8 +254,7 @@ void SettingsDialog::handleEvents() {
                     // 输入框点击（由 InputField 自己处理）
                     m_baseUrlInput->handleEvent(event);
                     m_apiKeyInput->handleEvent(event);
-                    m_whisperModelInput->handleEvent(event);
-                    m_gptModelInput->handleEvent(event);
+                    m_modelInput->handleEvent(event);
 
                     // 标题栏拖动
                     if (my < TITLE_HEIGHT) {
@@ -288,8 +279,7 @@ void SettingsDialog::handleEvents() {
                 m_dragging = false;
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_whisperModelInput->handleEvent(event);
-                m_gptModelInput->handleEvent(event);
+                m_modelInput->handleEvent(event);
                 break;
 
             case SDL_EVENT_MOUSE_MOTION:
@@ -304,8 +294,7 @@ void SettingsDialog::handleEvents() {
                 }
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_whisperModelInput->handleEvent(event);
-                m_gptModelInput->handleEvent(event);
+                m_modelInput->handleEvent(event);
                 break;
 
             case SDL_EVENT_KEY_DOWN: {
@@ -318,8 +307,7 @@ void SettingsDialog::handleEvents() {
                     // 更新设置
                     m_settings.baseUrl = m_baseUrlInput->getValue();
                     m_settings.apiKey = m_apiKeyInput->getValue();
-                    m_settings.whisperModel = m_whisperModelInput->getValue();
-                    m_settings.gptModel = m_gptModelInput->getValue();
+                    m_settings.model = m_modelInput->getValue();
 
                     if (m_saveCallback) {
                         m_saveCallback(m_settings);
@@ -331,16 +319,14 @@ void SettingsDialog::handleEvents() {
                 // 传递给输入框
                 if (m_baseUrlInput->handleEvent(event)) break;
                 if (m_apiKeyInput->handleEvent(event)) break;
-                if (m_whisperModelInput->handleEvent(event)) break;
-                if (m_gptModelInput->handleEvent(event)) break;
+                if (m_modelInput->handleEvent(event)) break;
                 break;
             }
 
             case SDL_EVENT_TEXT_INPUT:
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_whisperModelInput->handleEvent(event);
-                m_gptModelInput->handleEvent(event);
+                m_modelInput->handleEvent(event);
                 break;
         }
     }
