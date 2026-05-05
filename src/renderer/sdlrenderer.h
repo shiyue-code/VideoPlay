@@ -20,6 +20,8 @@ typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
 
+class CustomMessageBox;
+
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
 using FileOpenCallback = std::function<void()>;
@@ -293,6 +295,9 @@ private:
     TTF_Font* m_fontSmall = nullptr;
     TTF_Font* m_fontLarge = nullptr;
     std::string m_fontPath;
+
+    // 自定义消息框
+    std::unique_ptr<CustomMessageBox> m_messageBox;
 
     // 图标纹理
     std::unordered_map<std::string, SDL_Texture*> m_iconTextures;

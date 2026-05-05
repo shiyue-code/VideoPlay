@@ -4,6 +4,7 @@
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "renderer/windowframe.h"
+#include "renderer/custommessagebox.h"
 
 #include <SDL3/SDL.h>
 #ifdef HAS_SDL_TTF
@@ -451,12 +452,10 @@ void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callbac
 }
 
 void SDLRenderer::showMessageBox(const std::string& title, const std::string& message, bool isError) {
-    SDL_ShowSimpleMessageBox(
-        isError ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION,
-        title.c_str(),
-        message.c_str(),
-        m_window
-    );
+    if (!m_messageBox) {
+        m_messageBox = std::make_unique<CustomMessageBox>(m_window, m_font);
+    }
+    m_messageBox->show(title, message, isError);
 }
 
 void SDLRenderer::setLoopMode(int mode) {
