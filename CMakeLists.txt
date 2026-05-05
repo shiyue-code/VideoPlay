@@ -112,6 +112,7 @@ set(SOURCES
     src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
     src/renderer/custommessagebox.cpp
+    src/renderer/inputfield.cpp
     src/renderer/settingsdialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
@@ -137,6 +138,7 @@ set(HEADERS
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
     src/renderer/custommessagebox.h
+    src/renderer/inputfield.h
     src/renderer/settingsdialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h
