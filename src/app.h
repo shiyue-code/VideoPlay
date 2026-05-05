@@ -6,6 +6,7 @@
 #include "renderer/sdlrenderer.h"
 #include "ai/aianalyzer.h"
 #include "ai/searchengine.h"
+#include "renderer/settingsdialog.h"
 
 #include <string>
 #include <vector>
@@ -64,6 +65,7 @@ private:
     void showAISummary();
     void showSearchPanel();
     void clearAICache();
+    void showAISettings();
     void performSearch(const std::string& query);
 
     // 播放列表

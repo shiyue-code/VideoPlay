@@ -1,7 +1,6 @@
 #include "ai/aianalyzer.h"
 #include "utils/logger.h"
 #include <nlohmann/json.hpp>
-#include <httplib.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -63,21 +62,28 @@ std::string AIAnalyzer::getCacheDir() const {
 }
 
 std::string AIAnalyzer::computeFileHash(const std::string& filePath) const {
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) return "";
+    try {
+        if (!std::filesystem::exists(filePath)) return "";
+        
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file.is_open()) return "";
 
-    auto fileSize = std::filesystem::file_size(filePath);
-    auto modTime = std::filesystem::last_write_time(filePath).time_since_epoch().count();
+        auto fileSize = std::filesystem::file_size(filePath);
+        auto modTime = std::filesystem::last_write_time(filePath).time_since_epoch().count();
 
-    std::stringstream ss;
-    ss << filePath << "_" << fileSize << "_" << modTime;
+        std::stringstream ss;
+        ss << filePath << "_" << fileSize << "_" << modTime;
 
-    std::string input = ss.str();
-    size_t hash = std::hash<std::string>{}(input);
+        std::string input = ss.str();
+        size_t hash = std::hash<std::string>{}(input);
 
-    std::stringstream result;
-    result << std::hex << hash;
-    return result.str();
+        std::stringstream result;
+        result << std::hex << hash;
+        return result.str();
+    } catch (const std::exception& e) {
+        Logger::instance().error("[AI] computeFileHash failed: " + std::string(e.what()));
+        return "";
+    }
 }
 
 std::string AIAnalyzer::getCachePath(const std::string& videoPath) const {
@@ -245,14 +251,14 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
 
     SwrContext* swrCtx = nullptr;
     AVChannelLayout outChLayout = AV_CHANNEL_LAYOUT_MONO;
-    av_opt_set_chlayout(swrCtx, "in_chlayout", &codecCtx->ch_layout, 0);
-    av_opt_set_chlayout(swrCtx, "out_chlayout", &outChLayout, 0);
-    av_opt_set_int(swrCtx, "in_sample_rate", codecCtx->sample_rate, 0);
-    av_opt_set_int(swrCtx, "out_sample_rate", 16000, 0);
-    av_opt_set_sample_fmt(swrCtx, "in_sample_fmt", codecCtx->sample_fmt, 0);
-    av_opt_set_sample_fmt(swrCtx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
 
     swrCtx = swr_alloc();
+    if (!swrCtx) {
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&inputCtx);
+        return "";
+    }
+
     av_opt_set_chlayout(swrCtx, "in_chlayout", &codecCtx->ch_layout, 0);
     av_opt_set_chlayout(swrCtx, "out_chlayout", &outChLayout, 0);
     av_opt_set_int(swrCtx, "in_sample_rate", codecCtx->sample_rate, 0);
@@ -274,13 +280,24 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
     int64_t totalDuration = inputCtx->duration;
     int64_t processed = 0;
 
+    Logger::instance().info("[AI] Starting audio extraction...");
+
     while (av_read_frame(inputCtx, packet) >= 0 && !m_cancelled) {
         if (packet->stream_index == audioStreamIdx) {
-            avcodec_send_packet(codecCtx, packet);
+            int sendResult = avcodec_send_packet(codecCtx, packet);
+            if (sendResult < 0 && sendResult != AVERROR(EAGAIN)) {
+                av_packet_unref(packet);
+                continue;
+            }
             while (avcodec_receive_frame(codecCtx, frame) >= 0) {
                 int outSamples = swr_get_out_samples(swrCtx, frame->nb_samples);
+                if (outSamples <= 0) {
+                    av_frame_unref(frame);
+                    continue;
+                }
                 std::vector<int16_t> outBuf(outSamples);
-                int converted = swr_convert(swrCtx, (uint8_t**)outBuf.data(), outSamples,
+                uint8_t* outBuffer = reinterpret_cast<uint8_t*>(outBuf.data());
+                int converted = swr_convert(swrCtx, &outBuffer, outSamples,
                                             (const uint8_t**)frame->data, frame->nb_samples);
                 if (converted > 0) {
                     audioBuffer.insert(audioBuffer.end(), outBuf.begin(), outBuf.begin() + converted);
@@ -291,6 +308,7 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
                     float progress = static_cast<float>(processed) / totalDuration * 0.3f;
                     if (onProgress) onProgress(progress, "正在提取音频...");
                 }
+                av_frame_unref(frame);
             }
         }
         av_packet_unref(packet);
@@ -347,63 +365,49 @@ std::vector<TranscriptSegment> AIAnalyzer::transcribe(const std::string& audioPa
     if (onProgress) onProgress(0.3f, "正在转录音频...");
 
     std::string whisperModel;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        whisperModel = m_config.whisperModel;
-    }
-
-    httplib::MultipartFormDataItems items;
-    items.push_back({"model", whisperModel, "", ""});
-    items.push_back({"response_format", "verbose_json", "", ""});
-    items.push_back({"timestamp_granularities[]", "segment", "", ""});
-
-    std::ifstream audioFile(audioPath, std::ios::binary);
-    if (!audioFile.is_open()) {
-        Logger::instance().error("[AI] Cannot open audio file: " + audioPath);
-        return segments;
-    }
-
-    std::string audioContent((std::istreambuf_iterator<char>(audioFile)),
-                             std::istreambuf_iterator<char>());
-    audioFile.close();
-
-    std::string filename = std::filesystem::path(audioPath).filename().string();
-    items.push_back({"file", audioContent, filename, "audio/wav"});
-
     std::string apiKey;
     std::string baseUrl;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        whisperModel = m_config.whisperModel;
         apiKey = m_config.apiKey;
         baseUrl = m_config.baseUrl;
     }
 
-    httplib::Client client(baseUrl);
-    client.set_connection_timeout(60);
-    client.set_read_timeout(300);
-    client.set_write_timeout(60);
+    Logger::instance().info("[AI] Transcribe - baseUrl: " + baseUrl);
+    Logger::instance().info("[AI] Transcribe - whisperModel: " + whisperModel);
+    Logger::instance().info("[AI] Transcribe - apiKey length: " + std::to_string(apiKey.length()));
 
-    httplib::Headers headers;
-    headers.emplace("Authorization", "Bearer " + apiKey);
-
-    if (onProgress) onProgress(0.4f, "正在调用 Whisper API...");
-
-    auto result = client.Post("/audio/transcriptions", headers, items);
-
-    if (m_cancelled) return segments;
-
-    if (!result) {
-        Logger::instance().error("[AI] Whisper API request failed");
+    // 检查 Whisper 模型是否配置
+    if (whisperModel.empty()) {
+        Logger::instance().warning("[AI] Whisper model not configured, skipping transcription");
         return segments;
     }
 
-    if (result->status != 200) {
-        Logger::instance().error("[AI] Whisper API error: " + std::to_string(result->status) + " " + result->body);
+    if (onProgress) onProgress(0.4f, "正在调用 Whisper API...");
+
+    Logger::instance().info("[AI] Calling Whisper API: " + baseUrl + "/audio/transcriptions");
+
+    // 使用 HttpClient 的 uploadFile 方法
+    std::map<std::string, std::string> fields;
+    fields["model"] = whisperModel;
+    fields["response_format"] = "verbose_json";
+    fields["timestamp_granularities[]"] = "segment";
+
+    auto result = m_http.uploadFile("audio/transcriptions", audioPath, "file", fields);
+
+    if (m_cancelled) return segments;
+
+    Logger::instance().info("[AI] Whisper API response status: " + std::to_string(result.statusCode));
+
+    if (result.statusCode != 200) {
+        Logger::instance().error("[AI] Whisper API error: status=" + std::to_string(result.statusCode));
+        Logger::instance().error("[AI] Response body: " + result.body.substr(0, 500));
         return segments;
     }
 
     try {
-        nlohmann::json j = nlohmann::json::parse(result->body);
+        nlohmann::json j = nlohmann::json::parse(result.body);
 
         if (j.contains("segments") && j["segments"].is_array()) {
             for (const auto& seg : j["segments"]) {
@@ -432,10 +436,17 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
     if (onProgress) onProgress(0.7f, "正在生成摘要...");
 
     std::string gptModel;
+    std::string apiKey;
+    std::string baseUrl;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         gptModel = m_config.gptModel;
+        apiKey = m_config.apiKey;
+        baseUrl = m_config.baseUrl;
     }
+
+    Logger::instance().info("[AI] GPT Analysis - baseUrl: " + baseUrl);
+    Logger::instance().info("[AI] GPT Analysis - gptModel: " + gptModel);
 
     std::string transcriptText;
     for (const auto& seg : transcript) {
@@ -472,14 +483,19 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
         {"max_tokens", 2000}
     };
 
+    Logger::instance().info("[AI] Calling GPT API: " + baseUrl + "/chat/completions");
+
     auto response = m_http.post("chat/completions", requestBody.dump());
 
     if (m_cancelled) return result;
 
     if (!response.success()) {
-        Logger::instance().error("[AI] GPT API error: " + std::to_string(response.statusCode) + " " + response.body);
+        Logger::instance().error("[AI] GPT API error: status=" + std::to_string(response.statusCode));
+        Logger::instance().error("[AI] Response body: " + response.body.substr(0, 500));
         return result;
     }
+
+    Logger::instance().info("[AI] GPT API response status: " + std::to_string(response.statusCode));
 
     try {
         nlohmann::json j = nlohmann::json::parse(response.body);
@@ -530,6 +546,19 @@ void AIAnalyzer::analyze(const std::string& videoPath,
                           ErrorCallback onError) {
     m_cancelled = false;
 
+    // 检查配置
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_config.apiKey.empty()) {
+            if (onError) onError("请先配置 AI API Key");
+            return;
+        }
+        if (m_config.baseUrl.empty()) {
+            if (onError) onError("请先配置 AI API 地址");
+            return;
+        }
+    }
+
     if (hasCache(videoPath)) {
         AIAnalysisResult result = loadCache(videoPath);
         if (result.valid) {
@@ -539,39 +568,129 @@ void AIAnalyzer::analyze(const std::string& videoPath,
         }
     }
 
+    // 检查文件是否存在
+    if (!std::filesystem::exists(videoPath)) {
+        if (onError) onError("视频文件不存在: " + videoPath);
+        return;
+    }
+
     std::thread([this, videoPath, onComplete, onProgress, onError]() {
         try {
-            std::string audioPath = extractAudio(videoPath, onProgress);
-            if (m_cancelled || audioPath.empty()) {
-                if (onError) onError("音频提取失败或已取消");
-                return;
+            std::vector<TranscriptSegment> transcript;
+            
+            // 尝试从字幕文件加载转录文本
+            std::string subtitlePath = findSubtitleFile(videoPath);
+            if (!subtitlePath.empty()) {
+                if (onProgress) onProgress(0.2f, "正在加载字幕文件...");
+                transcript = loadSubtitleAsTranscript(subtitlePath);
+                if (!transcript.empty()) {
+                    Logger::instance().info("[AI] Loaded " + std::to_string(transcript.size()) + " segments from subtitle file");
+                }
+            }
+            
+            // 如果没有字幕文件，尝试 Whisper API
+            if (transcript.empty()) {
+                std::string whisperModel;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    whisperModel = m_config.whisperModel;
+                }
+                
+                if (whisperModel.empty()) {
+                    if (onError) onError("没有找到字幕文件，且未配置 Whisper 模型。\n请先加载字幕文件，或配置支持 Whisper 的 API");
+                    return;
+                }
+                
+                std::string audioPath = extractAudio(videoPath, onProgress);
+                if (m_cancelled) {
+                    if (onError) onError("已取消");
+                    return;
+                }
+                if (audioPath.empty()) {
+                    if (onError) onError("音频提取失败");
+                    return;
+                }
+
+                transcript = transcribe(audioPath, onProgress);
+                
+                // 清理临时音频文件
+                if (std::filesystem::exists(audioPath)) {
+                    std::filesystem::remove(audioPath);
+                }
+                
+                if (m_cancelled) {
+                    if (onError) onError("已取消");
+                    return;
+                }
+                if (transcript.empty()) {
+                    if (onError) onError("转录失败，请检查:\n1. API 是否支持 Whisper\n2. 或先加载字幕文件");
+                    return;
+                }
             }
 
-            auto transcript = transcribe(audioPath, onProgress);
-            if (m_cancelled || transcript.empty()) {
-                if (onError) onError("转录失败或已取消");
-                return;
-            }
-
+            if (onProgress) onProgress(0.7f, "正在生成摘要...");
+            
             AIAnalysisResult result = analyzeWithGPT(transcript, videoPath, onProgress);
-            if (m_cancelled || !result.valid) {
-                if (onError) onError("分析失败或已取消");
+            if (m_cancelled) {
+                if (onError) onError("已取消");
+                return;
+            }
+            if (!result.valid) {
+                if (onError) onError("GPT 分析失败，请检查 API Key 和模型名称");
                 return;
             }
 
             saveCache(videoPath, result);
 
-            if (std::filesystem::exists(audioPath)) {
-                std::filesystem::remove(audioPath);
-            }
-
             if (onProgress) onProgress(1.0f, "分析完成");
             if (onComplete) onComplete(result);
         } catch (const std::exception& e) {
             Logger::instance().error("[AI] Analysis failed: " + std::string(e.what()));
-            if (onError) onError(e.what());
+            if (onError) onError(std::string("分析异常: ") + e.what());
         }
     }).detach();
+}
+
+std::string AIAnalyzer::findSubtitleFile(const std::string& videoPath) {
+    std::filesystem::path video(videoPath);
+    std::string baseName = video.stem().string();
+    std::string dir = video.parent_path().string();
+    
+    // 常见字幕扩展名
+    std::vector<std::string> extensions = {".srt", ".ass", ".ssa", ".vtt"};
+    
+    for (const auto& ext : extensions) {
+        std::string subtitlePath = dir + "/" + baseName + ext;
+        if (std::filesystem::exists(subtitlePath)) {
+            Logger::instance().info("[AI] Found subtitle file: " + subtitlePath);
+            return subtitlePath;
+        }
+    }
+    
+    return "";
+}
+
+std::vector<TranscriptSegment> AIAnalyzer::loadSubtitleAsTranscript(const std::string& subtitlePath) {
+    std::vector<TranscriptSegment> segments;
+    
+    // 使用项目的 SubtitleParser 解析字幕
+    SubtitleParser parser;
+    if (!parser.loadFile(subtitlePath)) {
+        Logger::instance().error("[AI] Failed to load subtitle file: " + subtitlePath);
+        return segments;
+    }
+    
+    auto entries = parser.entries();
+    for (const auto& entry : entries) {
+        TranscriptSegment segment;
+        segment.startTime = entry.startTime;
+        segment.endTime = entry.endTime;
+        segment.text = entry.text;
+        segment.confidence = 1.0f; // 字幕文件的置信度为 1
+        segments.push_back(segment);
+    }
+    
+    return segments;
 }
 
 } // namespace VideoPlay

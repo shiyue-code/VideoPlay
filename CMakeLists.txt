@@ -90,13 +90,7 @@ endif()
 # 查找 OpenGL (可选，用于高级渲染)
 find_package(OpenGL QUIET)
 
-# 引入 cpp-httplib (HTTP 客户端)
-include(FetchContent)
-FetchContent_Declare(httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.14.3
-)
-FetchContent_MakeAvailable(httplib)
+# HTTP 客户端使用 Windows WinHTTP API (无需额外依赖)
 
 # 源文件
 set(SOURCES
@@ -118,6 +112,7 @@ set(SOURCES
     src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
     src/renderer/custommessagebox.cpp
+    src/renderer/settingsdialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
     src/ai/searchengine.cpp
@@ -142,6 +137,7 @@ set(HEADERS
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
     src/renderer/custommessagebox.h
+    src/renderer/settingsdialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h
     src/ai/searchengine.h
@@ -170,13 +166,16 @@ endif()
 # 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${FFMPEG_LIBRARIES}
-    httplib::httplib
 )
 
 if(TARGET SDL3::SDL3)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
 elseif(SDL3_FOUND)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL3_LIBRARIES})
+endif()
+
+if(OPENGL_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
 endif()
 
 if(SDL3_TTF_FOUND)

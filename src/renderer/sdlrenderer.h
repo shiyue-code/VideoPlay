@@ -184,6 +184,10 @@ public:
     int windowWidth() const { return m_windowWidth; }
     int windowHeight() const { return m_windowHeight; }
 
+    // 获取窗口和字体对象
+    SDL_Window* getWindow() const { return m_window; }
+    TTF_Font* getFont() const { return m_font; }
+
     // 显示消息框
     void showMessageBox(const std::string& title, const std::string& message, bool isError = false);
 

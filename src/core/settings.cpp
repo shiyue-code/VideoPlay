@@ -403,15 +403,18 @@ void Settings::clearLastSession() {
 
 // AI 配置
 void Settings::setAIConfig(const AIConfig& config) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_config["ai"] = {
-        {"baseUrl", config.baseUrl},
-        {"apiKey", config.apiKey},
-        {"whisperModel", config.whisperModel},
-        {"gptModel", config.gptModel},
-        {"cacheDir", config.cacheDir},
-        {"autoAnalyze", config.autoAnalyze}
-    };
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config["ai"] = {
+            {"baseUrl", config.baseUrl},
+            {"apiKey", config.apiKey},
+            {"whisperModel", config.whisperModel},
+            {"gptModel", config.gptModel},
+            {"cacheDir", config.cacheDir},
+            {"autoAnalyze", config.autoAnalyze}
+        };
+    }
+    save();
 }
 
 AIConfig Settings::aiConfig() const {
