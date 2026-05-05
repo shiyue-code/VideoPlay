@@ -14,6 +14,7 @@
 | **SDL3_ttf** | 字体渲染 |
 | **OpenGL** | 硬件加速渲染 (可选) |
 | **nlohmann/json** | 配置持久化 |
+| **WinHTTP** | AI API 通信 (Windows) |
 
 ## 功能特性
 
@@ -34,12 +35,20 @@
 - 📌 播放进度记忆与恢复
 - ⏭️ 自动连播下一集/下一个文件
 - 🔖 章节支持：MKV/MP4 章节自动解析，进度条书签标记
+- 🔁 AB 循环播放（`[` 设置 A 点、`]` 设置 B 点、`\` 清除）
+
+### AI 智能分析
+- 🤖 MiMo 视频理解分析（自动生成摘要和章节）
+- 🔍 全文搜索（支持转录文本和章节内容）
+- 💾 分析结果缓存（避免重复调用 API）
+- ⚙️ 可配置 API 地址和模型（支持 MiMo v2-pro / v2.5-pro）
 
 ### UI 与交互
 - 🖱️ 无边框窗口，支持自定义标题栏和拖拽调整大小
 - 📷 截图功能（`F12` 保存到桌面）
 - 📂 最近文件菜单（最多 10 个，LRU）
-- 📋 菜单栏（文件/播放/剧集/帮助）
+- 📋 菜单栏（文件/播放/章节/AI/剧集/帮助）
+- 🖱️ 右键上下文菜单（播放控制、AB 循环、AI 分析）
 - ⛶ 全屏模式
 - 📌 窗口置顶
 - 💾 最大化状态记忆
@@ -67,6 +76,9 @@
 | `Ctrl+O` | 打开文件 |
 | `Ctrl+L` | 切换播放列表面板 |
 | `Ctrl+E` | 切换选集面板 |
+| `[` | AB 循环：设置 A 点 |
+| `]` | AB 循环：设置 B 点 |
+| `\` | AB 循环：清除 |
 
 ## 构建要求
 
@@ -151,6 +163,10 @@ VideoPlay/
 │   │   └── windowframe_linux.cpp  # Linux 实现
 │   ├── subtitles/
 │   │   └── subtitleparser.h/cpp   # SRT/ASS/VTT 字幕解析
+│   ├── ai/
+│   │   ├── aianalyzer.h/cpp       # AI 视频分析（MiMo 集成）
+│   │   ├── httpclient.h/cpp       # HTTP 客户端（WinHTTP）
+│   │   └── searchengine.h/cpp     # 全文搜索引擎
 │   └── utils/
 │       ├── logger.h/cpp           # 单例日志系统
 │       ├── stb_image.h            # 图片加载
@@ -177,14 +193,24 @@ VideoPlay/
 │  │  SDLRenderer │  │ FFmpegPlayer │  │   Playlist   │  │
 │  │  (UI/Render) │  │ (Decode)     │  │   Manager    │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────────┘  │
-└─────────┼─────────────────┼────────────────────────────┘
-          │                 │
-          ▼                 ▼
-┌─────────────────┐  ┌─────────────────┐
-│     SDL3        │  │     FFmpeg      │
-│  Window/Render  │  │  Decode/Resample│
-└─────────────────┘  └─────────────────┘
+│         │                 │                             │
+│  ┌──────┴───────┐  ┌──────┴───────┐                    │
+│  │  AIAnalyzer  │  │ SearchEngine │                    │
+│  │  (MiMo API)  │  │  (全文搜索)  │                    │
+│  └──────────────┘  └──────────────┘                    │
+└─────────────────────────────────────────────────────────┘
 ```
+
+## AI 配置
+
+1. 菜单栏 → AI → AI 设置
+2. 输入 API 地址和 API Key
+3. 选择模型（默认 `mimo-v2-pro`）
+4. 打开视频后，点击 AI → AI 分析当前视频
+
+支持的模型：
+- `mimo-v2-pro` - MiMo v2 Pro 视频理解
+- `mimo-v2.5-pro` - MiMo v2.5 Pro（最新）
 
 ## 注意事项
 
@@ -193,6 +219,8 @@ VideoPlay/
 3. **文件拖放**: 支持直接拖放视频文件到窗口播放
 4. **配置存储**: 设置保存在 `%APPDATA%/VideoPlay/VideoPlay.json` (Windows)
 5. **日志文件**: 日志保存在 `%APPDATA%/VideoPlay/logs/videoplay.log`
+6. **AI 缓存**: AI 分析结果缓存在 `%APPDATA%/VideoPlay/ai_cache/`
+7. **Debug 模式**: 使用 Release 构建可获得最佳性能
 
 ## License
 
