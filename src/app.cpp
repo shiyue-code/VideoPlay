@@ -574,6 +574,23 @@ void VideoPlayerApp::openFile(const std::string& path) {
             m_renderer->setChapters(chapters);
         }
 
+        // 尝试加载 AI 分析缓存
+        if (m_aiAnalyzer && m_aiAnalyzer->hasCache(path)) {
+            m_aiResult = m_aiAnalyzer->loadCache(path);
+            if (m_aiResult.valid) {
+                // 使用 AI 分析的章节覆盖 FFmpeg 解析的章节
+                if (!m_aiResult.chapters.empty() && m_renderer) {
+                    m_player->setChapters(m_aiResult.chapters);
+                    m_renderer->setChapters(m_aiResult.chapters);
+                }
+                // 构建搜索索引
+                if (m_searchEngine) {
+                    m_searchEngine->buildIndex(path, m_aiResult.transcript, m_aiResult.chapters);
+                }
+                Logger::instance().info("[AI] Loaded cached analysis for: " + path);
+            }
+        }
+
         // 开始播放
         play();
 
