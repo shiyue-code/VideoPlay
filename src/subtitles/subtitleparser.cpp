@@ -1,4 +1,4 @@
-#include "subtitles/subtitleparser.h"
+﻿#include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
 #include <fstream>
 #include <sstream>
@@ -7,6 +7,14 @@
 #include <regex>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("subtitle");
+    return *logger;
+}
+}
+
 
 SubtitleParser::SubtitleParser()
     : m_loaded(false), m_offset(0) {
@@ -18,7 +26,7 @@ SubtitleParser::~SubtitleParser() {
 bool SubtitleParser::loadFile(const std::string& filePath) {
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open()) {
-        Logger::instance().warning("Cannot open subtitle file: " + filePath);
+        logger().warning("Cannot open subtitle file: " + filePath);
         return false;
     }
     
@@ -63,13 +71,13 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
     }
 
     if (!success) {
-        Logger::instance().warning("All subtitle parsers failed for: " + filePath);
+        logger().warning("All subtitle parsers failed for: " + filePath);
     }
     
     if (success) {
         m_filePath = filePath;
         m_loaded = true;
-        Logger::instance().info("Loaded subtitle: " + filePath + 
+        logger().info("Loaded subtitle: " + filePath + 
                                " (" + std::to_string(m_entries.size()) + " entries)");
     }
     
@@ -255,7 +263,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
     int formatStartIdx = -1, formatEndIdx = -1, formatTextIdx = -1;
     int formatFieldCount = 0;
 
-    Logger::instance().debug("[ASS] Starting parse, content size=" + std::to_string(content.size()));
+    logger().debug("[ASS] Starting parse, content size=" + std::to_string(content.size()));
 
     while (std::getline(stream, line)) {
         line = trim(line);
@@ -263,7 +271,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
         // 查找 Events 部分
         if (line == "[Events]") {
             inEvents = true;
-            Logger::instance().debug("[ASS] Found [Events]");
+            logger().debug("[ASS] Found [Events]");
             continue;
         }
 
@@ -291,7 +299,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
                 idx++;
                 formatFieldCount++;
             }
-            Logger::instance().debug("[ASS] Format parsed: Start=" + std::to_string(formatStartIdx) +
+            logger().debug("[ASS] Format parsed: Start=" + std::to_string(formatStartIdx) +
                                      " End=" + std::to_string(formatEndIdx) +
                                      " Text=" + std::to_string(formatTextIdx) +
                                      " Count=" + std::to_string(formatFieldCount));
@@ -367,7 +375,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
         }
     }
 
-    Logger::instance().debug("[ASS] Parse complete, entries=" + std::to_string(m_entries.size()));
+    logger().debug("[ASS] Parse complete, entries=" + std::to_string(m_entries.size()));
     return !m_entries.empty();
 }
 

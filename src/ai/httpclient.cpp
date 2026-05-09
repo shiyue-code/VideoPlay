@@ -1,4 +1,4 @@
-#include "ai/httpclient.h"
+﻿#include "ai/httpclient.h"
 #include "utils/logger.h"
 #include <sstream>
 #include <fstream>
@@ -12,6 +12,14 @@
 #endif
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("ai.http");
+    return *logger;
+}
+}
+
 
 HttpClient::HttpClient() = default;
 HttpClient::~HttpClient() = default;
@@ -226,7 +234,7 @@ static HttpResponse winHttpRequest(const std::string& url, const std::wstring& m
 HttpResponse HttpClient::get(const std::string& path,
                              const std::map<std::string, std::string>& headers) {
     std::string url = buildUrl(path);
-    Logger::instance().debug("[HTTP] GET " + url);
+    logger().debug("[HTTP] GET " + url);
 
     auto mergedHeaders = defaultHeaders();
     mergedHeaders.insert(headers.begin(), headers.end());
@@ -237,7 +245,7 @@ HttpResponse HttpClient::get(const std::string& path,
 HttpResponse HttpClient::post(const std::string& path, const std::string& jsonBody,
                               const std::map<std::string, std::string>& headers) {
     std::string url = buildUrl(path);
-    Logger::instance().debug("[HTTP] POST " + url);
+    logger().debug("[HTTP] POST " + url);
 
     auto mergedHeaders = defaultHeaders();
     mergedHeaders["Content-Type"] = "application/json";
@@ -252,7 +260,7 @@ HttpResponse HttpClient::uploadFile(const std::string& path,
                                     const std::map<std::string, std::string>& fields,
                                     const std::map<std::string, std::string>& headers) {
     std::string url = buildUrl(path);
-    Logger::instance().debug("[HTTP] UPLOAD " + url + " file=" + filePath);
+    logger().debug("[HTTP] UPLOAD " + url + " file=" + filePath);
 
     auto mergedHeaders = defaultHeaders();
     mergedHeaders.insert(headers.begin(), headers.end());
@@ -262,7 +270,7 @@ HttpResponse HttpClient::uploadFile(const std::string& path,
     // 读取文件
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open()) {
-        Logger::instance().error("[HTTP] Cannot open file: " + filePath);
+        logger().error("[HTTP] Cannot open file: " + filePath);
         HttpResponse response;
         response.statusCode = -1;
         response.body = "Cannot open file: " + filePath;

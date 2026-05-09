@@ -1,4 +1,4 @@
-#include "app.h"
+﻿#include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
@@ -26,6 +26,14 @@
 namespace VideoPlay {
 
 namespace {
+Logger& logger() {
+    static auto logger = Logger::get("app");
+    return *logger;
+}
+}
+
+
+namespace {
     const char* APP_TITLE = "VideoPlay - FFmpeg + SDL";
     const int DEFAULT_WIDTH = 1280;
     const int DEFAULT_HEIGHT = 720;
@@ -40,12 +48,13 @@ VideoPlayerApp::~VideoPlayerApp() {
 }
 
 bool VideoPlayerApp::initialize() {
-    Logger::instance().info("Initializing VideoPlayerApp...");
+    Logger::root().configure(Settings::instance().logConfig());
+    logger().info("Initializing VideoPlayerApp...");
 
     // 创建渲染器
     m_renderer = std::make_unique<SDLRenderer>();
     if (!m_renderer->initialize(APP_TITLE, DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
-        Logger::instance().error("Failed to initialize SDL renderer");
+        logger().error("Failed to initialize SDL renderer");
         return false;
     }
 
@@ -111,7 +120,7 @@ bool VideoPlayerApp::initialize() {
         if (m_player) {
             m_player->setVolume(m_volume);
         }
-        Logger::instance().info("Volume set to: " + std::to_string(m_volume));
+        logger().info("Volume set to: " + std::to_string(m_volume));
     });
     m_renderer->setMuteCallback([this]() {
         toggleMute();
@@ -147,7 +156,7 @@ bool VideoPlayerApp::initialize() {
             m_subtitleParser->adjustOffset(deltaMs);
             int64_t offset = m_subtitleParser->offset();
             std::string sign = offset >= 0 ? "+" : "";
-            Logger::instance().info("Subtitle offset: " + sign + std::to_string(offset) + "ms");
+            logger().info("Subtitle offset: " + sign + std::to_string(offset) + "ms");
         }
     });
     m_renderer->setABLoopCallback([this](char action) {
@@ -217,16 +226,16 @@ bool VideoPlayerApp::initialize() {
     // 配置 AI 分析器（始终加载配置，无论 cacheDir 是否为空）
     AIConfig aiConfig = Settings::instance().aiConfig();
     m_aiAnalyzer->configure(aiConfig);
-    Logger::instance().info("[AI] Initialized with baseUrl: " + aiConfig.baseUrl + 
+    logger().info("[AI] Initialized with baseUrl: " + aiConfig.baseUrl + 
                            ", apiKey: " + (aiConfig.apiKey.empty() ? "(empty)" : "(set)") +
                            ", model: " + aiConfig.model);
 
-    Logger::instance().info("VideoPlayerApp initialized successfully");
+    logger().info("VideoPlayerApp initialized successfully");
     return true;
 }
 
 void VideoPlayerApp::shutdown() {
-    Logger::instance().info("Shutting down VideoPlayerApp...");
+    logger().info("Shutting down VideoPlayerApp...");
 
     // 正常退出时保存窗口状态
     if (m_renderer) {
@@ -252,7 +261,7 @@ void VideoPlayerApp::shutdown() {
     m_player.reset();
     m_subtitleParser.reset();
 
-    Logger::instance().info("VideoPlayerApp shutdown complete");
+    logger().info("VideoPlayerApp shutdown complete");
 }
 
 int VideoPlayerApp::run(int argc, char* argv[]) {
@@ -267,7 +276,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
         auto session = Settings::instance().lastSession();
         if (session.hasValidSession && !session.filePath.empty() &&
             std::filesystem::exists(session.filePath)) {
-            Logger::instance().info("Restoring last session: " + session.filePath);
+            logger().info("Restoring last session: " + session.filePath);
             // 重建单文件播放列表
             m_playlist.push_back(session.filePath);
             m_currentIndex = 0;
@@ -311,7 +320,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
 }
 
 void VideoPlayerApp::runMainLoop() {
-    Logger::instance().info("Entering main loop");
+    logger().info("Entering main loop");
 
     auto frameStart = HRClock::now();
 
@@ -364,7 +373,7 @@ void VideoPlayerApp::render() {
     // AB 循环检查（仅在正常播放时触发，防止连续 seek）
     if (m_loopA >= 0 && m_loopB > m_loopA && !m_loopSeeking && m_position >= m_loopB) {
         if (m_player && m_isPlaying) {
-            Logger::instance().info("AB loop triggered: seeking from " + formatTime(m_position) +
+            logger().info("AB loop triggered: seeking from " + formatTime(m_position) +
                 " to " + formatTime(m_loopA));
             m_player->seek(m_loopA);
             m_seekTargetPosition = m_loopA;
@@ -504,7 +513,7 @@ void VideoPlayerApp::render() {
 
     double total = dtGet + dtClear + dtRenderFrame + dtRenderUI + dtPresent;
     if (total > 10.0) {
-        Logger::instance().debug("[PERF] render get=" + std::to_string(dtGet) +
+        logger().debug("[PERF] render get=" + std::to_string(dtGet) +
             "(pos=" + std::to_string(dtPos) +
             ",vframe=" + std::to_string(dtGet - dtPos) + ")" +
             " clear=" + std::to_string(dtClear) +
@@ -518,7 +527,7 @@ void VideoPlayerApp::render() {
     static int renderCount = 0;
     renderCount++;
     if (elapsedMs(reportStart) >= 1000.0) {
-        Logger::instance().debug("[PERF] render fps=" + std::to_string(renderCount));
+        logger().debug("[PERF] render fps=" + std::to_string(renderCount));
         renderCount = 0;
         reportStart = HRClock::now();
     }
@@ -543,11 +552,11 @@ void VideoPlayerApp::render() {
 
 void VideoPlayerApp::openFile(const std::string& path) {
     if (!std::filesystem::exists(path)) {
-        Logger::instance().error("File not found: " + path);
+        logger().error("File not found: " + path);
         return;
     }
 
-    Logger::instance().info("Opening file: " + path);
+    logger().info("Opening file: " + path);
 
     // 停止当前播放
     stop();
@@ -592,7 +601,7 @@ void VideoPlayerApp::openFile(const std::string& path) {
                 if (m_searchEngine) {
                     m_searchEngine->buildIndex(path, m_aiResult.transcript, m_aiResult.chapters);
                 }
-                Logger::instance().info("[AI] Loaded cached analysis for: " + path);
+                logger().info("[AI] Loaded cached analysis for: " + path);
             }
         }
 
@@ -624,7 +633,7 @@ void VideoPlayerApp::openFile(const std::string& path) {
             m_renderer->updateRecentFilesMenu();
         }
     } else {
-        Logger::instance().error("Failed to load file: " + path);
+        logger().error("Failed to load file: " + path);
         if (m_renderer) {
             m_renderer->showMessageBox("打开文件失败", "无法加载文件: " + path + "\n请检查文件格式是否受支持。", true);
         }
@@ -634,14 +643,14 @@ void VideoPlayerApp::openFile(const std::string& path) {
 void VideoPlayerApp::openFileDialog() {
     if (!m_renderer) return;
 
-    Logger::instance().info("Opening file dialog...");
+    logger().info("Opening file dialog...");
 
     m_renderer->openFileDialog([this](const std::string& filePath) {
         if (!filePath.empty()) {
-            Logger::instance().info("Selected file: " + filePath);
+            logger().info("Selected file: " + filePath);
             openFile(filePath);
         } else {
-            Logger::instance().info("File dialog cancelled");
+            logger().info("File dialog cancelled");
         }
     });
 }
@@ -649,15 +658,15 @@ void VideoPlayerApp::openFileDialog() {
 void VideoPlayerApp::openFolderDialog() {
     if (!m_renderer) return;
 
-    Logger::instance().info("Opening folder dialog...");
+    logger().info("Opening folder dialog...");
 
     m_renderer->openFolderDialog([this](const std::string& folderPath) {
         if (folderPath.empty()) {
-            Logger::instance().info("Folder dialog cancelled");
+            logger().info("Folder dialog cancelled");
             return;
         }
 
-        Logger::instance().info("Selected folder: " + folderPath);
+        logger().info("Selected folder: " + folderPath);
 
         std::vector<std::string> mediaFiles;
         const std::vector<std::string> extensions = {
@@ -676,12 +685,12 @@ void VideoPlayerApp::openFolderDialog() {
                 }
             }
         } catch (const std::exception& e) {
-            Logger::instance().error("Failed to read folder: " + std::string(e.what()));
+            logger().error("Failed to read folder: " + std::string(e.what()));
             return;
         }
 
         if (mediaFiles.empty()) {
-            Logger::instance().info("No media files found in folder");
+            logger().info("No media files found in folder");
             return;
         }
 
@@ -693,7 +702,7 @@ void VideoPlayerApp::openFolderDialog() {
         }
         m_progressCacheDirty = true;
 
-        Logger::instance().info("Added " + std::to_string(mediaFiles.size()) + " files from folder");
+        logger().info("Added " + std::to_string(mediaFiles.size()) + " files from folder");
 
         // 如果当前没有播放文件，自动播放第一个
         if (m_currentFile.empty()) {
@@ -722,10 +731,10 @@ void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
         return;
     }
 
-    Logger::instance().info("Loading subtitle: " + m_currentSubtitle);
+    logger().info("Loading subtitle: " + m_currentSubtitle);
     if (m_subtitleParser) {
         if (!m_subtitleParser->loadFile(m_currentSubtitle)) {
-            Logger::instance().warning("Failed to parse subtitle: " + m_currentSubtitle);
+            logger().warning("Failed to parse subtitle: " + m_currentSubtitle);
             m_currentSubtitle.clear();
         }
     }
@@ -742,22 +751,22 @@ void VideoPlayerApp::onDurationChanged(int64_t duration) {
         Settings::instance().setLastDuration(m_currentFile, duration);
         m_progressCacheDirty = true;
     }
-    Logger::instance().info("Duration: " + std::to_string(duration) + "ms");
+    logger().info("Duration: " + std::to_string(duration) + "ms");
 }
 
 void VideoPlayerApp::onStateChanged(PlaybackState state) {
     switch (state) {
         case PlaybackState::Playing:
             m_isPlaying = true;
-            Logger::instance().info("State changed: Playing");
+            logger().info("State changed: Playing");
             break;
         case PlaybackState::Paused:
             m_isPlaying = false;
-            Logger::instance().info("State changed: Paused");
+            logger().info("State changed: Paused");
             break;
         case PlaybackState::Stopped:
             m_isPlaying = false;
-            Logger::instance().info("State changed: Stopped");
+            logger().info("State changed: Stopped");
             // 自动播放下一个（仅当不是手动停止/切换时）
             if (m_isManualOperation.exchange(false)) {
                 break;
@@ -768,7 +777,7 @@ void VideoPlayerApp::onStateChanged(PlaybackState state) {
 }
 
 void VideoPlayerApp::onError(const std::string& error) {
-    Logger::instance().error("Player error: " + error);
+    logger().error("Player error: " + error);
 }
 
 } // namespace VideoPlay

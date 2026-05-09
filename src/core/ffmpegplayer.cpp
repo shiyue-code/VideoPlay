@@ -1,4 +1,4 @@
-#include "core/ffmpegplayer.h"
+﻿#include "core/ffmpegplayer.h"
 #include "core/audioplayer.h"
 #include "utils/logger.h"
 
@@ -12,6 +12,14 @@ extern "C" {
 }
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("ffmpeg");
+    return *logger;
+}
+}
+
 
 namespace {
     const double CLOCK_SYNC_THRESHOLD = 0.01;
@@ -30,7 +38,7 @@ FFmpegPlayer::~FFmpegPlayer() {
 
 void FFmpegPlayer::initialize() {
     avformat_network_init();
-    Logger::instance().debug("FFmpegPlayer initialized");
+    logger().debug("FFmpegPlayer initialized");
 }
 
 void FFmpegPlayer::cleanup() {
@@ -45,7 +53,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         return false;
     }
 
-    Logger::instance().info("Loading file: " + filePath);
+    logger().info("Loading file: " + filePath);
     
     closeFile();
     
@@ -99,7 +107,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             }
             m_chapters.push_back(info);
         }
-        Logger::instance().info("Found " + std::to_string(m_chapters.size()) + " chapters");
+        logger().info("Found " + std::to_string(m_chapters.size()) + " chapters");
     }
     
     for (unsigned int i = 0; i < m_formatContext->nb_streams; i++) {
@@ -110,7 +118,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         if (!codec) continue;
         
         if (codecPar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            Logger::instance().info("Found video stream: " + 
+            logger().info("Found video stream: " + 
                                    std::to_string(codecPar->width) + "x" + 
                                    std::to_string(codecPar->height));
             
@@ -130,7 +138,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             initializeVideoContext();
             
         } else if (codecPar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            Logger::instance().info("Found audio stream: " + 
+            logger().info("Found audio stream: " + 
                                    std::to_string(codecPar->ch_layout.nb_channels) + " channels, " +
                                    std::to_string(codecPar->sample_rate) + " Hz");
             
@@ -218,7 +226,7 @@ bool FFmpegPlayer::initializeAudioContext() {
     
     m_audioPlayer = std::make_unique<AudioPlayer>();
     if (!m_audioPlayer->initialize(m_audioCtx.format)) {
-        Logger::instance().error("Failed to initialize audio player");
+        logger().error("Failed to initialize audio player");
         m_audioPlayer.reset();
         return false;
     }
@@ -279,7 +287,7 @@ void FFmpegPlayer::play() {
         // 首次播放：进入预缓冲状态，由主线程轮询 checkPreloadComplete()
         m_preloading = true;
         m_preloadStartTime = std::chrono::steady_clock::now();
-        Logger::instance().debug("Preload started");
+        logger().debug("Preload started");
     }
 }
 
@@ -369,7 +377,7 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     
     int ret = av_seek_frame(m_formatContext, -1, seekTarget, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
-        Logger::instance().error("Seek failed: " + std::to_string(positionMs));
+        logger().error("Seek failed: " + std::to_string(positionMs));
         return;
     }
     
@@ -445,11 +453,11 @@ bool FFmpegPlayer::checkPreloadComplete() {
             m_stateCallback(PlaybackState::Playing);
         }
         if (timeout) {
-            Logger::instance().warning("Preload timeout (" + std::to_string(elapsedMs) + 
+            logger().warning("Preload timeout (" + std::to_string(elapsedMs) + 
                 "ms), forcing play. video=" + std::to_string(videoQueueSize) + 
                 " audio=" + std::to_string(audioQueuedMs) + "ms");
         } else {
-            Logger::instance().debug("Preload complete in " + std::to_string(elapsedMs) + 
+            logger().debug("Preload complete in " + std::to_string(elapsedMs) + 
                 "ms. video=" + std::to_string(videoQueueSize) + 
                 " audio=" + std::to_string(audioQueuedMs) + "ms");
         }
@@ -460,7 +468,7 @@ bool FFmpegPlayer::checkPreloadComplete() {
     static auto s_lastLogTime = std::chrono::steady_clock::now();
     if (std::chrono::steady_clock::now() - s_lastLogTime > std::chrono::milliseconds(500)) {
         s_lastLogTime = std::chrono::steady_clock::now();
-        Logger::instance().debug("Preloading... elapsed=" + std::to_string(elapsedMs) +
+        logger().debug("Preloading... elapsed=" + std::to_string(elapsedMs) +
             "ms video=" + std::to_string(videoQueueSize) +
             " audio=" + std::to_string(audioQueuedMs) + "ms");
     }
@@ -469,7 +477,7 @@ bool FFmpegPlayer::checkPreloadComplete() {
 }
 
 void FFmpegPlayer::decodeLoop() {
-    Logger::instance().debug("Decode thread started");
+    logger().debug("Decode thread started");
 
     m_frameTimer = av_gettime() / 1000000.0;
 
@@ -479,7 +487,7 @@ void FFmpegPlayer::decodeLoop() {
     AVFrame* aframe = av_frame_alloc();
 
     if (!packet || !vframe || !aframe) {
-        Logger::instance().error("Failed to allocate FFmpeg packet/frame");
+        logger().error("Failed to allocate FFmpeg packet/frame");
         av_packet_free(&packet);
         av_frame_free(&vframe);
         av_frame_free(&aframe);
@@ -568,7 +576,7 @@ void FFmpegPlayer::decodeLoop() {
                         vframeCount++;
                         double dtPush = elapsedMs(t2);
                         if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) +
+                            logger().debug("[PERF] video read=" + std::to_string(dtRead) +
                                 "ms convert=" + std::to_string(dtConv) +
                                 "ms push=" + std::to_string(dtPush) + "ms");
                         }
@@ -594,7 +602,7 @@ void FFmpegPlayer::decodeLoop() {
                         vframeCount++;
                         double dtPush = elapsedMs(t2);
                         if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            Logger::instance().debug("[PERF] video read=" + std::to_string(dtRead) +
+                            logger().debug("[PERF] video read=" + std::to_string(dtRead) +
                                 "ms convert=" + std::to_string(dtConv) +
                                 "ms push=" + std::to_string(dtPush) + "ms");
                         }
@@ -621,7 +629,7 @@ void FFmpegPlayer::decodeLoop() {
                         aframeCount++;
                         double dtEnqueue = elapsedMs(t4);
                         if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                            logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
                                 "ms resample=" + std::to_string(dtResample) +
                                 "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
                         }
@@ -645,7 +653,7 @@ void FFmpegPlayer::decodeLoop() {
                         aframeCount++;
                         double dtEnqueue = elapsedMs(t4);
                         if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            Logger::instance().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                            logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
                                 "ms resample=" + std::to_string(dtResample) +
                                 "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
                         }
@@ -658,7 +666,7 @@ void FFmpegPlayer::decodeLoop() {
         av_packet_unref(packet);
 
         if (elapsedMs(reportStart) >= 1000.0) {
-            Logger::instance().debug("[PERF] decodeLoop pkt/s=" + std::to_string(pktCount) +
+            logger().debug("[PERF] decodeLoop pkt/s=" + std::to_string(pktCount) +
                 " vframe/s=" + std::to_string(vframeCount) +
                 " aframe/s=" + std::to_string(aframeCount));
             pktCount = 0;
@@ -673,7 +681,7 @@ void FFmpegPlayer::decodeLoop() {
     av_frame_free(&vframe);
     av_frame_free(&aframe);
 
-    Logger::instance().debug("Decode thread stopped");
+    logger().debug("Decode thread stopped");
 }
 
 VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
@@ -754,7 +762,7 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
                                      coefs, dstRange, 
                                      0, 1 << 16, 1 << 16);
             
-            Logger::instance().debug("SWS context created: colorspace=" + std::to_string(colorSpace) + 
+            logger().debug("SWS context created: colorspace=" + std::to_string(colorSpace) + 
                                      " srcRange=" + std::to_string(srcRange));
         }
         
@@ -781,7 +789,7 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     
     int swsRet = sws_scale(m_videoCtx.swsContext, frame->data, frame->linesize, 0, height, dstData, dstStride);
     if (swsRet <= 0) {
-        Logger::instance().warning("sws_scale failed or returned 0 lines");
+        logger().warning("sws_scale failed or returned 0 lines");
         return result;
     }
 
@@ -991,7 +999,7 @@ std::vector<ChapterInfo> FFmpegPlayer::chapters() const {
 void FFmpegPlayer::setChapters(const std::vector<ChapterInfo>& chapters) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_chapters = chapters;
-    Logger::instance().info("[FFmpeg] Chapters set: " + std::to_string(chapters.size()));
+    logger().info("[FFmpeg] Chapters set: " + std::to_string(chapters.size()));
 }
 
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {

@@ -1,4 +1,4 @@
-#include "app.h"
+﻿#include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
@@ -8,6 +8,14 @@
 #include <iostream>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("app.events");
+    return *logger;
+}
+}
+
 
 
 void VideoPlayerApp::handleMenu(int menuId) {
@@ -150,7 +158,7 @@ void VideoPlayerApp::handleMenu(int menuId) {
             int64_t targetPos = chapters[idx].startTime;
             if (targetPos >= 0 && targetPos < m_duration) {
                 seek(targetPos - m_position); // 相对 seek
-                Logger::instance().info("Chapter seek: " + chapters[idx].title +
+                logger().info("Chapter seek: " + chapters[idx].title +
                     " at " + formatTime(targetPos));
             }
         }
@@ -160,14 +168,14 @@ void VideoPlayerApp::handleMenu(int menuId) {
 void VideoPlayerApp::openSubtitleDialog() {
     if (!m_renderer) return;
 
-    Logger::instance().info("Opening subtitle dialog...");
+    logger().info("Opening subtitle dialog...");
 
     m_renderer->openSubtitleDialog([this](const std::string& filePath) {
         if (!filePath.empty()) {
-            Logger::instance().info("Selected subtitle: " + filePath);
+            logger().info("Selected subtitle: " + filePath);
             loadSubtitleFile(filePath);
         } else {
-            Logger::instance().info("Subtitle dialog cancelled");
+            logger().info("Subtitle dialog cancelled");
         }
     });
 }
@@ -177,9 +185,9 @@ void VideoPlayerApp::loadSubtitleFile(const std::string& path) {
 
     if (m_subtitleParser->loadFile(path)) {
         m_currentSubtitle = path;
-        Logger::instance().info("Loaded subtitle: " + path);
+        logger().info("Loaded subtitle: " + path);
     } else {
-        Logger::instance().error("Failed to load subtitle: " + path);
+        logger().error("Failed to load subtitle: " + path);
         m_currentSubtitle.clear();
     }
 }
@@ -260,7 +268,7 @@ void VideoPlayerApp::startAIAnalysis() {
     }
 
     if (m_aiAnalyzing) {
-        Logger::instance().info("AI analysis already in progress");
+        logger().info("AI analysis already in progress");
         return;
     }
 
@@ -268,7 +276,7 @@ void VideoPlayerApp::startAIAnalysis() {
     m_aiProgress = 0.0f;
     m_aiStatus = "开始分析...";
 
-    Logger::instance().info("[AI] Starting analysis for: " + m_currentFile);
+    logger().info("[AI] Starting analysis for: " + m_currentFile);
 
     m_aiAnalyzer->analyze(m_currentFile,
         [this](const AIAnalysisResult& result) {
@@ -286,7 +294,7 @@ void VideoPlayerApp::startAIAnalysis() {
                 m_searchEngine->buildIndex(m_currentFile, result.transcript, result.chapters);
             }
 
-            Logger::instance().info("[AI] Analysis complete: " + 
+            logger().info("[AI] Analysis complete: " + 
                 std::to_string(result.chapters.size()) + " chapters");
         },
         [this](float progress, const std::string& status) {
@@ -296,7 +304,7 @@ void VideoPlayerApp::startAIAnalysis() {
         [this](const std::string& error) {
             m_aiAnalyzing = false;
             m_aiStatus = "分析失败: " + error;
-            Logger::instance().error("[AI] Analysis failed: " + error);
+            logger().error("[AI] Analysis failed: " + error);
         }
     );
 }
@@ -365,7 +373,7 @@ void VideoPlayerApp::showSearchPanel() {
         return;
     }
 
-    Logger::instance().info("[Search] Search panel requested");
+    logger().info("[Search] Search panel requested");
 }
 
 void VideoPlayerApp::clearAICache() {
@@ -385,7 +393,7 @@ void VideoPlayerApp::clearAICache() {
     if (m_renderer) {
         m_renderer->showMessageBox("清除缓存", "AI 缓存已清除", false);
     }
-    Logger::instance().info("[AI] Cache cleared for: " + m_currentFile);
+    logger().info("[AI] Cache cleared for: " + m_currentFile);
 }
 
 void VideoPlayerApp::showAISettings() {
@@ -435,7 +443,7 @@ void VideoPlayerApp::showAISettings() {
             m_aiAnalyzer->configure(config);
         }
         
-        Logger::instance().info("[AI] Settings saved, baseUrl: " + config.baseUrl);
+        logger().info("[AI] Settings saved, baseUrl: " + config.baseUrl);
     });
 }
 
@@ -445,7 +453,7 @@ void VideoPlayerApp::performSearch(const std::string& query) {
     }
 
     auto results = m_searchEngine->search(query, 20);
-    Logger::instance().info("[Search] Query: " + query + " Results: " + std::to_string(results.size()));
+    logger().info("[Search] Query: " + query + " Results: " + std::to_string(results.size()));
 
     if (!results.empty()) {
         seek(results[0].timestamp - m_position);

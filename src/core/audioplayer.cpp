@@ -1,9 +1,17 @@
-#include "core/audioplayer.h"
+﻿#include "core/audioplayer.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <cstring>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("audio");
+    return *logger;
+}
+}
+
 
 AudioPlayer::AudioPlayer() = default;
 
@@ -28,7 +36,7 @@ bool AudioPlayer::initialize(const AudioFormat& format) {
 
     m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (!m_stream) {
-        Logger::instance().error("Failed to initialize audio stream: " + std::string(SDL_GetError()));
+        logger().error("Failed to initialize audio stream: " + std::string(SDL_GetError()));
         return false;
     }
 
@@ -40,7 +48,7 @@ bool AudioPlayer::initialize(const AudioFormat& format) {
     // Apply initial volume/mute state to stream gain
     applyStreamGain();
 
-    Logger::instance().info("Audio stream initialized: " +
+    logger().info("Audio stream initialized: " +
                            std::to_string(format.sampleRate) + "Hz, " +
                            std::to_string(format.channels) + " channels");
     return true;
@@ -58,7 +66,7 @@ void AudioPlayer::shutdown() {
             m_deviceId = 0;
         }
         m_initialized = false;
-        Logger::instance().info("Audio stream shutdown");
+        logger().info("Audio stream shutdown");
     }
 }
 
@@ -72,16 +80,16 @@ void AudioPlayer::play() {
             m_paused = false;
             m_timerStart = Clock::now();
             m_timerRunning = true;
-            Logger::instance().debug("Audio playback started");
+            logger().debug("Audio playback started");
         } else {
-            Logger::instance().error("Failed to start audio stream: " + std::string(SDL_GetError()));
+            logger().error("Failed to start audio stream: " + std::string(SDL_GetError()));
         }
     } else if (m_paused) {
         if (SDL_ResumeAudioStreamDevice(m_stream)) {
             m_paused = false;
             m_timerStart = Clock::now();
             m_timerRunning = true;
-            Logger::instance().debug("Audio playback resumed");
+            logger().debug("Audio playback resumed");
         }
     }
 }
@@ -98,7 +106,7 @@ void AudioPlayer::pause() {
             m_basePlayedMs += physicalElapsed * m_playbackSpeed.load();
             m_timerRunning = false;
         }
-        Logger::instance().debug("Audio playback paused");
+        logger().debug("Audio playback paused");
     }
 }
 
@@ -111,7 +119,7 @@ void AudioPlayer::stop() {
         SDL_ClearAudioStream(m_stream);
         m_playing = false;
         m_paused = false;
-        Logger::instance().debug("Audio playback stopped");
+        logger().debug("Audio playback stopped");
     }
     m_basePlayedMs = 0.0;
     m_timerRunning = false;
@@ -172,7 +180,7 @@ void AudioPlayer::enqueue(const std::vector<float>& audioData) {
 
     // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
     if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
-        Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
+        logger().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
     }
 }
 
@@ -181,7 +189,7 @@ void AudioPlayer::enqueue(const float* data, size_t sampleCount) {
 
     // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
     if (!SDL_PutAudioStreamData(m_stream, data, static_cast<int>(sampleCount * sizeof(float)))) {
-        Logger::instance().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
+        logger().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
     }
 }
 

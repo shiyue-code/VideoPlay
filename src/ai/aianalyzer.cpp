@@ -1,4 +1,4 @@
-#include "ai/aianalyzer.h"
+﻿#include "ai/aianalyzer.h"
 #include "utils/logger.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -19,6 +19,14 @@ extern "C" {
 }
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("ai");
+    return *logger;
+}
+}
+
 
 AIAnalyzer::AIAnalyzer() = default;
 
@@ -82,7 +90,7 @@ std::string AIAnalyzer::computeFileHash(const std::string& filePath) const {
         result << std::hex << hash;
         return result.str();
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] computeFileHash failed: " + std::string(e.what()));
+        logger().error("[AI] computeFileHash failed: " + std::string(e.what()));
         return "";
     }
 }
@@ -138,9 +146,9 @@ AIAnalysisResult AIAnalyzer::loadCache(const std::string& videoPath) const {
             }
         }
 
-        Logger::instance().info("[AI] Loaded cache for: " + videoPath);
+        logger().info("[AI] Loaded cache for: " + videoPath);
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] Failed to load cache: " + std::string(e.what()));
+        logger().error("[AI] Failed to load cache: " + std::string(e.what()));
         result.valid = false;
     }
 
@@ -180,9 +188,9 @@ void AIAnalyzer::saveCache(const std::string& videoPath, const AIAnalysisResult&
         std::ofstream file(path);
         file << j.dump(2);
 
-        Logger::instance().info("[AI] Saved cache for: " + videoPath);
+        logger().info("[AI] Saved cache for: " + videoPath);
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] Failed to save cache: " + std::string(e.what()));
+        logger().error("[AI] Failed to save cache: " + std::string(e.what()));
     }
 }
 
@@ -190,7 +198,7 @@ void AIAnalyzer::clearCache(const std::string& videoPath) {
     std::string path = getCachePath(videoPath);
     if (std::filesystem::exists(path)) {
         std::filesystem::remove(path);
-        Logger::instance().info("[AI] Cleared cache for: " + videoPath);
+        logger().info("[AI] Cleared cache for: " + videoPath);
     }
 }
 
@@ -198,7 +206,7 @@ void AIAnalyzer::clearAllCache() {
     std::string cacheDir = getCacheDir();
     if (std::filesystem::exists(cacheDir)) {
         std::filesystem::remove_all(cacheDir);
-        Logger::instance().info("[AI] Cleared all cache");
+        logger().info("[AI] Cleared all cache");
     }
 }
 
@@ -210,7 +218,7 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
 
     AVFormatContext* inputCtx = nullptr;
     if (avformat_open_input(&inputCtx, videoPath.c_str(), nullptr, nullptr) < 0) {
-        Logger::instance().error("[AI] Cannot open video file: " + videoPath);
+        logger().error("[AI] Cannot open video file: " + videoPath);
         return "";
     }
 
@@ -229,7 +237,7 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
 
     if (audioStreamIdx < 0) {
         avformat_close_input(&inputCtx);
-        Logger::instance().error("[AI] No audio stream found");
+        logger().error("[AI] No audio stream found");
         return "";
     }
 
@@ -281,7 +289,7 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
     int64_t totalDuration = inputCtx->duration;
     int64_t processed = 0;
 
-    Logger::instance().info("[AI] Starting audio extraction...");
+    logger().info("[AI] Starting audio extraction...");
 
     while (av_read_frame(inputCtx, packet) >= 0 && !m_cancelled) {
         if (packet->stream_index == audioStreamIdx) {
@@ -357,7 +365,7 @@ std::string AIAnalyzer::extractAudio(const std::string& videoPath, ProgressCallb
     wavFile.write((char*)audioBuffer.data(), dataSize);
 
     wavFile.close();
-    Logger::instance().info("[AI] Audio extracted to: " + audioPath);
+    logger().info("[AI] Audio extracted to: " + audioPath);
     return audioPath;
 }
 
@@ -375,19 +383,19 @@ std::vector<TranscriptSegment> AIAnalyzer::transcribe(const std::string& audioPa
         baseUrl = m_config.baseUrl;
     }
 
-    Logger::instance().info("[AI] Transcribe - baseUrl: " + baseUrl);
-    Logger::instance().info("[AI] Transcribe - model: " + model);
-    Logger::instance().info("[AI] Transcribe - apiKey length: " + std::to_string(apiKey.length()));
+    logger().info("[AI] Transcribe - baseUrl: " + baseUrl);
+    logger().info("[AI] Transcribe - model: " + model);
+    logger().info("[AI] Transcribe - apiKey length: " + std::to_string(apiKey.length()));
 
     // 检查模型是否配置
     if (model.empty()) {
-        Logger::instance().warning("[AI] Model not configured, skipping transcription");
+        logger().warning("[AI] Model not configured, skipping transcription");
         return segments;
     }
 
     if (onProgress) onProgress(0.4f, "正在调用 Whisper API...");
 
-    Logger::instance().info("[AI] Calling Whisper API: " + baseUrl + "/audio/transcriptions");
+    logger().info("[AI] Calling Whisper API: " + baseUrl + "/audio/transcriptions");
 
     // 使用 HttpClient 的 uploadFile 方法
     std::map<std::string, std::string> fields;
@@ -399,11 +407,11 @@ std::vector<TranscriptSegment> AIAnalyzer::transcribe(const std::string& audioPa
 
     if (m_cancelled) return segments;
 
-    Logger::instance().info("[AI] Whisper API response status: " + std::to_string(result.statusCode));
+    logger().info("[AI] Whisper API response status: " + std::to_string(result.statusCode));
 
     if (result.statusCode != 200) {
-        Logger::instance().error("[AI] Whisper API error: status=" + std::to_string(result.statusCode));
-        Logger::instance().error("[AI] Response body: " + result.body.substr(0, 500));
+        logger().error("[AI] Whisper API error: status=" + std::to_string(result.statusCode));
+        logger().error("[AI] Response body: " + result.body.substr(0, 500));
         return segments;
     }
 
@@ -421,9 +429,9 @@ std::vector<TranscriptSegment> AIAnalyzer::transcribe(const std::string& audioPa
             }
         }
 
-        Logger::instance().info("[AI] Transcription complete: " + std::to_string(segments.size()) + " segments");
+        logger().info("[AI] Transcription complete: " + std::to_string(segments.size()) + " segments");
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] Failed to parse Whisper response: " + std::string(e.what()));
+        logger().error("[AI] Failed to parse Whisper response: " + std::string(e.what()));
     }
 
     if (onProgress) onProgress(0.7f, "转录完成");
@@ -446,8 +454,8 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
         baseUrl = m_config.baseUrl;
     }
 
-    Logger::instance().info("[AI] GPT Analysis - baseUrl: " + baseUrl);
-    Logger::instance().info("[AI] GPT Analysis - model: " + model);
+    logger().info("[AI] GPT Analysis - baseUrl: " + baseUrl);
+    logger().info("[AI] GPT Analysis - model: " + model);
 
     std::string transcriptText;
     for (const auto& seg : transcript) {
@@ -484,19 +492,19 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
         {"max_tokens", 2000}
     };
 
-    Logger::instance().info("[AI] Calling GPT API: " + baseUrl + "/v1/chat/completions");
+    logger().info("[AI] Calling GPT API: " + baseUrl + "/v1/chat/completions");
 
     auto response = m_http.post("v1/chat/completions", requestBody.dump());
 
     if (m_cancelled) return result;
 
     if (!response.success()) {
-        Logger::instance().error("[AI] GPT API error: status=" + std::to_string(response.statusCode));
-        Logger::instance().error("[AI] Response body: " + response.body.substr(0, 500));
+        logger().error("[AI] GPT API error: status=" + std::to_string(response.statusCode));
+        logger().error("[AI] Response body: " + response.body.substr(0, 500));
         return result;
     }
 
-    Logger::instance().info("[AI] GPT API response status: " + std::to_string(response.statusCode));
+    logger().info("[AI] GPT API response status: " + std::to_string(response.statusCode));
 
     try {
         nlohmann::json j = nlohmann::json::parse(response.body);
@@ -532,9 +540,9 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
         result.valid = true;
 
-        Logger::instance().info("[AI] GPT analysis complete: " + std::to_string(result.chapters.size()) + " chapters");
+        logger().info("[AI] GPT analysis complete: " + std::to_string(result.chapters.size()) + " chapters");
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] Failed to parse GPT response: " + std::string(e.what()));
+        logger().error("[AI] Failed to parse GPT response: " + std::string(e.what()));
     }
 
     if (onProgress) onProgress(0.9f, "分析完成");
@@ -593,7 +601,7 @@ void AIAnalyzer::analyze(const std::string& videoPath,
             if (onProgress) onProgress(1.0f, "分析完成");
             if (onComplete) onComplete(result);
         } catch (const std::exception& e) {
-            Logger::instance().error("[AI] Analysis failed: " + std::string(e.what()));
+            logger().error("[AI] Analysis failed: " + std::string(e.what()));
             if (onError) onError(std::string("分析异常: ") + e.what());
         }
     }).detach();
@@ -607,13 +615,13 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
     if (onProgress) onProgress(0.1f, "正在提取视频...");
     std::string mp4Path = extractVideoForAI(videoPath, onProgress);
     if (mp4Path.empty()) {
-        Logger::instance().error("[AI] Failed to extract video for AI");
+        logger().error("[AI] Failed to extract video for AI");
         return result;
     }
 
     // 转换为 base64
     if (onProgress) onProgress(0.4f, "正在编码视频...");
-    Logger::instance().info("[AI] Converting video to base64...");
+    logger().info("[AI] Converting video to base64...");
     std::string base64Data = fileToBase64(mp4Path);
     
     // 清理临时文件
@@ -622,10 +630,10 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
     }
 
     if (base64Data.empty()) {
-        Logger::instance().error("[AI] Failed to convert video to base64");
+        logger().error("[AI] Failed to convert video to base64");
         return result;
     }
-    Logger::instance().info("[AI] Base64 size: " + std::to_string(base64Data.length()) + " chars");
+    logger().info("[AI] Base64 size: " + std::to_string(base64Data.length()) + " chars");
 
     // 构建请求
     if (onProgress) onProgress(0.6f, "正在调用 MiMo 视频理解...");
@@ -665,20 +673,20 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
         {"max_tokens", 4096}
     };
 
-    Logger::instance().info("[AI] Calling MiMo video understanding: " + baseUrl + "/v1/chat/completions");
-    Logger::instance().info("[AI] Model: " + model);
+    logger().info("[AI] Calling MiMo video understanding: " + baseUrl + "/v1/chat/completions");
+    logger().info("[AI] Model: " + model);
 
     auto response = m_http.post("v1/chat/completions", requestBody.dump());
 
     if (m_cancelled) return result;
 
     if (!response.success()) {
-        Logger::instance().error("[AI] MiMo API error: status=" + std::to_string(response.statusCode));
-        Logger::instance().error("[AI] Response: " + response.body.substr(0, 500));
+        logger().error("[AI] MiMo API error: status=" + std::to_string(response.statusCode));
+        logger().error("[AI] Response: " + response.body.substr(0, 500));
         return result;
     }
 
-    Logger::instance().info("[AI] MiMo API response status: " + std::to_string(response.statusCode));
+    logger().info("[AI] MiMo API response status: " + std::to_string(response.statusCode));
 
     try {
         nlohmann::json j = nlohmann::json::parse(response.body);
@@ -714,11 +722,11 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
         result.valid = true;
 
-        Logger::instance().info("[AI] MiMo video analysis complete: " + 
+        logger().info("[AI] MiMo video analysis complete: " + 
             std::to_string(result.chapters.size()) + " chapters");
     } catch (const std::exception& e) {
-        Logger::instance().error("[AI] Failed to parse MiMo response: " + std::string(e.what()));
-        Logger::instance().error("[AI] Response body: " + response.body.substr(0, 500));
+        logger().error("[AI] Failed to parse MiMo response: " + std::string(e.what()));
+        logger().error("[AI] Response body: " + response.body.substr(0, 500));
     }
 
     if (onProgress) onProgress(0.9f, "分析完成");
@@ -735,7 +743,7 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath, Progress
     // 获取视频时长
     AVFormatContext* inputCtx = nullptr;
     if (avformat_open_input(&inputCtx, videoPath.c_str(), nullptr, nullptr) < 0) {
-        Logger::instance().error("[AI] Cannot open video file: " + videoPath);
+        logger().error("[AI] Cannot open video file: " + videoPath);
         return "";
     }
     if (avformat_find_stream_info(inputCtx, nullptr) < 0) {
@@ -745,7 +753,7 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath, Progress
     double duration = inputCtx->duration / (double)AV_TIME_BASE;
     avformat_close_input(&inputCtx);
     
-    Logger::instance().info("[AI] Video duration: " + std::to_string(duration) + "s");
+    logger().info("[AI] Video duration: " + std::to_string(duration) + "s");
     
     int64_t maxDuration = 90;
     bool needTrim = (duration > maxDuration);
@@ -769,7 +777,7 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath, Progress
         const auto& preset = presets[i];
         
         if (i > 0) {
-            Logger::instance().info("[AI] Retrying with lower quality: " + std::string(preset.name));
+            logger().info("[AI] Retrying with lower quality: " + std::string(preset.name));
             if (std::filesystem::exists(outputPath)) {
                 std::filesystem::remove(outputPath);
             }
@@ -792,30 +800,30 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath, Progress
         cmd += " -movflags +faststart";
         cmd += " \"" + outputPath + "\"";
         
-        Logger::instance().info("[AI] FFmpeg command: " + cmd);
+        logger().info("[AI] FFmpeg command: " + cmd);
         if (onProgress) onProgress(0.2f + i * 0.1f, "正在转码视频 (" + std::string(preset.name) + ")...");
         
         int ret = system(cmd.c_str());
         if (ret != 0) {
-            Logger::instance().error("[AI] FFmpeg failed with code: " + std::to_string(ret));
+            logger().error("[AI] FFmpeg failed with code: " + std::to_string(ret));
             continue;
         }
         
         if (std::filesystem::exists(outputPath)) {
             auto fileSize = std::filesystem::file_size(outputPath);
-            Logger::instance().info("[AI] Output video size: " + std::to_string(fileSize / 1024) + " KB (" + std::string(preset.name) + ")");
+            logger().info("[AI] Output video size: " + std::to_string(fileSize / 1024) + " KB (" + std::string(preset.name) + ")");
             
             // 检查是否满足大小限制（原始文件 ≤ 35MB，因为 base64 会增大约 33%）
             if (fileSize <= 35 * 1024 * 1024) {
                 return outputPath;
             }
             
-            Logger::instance().warning("[AI] Video still too large, trying lower quality...");
+            logger().warning("[AI] Video still too large, trying lower quality...");
         }
     }
     
     // 所有质量级别都失败
-    Logger::instance().error("[AI] Failed to compress video to acceptable size");
+    logger().error("[AI] Failed to compress video to acceptable size");
     if (std::filesystem::exists(outputPath)) {
         std::filesystem::remove(outputPath);
     }
@@ -829,7 +837,7 @@ std::string AIAnalyzer::fileToBase64(const std::string& filePath) {
     
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
-        Logger::instance().error("[AI] Cannot open file for base64: " + filePath);
+        logger().error("[AI] Cannot open file for base64: " + filePath);
         return "";
     }
     
@@ -870,7 +878,7 @@ std::string AIAnalyzer::findSubtitleFile(const std::string& videoPath) {
     for (const auto& ext : extensions) {
         std::string subtitlePath = dir + "/" + baseName + ext;
         if (std::filesystem::exists(subtitlePath)) {
-            Logger::instance().info("[AI] Found subtitle file: " + subtitlePath);
+            logger().info("[AI] Found subtitle file: " + subtitlePath);
             return subtitlePath;
         }
     }
@@ -884,7 +892,7 @@ std::vector<TranscriptSegment> AIAnalyzer::loadSubtitleAsTranscript(const std::s
     // 使用项目的 SubtitleParser 解析字幕
     SubtitleParser parser;
     if (!parser.loadFile(subtitlePath)) {
-        Logger::instance().error("[AI] Failed to load subtitle file: " + subtitlePath);
+        logger().error("[AI] Failed to load subtitle file: " + subtitlePath);
         return segments;
     }
     

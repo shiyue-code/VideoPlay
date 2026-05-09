@@ -1,4 +1,4 @@
-#include "app.h"
+﻿#include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
@@ -10,6 +10,14 @@
 
 namespace VideoPlay {
 
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("app.playlist");
+    return *logger;
+}
+}
+
+
 
 void VideoPlayerApp::addToPlaylist(const std::string& path) {
     // 检查是否已存在
@@ -17,7 +25,7 @@ void VideoPlayerApp::addToPlaylist(const std::string& path) {
     if (it == m_playlist.end()) {
         m_playlist.push_back(path);
         m_progressCacheDirty = true;
-        Logger::instance().info("Added to playlist: " + path);
+        logger().info("Added to playlist: " + path);
     }
 }
 
@@ -63,7 +71,7 @@ void VideoPlayerApp::playPrevious() {
 void VideoPlayerApp::playFromPlaylist(size_t index) {
     if (index >= m_playlist.size()) return;
     if (!m_currentFile.empty() && m_currentFile == m_playlist[index]) {
-        Logger::instance().debug("Already playing: " + m_playlist[index]);
+        logger().debug("Already playing: " + m_playlist[index]);
         return;
     }
 
@@ -93,7 +101,7 @@ void VideoPlayerApp::playEpisode(size_t index) {
 
     std::string path = m_currentSeries->episodes[index].path;
     if (!m_currentFile.empty() && m_currentFile == path) {
-        Logger::instance().debug("Already playing episode: " + path);
+        logger().debug("Already playing episode: " + path);
         return;
     }
 
@@ -170,7 +178,7 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
 
     // 单曲循环：重新播放当前文件
     if (loopMode == LoopMode::Single && !m_currentFile.empty()) {
-        Logger::instance().info("Loop mode: Single, replaying current file");
+        logger().info("Loop mode: Single, replaying current file");
         if (m_player) {
             // Clear display frame to avoid showing last frame briefly
             m_displayFrame = VideoFrame();
@@ -182,7 +190,7 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
 
     // 不循环：播放完就停止
     if (loopMode == LoopMode::None) {
-        Logger::instance().info("Loop mode: None, stopping after current file");
+        logger().info("Loop mode: None, stopping after current file");
         return;
     }
 
@@ -190,7 +198,7 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
     if (m_currentSeries) {
         size_t nextIndex = m_currentSeries->currentIndex + 1;
         if (nextIndex < m_currentSeries->episodes.size()) {
-            Logger::instance().info("Auto-playing next episode: " +
+            logger().info("Auto-playing next episode: " +
                                     std::to_string(nextIndex + 1));
             playEpisode(nextIndex);
             return;
@@ -201,7 +209,7 @@ void VideoPlayerApp::autoAdvanceAfterStop() {
                 nextPlaylistIndex = 0;
             }
             if (m_playlist.size() > 1 || m_playlist[nextPlaylistIndex] != m_currentFile) {
-                Logger::instance().info("Series finished, continuing playlist");
+                logger().info("Series finished, continuing playlist");
                 playFromPlaylist(nextPlaylistIndex);
             }
         }

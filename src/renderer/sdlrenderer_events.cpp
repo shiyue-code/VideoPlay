@@ -1,10 +1,18 @@
-#include "renderer/sdlrenderer.h"
+﻿#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.events");
+    return *logger;
+}
+}
+
 
 
 void SDLRenderer::handleEvent(const SDL_Event& event) {
@@ -548,12 +556,12 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         case ControlType::ChapterMarker:
             if (m_seekCallback && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_chapters.size()) {
                 int64_t chapterTime = m_chapters[m_pressedControlValue].startTime;
-                Logger::instance().info("[Chapter] Clicked chapter " + std::to_string(m_pressedControlValue) + 
+                logger().info("[Chapter] Clicked chapter " + std::to_string(m_pressedControlValue) + 
                     ", startTime=" + std::to_string(chapterTime) + 
                     ", duration=" + std::to_string(m_lastDuration));
                 if (m_lastDuration > 0) {
                     double ratio = static_cast<double>(chapterTime) / static_cast<double>(m_lastDuration);
-                    Logger::instance().info("[Chapter] ratio=" + std::to_string(ratio) + 
+                    logger().info("[Chapter] ratio=" + std::to_string(ratio) + 
                         ", seekParam=" + std::to_string(1000.0 + ratio * 1000.0));
                     m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
                 }
