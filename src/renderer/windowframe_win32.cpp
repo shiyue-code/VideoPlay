@@ -1,4 +1,4 @@
-#ifdef _WIN32
+﻿#ifdef _WIN32
 
 #include "renderer/windowframe_win32.h"
 #include "utils/logger.h"
@@ -24,6 +24,14 @@ enum DWM_WINDOW_CORNER_PREFERENCE {
 #endif
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.windowframe");
+    return *logger;
+}
+}
+
 
 namespace {
 #ifndef WM_NCUAHDRAWCAPTION
@@ -397,7 +405,7 @@ bool WindowFrameWin32::enable(SDL_Window* window)
     SDL_PropertiesID props = SDL_GetWindowProperties(window);
     m_hwnd = (HWND)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
     if (!m_hwnd) {
-        Logger::instance().error("WindowFrameWin32: failed to get HWND");
+        logger().error("WindowFrameWin32: failed to get HWND");
         return false;
     }
 
@@ -414,7 +422,7 @@ bool WindowFrameWin32::enable(SDL_Window* window)
     refreshWindow();
     createShadowWindow();
 
-    Logger::instance().info("WindowFrameWin32 enabled");
+    logger().info("WindowFrameWin32 enabled");
     m_enabled = true;
     return true;
 }
@@ -429,7 +437,7 @@ void WindowFrameWin32::disable()
     restoreStyle();
     refreshWindow();
 
-    Logger::instance().info("WindowFrameWin32 disabled");
+    logger().info("WindowFrameWin32 disabled");
     m_enabled = false;
     m_hwnd = nullptr;
     m_window = nullptr;
@@ -723,7 +731,7 @@ void WindowFrameWin32::createShadowWindow() {
         SetWindowRgn(m_shadowHwnd, hRgn, FALSE);
         DeleteObject(hInner);
 
-        Logger::instance().info("ShadowWindow created: hwnd=" +
+        logger().info("ShadowWindow created: hwnd=" +
             std::to_string(reinterpret_cast<uintptr_t>(m_shadowHwnd)) +
             " pos=" + std::to_string(rc.left - kShadowBorder) + "," + std::to_string(rc.top - kShadowBorder) +
             " size=" + std::to_string(rc.right - rc.left + kShadowBorder * 2) + "x" + std::to_string(rc.bottom - rc.top + kShadowBorder * 2));

@@ -1,10 +1,18 @@
-#include "ai/searchengine.h"
+﻿#include "ai/searchengine.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <sstream>
 #include <cctype>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("search");
+    return *logger;
+}
+}
+
 
 SearchEngine::SearchEngine() = default;
 SearchEngine::~SearchEngine() = default;
@@ -46,7 +54,7 @@ void SearchEngine::buildIndex(const std::string& videoPath,
     }
 
     m_hasIndex = true;
-    Logger::instance().info("[Search] Index built: " + std::to_string(m_entries.size()) + " entries");
+    logger().info("[Search] Index built: " + std::to_string(m_entries.size()) + " entries");
 }
 
 void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries) {
@@ -70,7 +78,7 @@ void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries)
         }
     }
 
-    Logger::instance().info("[Search] Added " + std::to_string(entries.size()) + " subtitle entries");
+    logger().info("[Search] Added " + std::to_string(entries.size()) + " subtitle entries");
 }
 
 void SearchEngine::clearIndex() {

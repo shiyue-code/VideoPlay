@@ -1,4 +1,4 @@
-#include "renderer/sdlrenderer.h"
+﻿#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
@@ -18,6 +18,14 @@
 
 namespace VideoPlay {
 
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.draw");
+    return *logger;
+}
+}
+
+
 
 bool SDLRenderer::loadFont(const std::string& fontPath, int fontSize) {
 #ifdef HAS_SDL_TTF
@@ -25,7 +33,7 @@ bool SDLRenderer::loadFont(const std::string& fontPath, int fontSize) {
 
     m_font = TTF_OpenFont(fontPath.c_str(), fontSize);
     if (!m_font) {
-        Logger::instance().error("Failed to load font: " + std::string(SDL_GetError()));
+        logger().error("Failed to load font: " + std::string(SDL_GetError()));
         return false;
     }
 
@@ -533,14 +541,14 @@ SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
     }
 
     if (!m_renderer) {
-        Logger::instance().debug("getIconTexture: renderer not ready for " + type);
+        logger().debug("getIconTexture: renderer not ready for " + type);
         return nullptr;
     }
 
     SDL_Texture* texture = createIconTexture(type);
     if (texture) {
         m_iconTextures[type] = texture;
-        Logger::instance().info("Generated icon texture for: " + type);
+        logger().info("Generated icon texture for: " + type);
     }
     return texture;
 }

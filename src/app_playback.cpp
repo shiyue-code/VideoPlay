@@ -9,6 +9,11 @@
 namespace {
     const int MIN_VOLUME = 0;
     const int MAX_VOLUME = 100;
+
+    VideoPlay::Logger& logger() {
+        static auto logger = VideoPlay::Logger::get("playback");
+        return *logger;
+    }
 }
 
 namespace VideoPlay {
@@ -17,7 +22,7 @@ namespace VideoPlay {
 void VideoPlayerApp::play() {
     if (!m_player) return;
 
-    Logger::instance().info("Playing");
+    logger().info("Playing");
     m_player->play();
     m_isPlaying = true;
 }
@@ -25,7 +30,7 @@ void VideoPlayerApp::play() {
 void VideoPlayerApp::pause() {
     if (!m_player) return;
 
-    Logger::instance().info("Pausing");
+    logger().info("Pausing");
     m_player->pause();
     m_isPlaying = false;
 }
@@ -41,7 +46,7 @@ void VideoPlayerApp::togglePlayPause() {
 void VideoPlayerApp::stop() {
     if (!m_player) return;
 
-    Logger::instance().info("Stopping");
+    logger().info("Stopping");
     m_isManualOperation = true;
     m_player->stop();
     m_isPlaying = false;
@@ -57,7 +62,7 @@ void VideoPlayerApp::seek(double deltaMs) {
     int64_t targetPos = m_position + static_cast<int64_t>(deltaMs);
     targetPos = std::max(0LL, std::min(targetPos, m_duration));
     
-    Logger::instance().info("Seeking to: " + std::to_string(targetPos) + "ms");
+    logger().info("Seeking to: {}ms", targetPos);
     m_player->seek(targetPos);
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
@@ -69,7 +74,7 @@ void VideoPlayerApp::seekTo(double position) {
     position = std::max(0.0, std::min(1.0, position));
     int64_t targetPos = static_cast<int64_t>(position * m_duration);
     
-    Logger::instance().info("Seeking to position: " + std::to_string(position));
+    logger().info("Seeking to position: {}", position);
     m_player->seek(targetPos);
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
@@ -83,7 +88,7 @@ void VideoPlayerApp::setVolume(int delta) {
         m_player->setVolume(m_volume);
     }
     
-    Logger::instance().info("Volume set to: " + std::to_string(m_volume));
+    logger().info("Volume set to: {}", m_volume);
 }
 
 void VideoPlayerApp::toggleMute() {
@@ -93,7 +98,7 @@ void VideoPlayerApp::toggleMute() {
         m_player->setMuted(m_isMuted);
     }
     
-    Logger::instance().info(m_isMuted ? "Muted" : "Unmuted");
+    logger().info(m_isMuted ? "Muted" : "Unmuted");
 }
 
 void VideoPlayerApp::setSpeed(double speed) {
@@ -103,7 +108,7 @@ void VideoPlayerApp::setSpeed(double speed) {
         m_player->setPlaybackSpeed(m_speed);
     }
     
-    Logger::instance().info("Playback speed set to: " + std::to_string(m_speed) + "x");
+    logger().info("Playback speed set to: {}x", m_speed);
 }
 
 void VideoPlayerApp::cycleSpeed() {
@@ -124,28 +129,28 @@ void VideoPlayerApp::cycleSpeed() {
 
 void VideoPlayerApp::setLoopPointA() {
     m_loopA = m_position;
-    Logger::instance().info("Loop A set: " + formatTime(m_loopA));
+    logger().info("Loop A set: {}", formatTime(m_loopA));
 }
 
 void VideoPlayerApp::setLoopPointB() {
     if (m_loopA < 0) {
-        Logger::instance().warning("Set loop point A first before setting B");
+        logger().warning("Set loop point A first before setting B");
         return;
     }
     m_loopB = m_position;
     if (m_loopB <= m_loopA) {
-        Logger::instance().warning("Loop B must be after loop A");
+        logger().warning("Loop B must be after loop A");
         m_loopB = -1;
         return;
     }
-    Logger::instance().info("Loop B set: " + formatTime(m_loopB) + ", AB loop active");
+    logger().info("Loop B set: {}, AB loop active", formatTime(m_loopB));
 }
 
 void VideoPlayerApp::clearLoop() {
     m_loopA = -1;
     m_loopB = -1;
     m_loopSeeking = false;
-    Logger::instance().info("AB loop cleared");
+    logger().info("AB loop cleared");
 }
 
 } // namespace VideoPlay

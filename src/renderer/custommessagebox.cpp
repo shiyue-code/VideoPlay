@@ -1,4 +1,4 @@
-#include "renderer/custommessagebox.h"
+﻿#include "renderer/custommessagebox.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <SDL3/SDL.h>
@@ -24,6 +24,14 @@ enum DWM_WINDOW_CORNER_PREFERENCE {
 #endif
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.dialog");
+    return *logger;
+}
+}
+
 
 // 颜色常量
 static constexpr uint8_t COLOR_BG[4] = {30, 30, 30, 240};
@@ -59,7 +67,7 @@ void CustomMessageBox::show(const std::string& title, const std::string& message
     // 创建无边框窗口
     m_window = SDL_CreateWindow(title.c_str(), m_windowWidth, m_windowHeight, SDL_WINDOW_BORDERLESS);
     if (!m_window) {
-        Logger::instance().error("Failed to create message box window: " + std::string(SDL_GetError()));
+        logger().error("Failed to create message box window: " + std::string(SDL_GetError()));
         return;
     }
 
@@ -89,7 +97,7 @@ void CustomMessageBox::show(const std::string& title, const std::string& message
 
     m_renderer = SDL_CreateRenderer(m_window, nullptr);
     if (!m_renderer) {
-        Logger::instance().error("Failed to create message box renderer: " + std::string(SDL_GetError()));
+        logger().error("Failed to create message box renderer: " + std::string(SDL_GetError()));
         SDL_DestroyWindow(m_window);
         m_window = nullptr;
         return;

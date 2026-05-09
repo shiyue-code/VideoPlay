@@ -1,4 +1,4 @@
-#include "renderer/settingsdialog.h"
+﻿#include "renderer/settingsdialog.h"
 #include "utils/logger.h"
 #include <algorithm>
 
@@ -20,6 +20,14 @@ enum DWM_WINDOW_CORNER_PREFERENCE {
 #endif
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.settings");
+    return *logger;
+}
+}
+
 
 // 颜色常量
 static constexpr uint8_t COLOR_BG[4] = {30, 30, 30, 240};
@@ -67,7 +75,7 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
 
     m_window = SDL_CreateWindow("AI 设置", m_windowWidth, m_windowHeight, SDL_WINDOW_BORDERLESS);
     if (!m_window) {
-        Logger::instance().error("Failed to create settings dialog: " + std::string(SDL_GetError()));
+        logger().error("Failed to create settings dialog: " + std::string(SDL_GetError()));
         return;
     }
 
@@ -93,7 +101,7 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
 
     m_renderer = SDL_CreateRenderer(m_window, nullptr);
     if (!m_renderer) {
-        Logger::instance().error("Failed to create settings renderer: " + std::string(SDL_GetError()));
+        logger().error("Failed to create settings renderer: " + std::string(SDL_GetError()));
         SDL_DestroyWindow(m_window);
         m_window = nullptr;
         return;

@@ -1,10 +1,18 @@
-#ifndef _WIN32
+﻿#ifndef _WIN32
 
 #include "renderer/windowframe_linux.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer.windowframe");
+    return *logger;
+}
+}
+
 
 WindowFrameLinux::WindowFrameLinux() = default;
 
@@ -20,7 +28,7 @@ bool WindowFrameLinux::enable(SDL_Window* window) {
     m_window = window;
     SDL_SetWindowBordered(window, false);
 
-    Logger::instance().info("WindowFrameLinux enabled");
+    logger().info("WindowFrameLinux enabled");
     m_enabled = true;
     return true;
 }
@@ -32,7 +40,7 @@ void WindowFrameLinux::disable() {
 
     SDL_SetWindowBordered(m_window, true);
 
-    Logger::instance().info("WindowFrameLinux disabled");
+    logger().info("WindowFrameLinux disabled");
     m_enabled = false;
     m_window = nullptr;
     m_dragging = false;

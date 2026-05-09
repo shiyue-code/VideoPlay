@@ -90,6 +90,12 @@ endif()
 # 查找 OpenGL (可选，用于高级渲染)
 find_package(OpenGL QUIET)
 
+# 查找 spdlog (可选，用于高性能日志；未安装时使用内置日志实现)
+find_package(spdlog CONFIG QUIET)
+if(NOT spdlog_FOUND)
+    find_package(spdlog QUIET)
+endif()
+
 # HTTP 客户端使用 Windows WinHTTP API (无需额外依赖)
 
 # 源文件
@@ -169,6 +175,15 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${FFMPEG_LIBRARIES}
 )
+
+if(spdlog_FOUND)
+    if(TARGET spdlog::spdlog)
+        target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog)
+    elseif(TARGET spdlog::spdlog_header_only)
+        target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog_header_only)
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE VIDEOPLAY_HAS_SPDLOG=1)
+endif()
 
 if(TARGET SDL3::SDL3)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
@@ -278,3 +293,4 @@ message(STATUS "  FFmpeg: ${FFMPEG_FOUND}")
 message(STATUS "  SDL3: ${SDL3_FOUND}")
 message(STATUS "  SDL3_ttf: ${SDL3_TTF_FOUND}")
 message(STATUS "  OpenGL: ${OPENGL_FOUND}")
+message(STATUS "  spdlog: ${spdlog_FOUND}")

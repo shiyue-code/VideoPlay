@@ -1,4 +1,4 @@
-#include "renderer/sdlrenderer.h"
+﻿#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "core/episodedetector.h"
 #include "core/settings.h"
@@ -47,6 +47,14 @@ namespace {
 
 namespace VideoPlay {
 
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("renderer");
+    return *logger;
+}
+}
+
+
 SDLRenderer::SDLRenderer() = default;
 
 SDLRenderer::~SDLRenderer() {
@@ -63,7 +71,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 
     // 初始化 SDL
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
-        Logger::instance().error("SDL_Init failed: " + std::string(SDL_GetError()));
+        logger().error("SDL_Init failed: " + std::string(SDL_GetError()));
         return false;
     }
 
@@ -76,7 +84,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 #ifdef HAS_SDL_TTF
     // 初始化 SDL_ttf
     if (!TTF_Init()) {
-        Logger::instance().error("TTF_Init failed: " + std::string(SDL_GetError()));
+        logger().error("TTF_Init failed: " + std::string(SDL_GetError()));
         // 继续运行，只是没有文字
         } else {
         // 加载字体
@@ -90,14 +98,14 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         for (const auto& path : fontPaths) {
             if (std::filesystem::exists(path)) {
                 if (loadFont(path, 14)) {
-                    Logger::instance().info("Font loaded: " + path);
+                    logger().info("Font loaded: " + path);
                     break;
                 }
             }
         }
         
         if (!m_font) {
-            Logger::instance().warning("No font loaded, text rendering disabled");
+            logger().warning("No font loaded, text rendering disabled");
         }
     }
 #endif
@@ -111,7 +119,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     );
 
     if (!m_window) {
-        Logger::instance().error("SDL_CreateWindow failed: " + std::string(SDL_GetError()));
+        logger().error("SDL_CreateWindow failed: " + std::string(SDL_GetError()));
         SDL_Quit();
         return false;
     }
@@ -119,12 +127,12 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 创建渲染器：优先尝试 OpenGL（使多重采样�?GL 特性生效）
     m_renderer = SDL_CreateRenderer(m_window, "opengl");
     if (m_renderer) {
-        Logger::instance().info("Renderer backend: opengl");
+        logger().info("Renderer backend: opengl");
     } else {
-        Logger::instance().warning("OpenGL renderer unavailable, falling back to default: " + std::string(SDL_GetError()));
+        logger().warning("OpenGL renderer unavailable, falling back to default: " + std::string(SDL_GetError()));
         m_renderer = SDL_CreateRenderer(m_window, NULL);
         if (!m_renderer) {
-            Logger::instance().error("SDL_CreateRenderer failed: " + std::string(SDL_GetError()));
+            logger().error("SDL_CreateRenderer failed: " + std::string(SDL_GetError()));
             SDL_DestroyWindow(m_window);
             m_window = nullptr;
             SDL_Quit();
@@ -154,7 +162,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 
     m_initialized = true;
     m_lastMouseMove = SDL_GetTicks(); // 防止启动时控制栏立即自动隐藏
-    Logger::instance().info("SDLRenderer initialized: " + std::to_string(width) + "x" + std::to_string(height));
+    logger().info("SDLRenderer initialized: " + std::to_string(width) + "x" + std::to_string(height));
     
     return true;
 }
@@ -204,7 +212,7 @@ void SDLRenderer::shutdown() {
         m_windowFrame.reset();
     }
 
-    Logger::instance().info("SDLRenderer shutdown");
+    logger().info("SDLRenderer shutdown");
 }
 
 void SDLRenderer::setWindowTitle(const std::string& title) {
@@ -236,7 +244,7 @@ void SDLRenderer::toggleBorderless() {
     if (!m_window) return;
 
     m_borderless = !m_borderless;
-    Logger::instance().info("toggleBorderless called, new state: " + std::string(m_borderless ? "true" : "false"));
+    logger().info("toggleBorderless called, new state: " + std::string(m_borderless ? "true" : "false"));
 
     if (!m_windowFrame) {
         m_windowFrame = WindowFrame::create();
@@ -276,9 +284,9 @@ void SDLRenderer::ensureTexture(int width, int height) {
     m_videoHeight = height;
 
     if (!m_videoTexture) {
-        Logger::instance().error("Failed to create video texture: " + std::string(SDL_GetError()));
+        logger().error("Failed to create video texture: " + std::string(SDL_GetError()));
     } else {
-        Logger::instance().info("Video texture created: " + std::to_string(width) + "x" + std::to_string(height));
+        logger().info("Video texture created: " + std::to_string(width) + "x" + std::to_string(height));
     }
 }
 
@@ -548,7 +556,7 @@ void SDLRenderer::takeScreenshot() {
 
     SDL_Surface* surface = SDL_RenderReadPixels(m_renderer, nullptr);
     if (!surface) {
-        Logger::instance().error("Failed to read pixels for screenshot");
+        logger().error("Failed to read pixels for screenshot");
         return;
     }
 
@@ -586,10 +594,10 @@ void SDLRenderer::takeScreenshot() {
     SDL_DestroySurface(surface);
 
     if (result) {
-        Logger::instance().info("Screenshot saved: " + savePath);
+        logger().info("Screenshot saved: " + savePath);
         showMessageBox("截图已保存", "截图已保存到:\n" + savePath, false);
     } else {
-        Logger::instance().error("Failed to save screenshot");
+        logger().error("Failed to save screenshot");
         showMessageBox("截图失败", "无法保存截图", true);
     }
 }

@@ -57,6 +57,17 @@ struct AIConfig {
     bool autoAnalyze = false;
 };
 
+struct LogConfig {
+    bool enabled = true;
+    bool consoleOutput = true;
+    std::string level = "info";       // trace/debug/info/warning/error/critical/off
+    std::unordered_map<std::string, std::string> moduleLevels;
+    std::string filePath;             // 为空时使用默认日志路径
+    size_t maxFileSize = 5 * 1024 * 1024;
+    size_t maxFiles = 3;
+    bool flushOnWarning = true;
+};
+
 class Settings {
 public:
     static Settings& instance();
@@ -109,6 +120,10 @@ public:
     // AI 配置
     void setAIConfig(const AIConfig& config);
     AIConfig aiConfig() const;
+
+    // 日志配置
+    void setLogConfig(const LogConfig& config);
+    LogConfig logConfig() const;
 
     // 保存和加载
     void save();

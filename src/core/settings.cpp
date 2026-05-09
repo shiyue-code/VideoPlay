@@ -1,4 +1,4 @@
-#include "core/settings.h"
+﻿#include "core/settings.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -8,6 +8,14 @@
 #include <nlohmann/json.hpp>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("settings");
+    return *logger;
+}
+}
+
 
 Settings& Settings::instance() {
     static Settings instance;
@@ -74,6 +82,16 @@ void Settings::load() {
                 {"outlineColor", "#000000"},
                 {"outlineWidth", 2}
             }},
+            {"log", {
+                {"enabled", true},
+                {"consoleOutput", true},
+                {"level", "info"},
+                {"modules", nlohmann::json::object()},
+                {"filePath", std::string()},
+                {"maxFileSize", 5 * 1024 * 1024},
+                {"maxFiles", 3},
+                {"flushOnWarning", true}
+            }},
             {"rememberPosition", true},
             {"positions", nlohmann::json::object()},
             {"seriesProgress", nlohmann::json::object()}
@@ -87,9 +105,22 @@ void Settings::load() {
             file >> m_config;
         }
     } catch (const std::exception& e) {
-        Logger::instance().error("Failed to load settings: " + std::string(e.what()));
+        logger().error("Failed to load settings: " + std::string(e.what()));
         // 使用默认配置
         m_config = nlohmann::json::object();
+    }
+
+    if (!m_config.contains("log")) {
+        m_config["log"] = {
+            {"enabled", true},
+            {"consoleOutput", true},
+            {"level", "info"},
+            {"modules", nlohmann::json::object()},
+            {"filePath", std::string()},
+            {"maxFileSize", 5 * 1024 * 1024},
+            {"maxFiles", 3},
+            {"flushOnWarning", true}
+        };
     }
 }
 
@@ -102,7 +133,7 @@ void Settings::save() {
             file << m_config.dump(4);
         }
     } catch (const std::exception& e) {
-        Logger::instance().error("Failed to save settings: " + std::string(e.what()));
+        logger().error("Failed to save settings: " + std::string(e.what()));
     }
 }
 
@@ -426,6 +457,48 @@ AIConfig Settings::aiConfig() const {
         config.model = ai.value("model", "mimo-v2-pro");
         config.cacheDir = ai.value("cacheDir", std::string());
         config.autoAnalyze = ai.value("autoAnalyze", false);
+    }
+    return config;
+}
+
+// 日志配置
+void Settings::setLogConfig(const LogConfig& config) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config["log"] = {
+            {"enabled", config.enabled},
+            {"consoleOutput", config.consoleOutput},
+            {"level", config.level},
+            {"modules", config.moduleLevels},
+            {"filePath", config.filePath},
+            {"maxFileSize", config.maxFileSize},
+            {"maxFiles", config.maxFiles},
+            {"flushOnWarning", config.flushOnWarning}
+        };
+    }
+    save();
+}
+
+LogConfig Settings::logConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    LogConfig config;
+    if (m_config.contains("log")) {
+        const auto& log = m_config["log"];
+        config.enabled = log.value("enabled", true);
+        config.consoleOutput = log.value("consoleOutput", true);
+        config.level = log.value("level", "info");
+        config.moduleLevels.clear();
+        if (log.contains("modules") && log["modules"].is_object()) {
+            for (const auto& [module, level] : log["modules"].items()) {
+                if (level.is_string()) {
+                    config.moduleLevels[module] = level.get<std::string>();
+                }
+            }
+        }
+        config.filePath = log.value("filePath", std::string());
+        config.maxFileSize = log.value("maxFileSize", static_cast<size_t>(5 * 1024 * 1024));
+        config.maxFiles = log.value("maxFiles", static_cast<size_t>(3));
+        config.flushOnWarning = log.value("flushOnWarning", true);
     }
     return config;
 }
