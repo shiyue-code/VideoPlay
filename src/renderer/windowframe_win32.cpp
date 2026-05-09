@@ -124,27 +124,25 @@ namespace {
                 if (w <= 0 || h <= 0) return HTCLIENT;
 
                 const int menuBarHeight = 32;
-                const int btnSize = 14;
-                const int btnGap = 12;
-                const int rightMargin = 14;
+                const int btnWidth = 46;
 
                 // 系统按钮
                 if (pt.y >= 0 && pt.y < menuBarHeight) {
-                    int startX = w - rightMargin - 3 * btnSize - 2 * btnGap;
+                    int startX = w - 3 * btnWidth;
 
-                    int bxClose = startX + 2 * (btnSize + btnGap);
-                    if (pt.x >= bxClose - 4 && pt.x < bxClose + btnSize + 4)
+                    int bxClose = startX + 2 * btnWidth;
+                    if (pt.x >= bxClose && pt.x < bxClose + btnWidth)
                         return HTCLOSE;
 
-                    int bxMax = startX + btnSize + btnGap;
-                    if (pt.x >= bxMax - 4 && pt.x < bxMax + btnSize + 4)
+                    int bxMax = startX + btnWidth;
+                    if (pt.x >= bxMax && pt.x < bxMax + btnWidth)
                         return HTMAXBUTTON;
 
                     int bxMin = startX;
-                    if (pt.x >= bxMin - 4 && pt.x < bxMin + btnSize + 4)
+                    if (pt.x >= bxMin && pt.x < bxMin + btnWidth)
                         return HTMINBUTTON;
 
-                    if (pt.x < startX - 10)
+                    if (pt.x < startX)
                         return HTCAPTION;
                 }
 
@@ -529,26 +527,24 @@ FrameHitTest WindowFrameWin32::hitTest(int clientX, int clientY) const {
     if (w <= 0 || h <= 0) return FrameHitTest::None;
 
     const int menuBarHeight = kMenuBarHeight;
-    const int btnSize = kSysBtnSize;
-    const int btnGap = kSysBtnGap;
-    const int rightMargin = kSysBtnRightMargin;
+    const int btnWidth = kSysBtnWidth;
 
     // 系统按钮
     if (clientY >= 0 && clientY < menuBarHeight) {
-        int startX = w - rightMargin - 3 * btnSize - 2 * btnGap;
-        int bxClose = startX + 2 * (btnSize + btnGap);
-        if (clientX >= bxClose - 4 && clientX < bxClose + btnSize + 4)
+        int startX = w - 3 * btnWidth;
+        int bxClose = startX + 2 * btnWidth;
+        if (clientX >= bxClose && clientX < bxClose + btnWidth)
             return FrameHitTest::CloseButton;
 
-        int bxMax = startX + btnSize + btnGap;
-        if (clientX >= bxMax - 4 && clientX < bxMax + btnSize + 4)
+        int bxMax = startX + btnWidth;
+        if (clientX >= bxMax && clientX < bxMax + btnWidth)
             return FrameHitTest::MaxButton;
 
         int bxMin = startX;
-        if (clientX >= bxMin - 4 && clientX < bxMin + btnSize + 4)
+        if (clientX >= bxMin && clientX < bxMin + btnWidth)
             return FrameHitTest::MinButton;
 
-        if (clientX < startX - 10)
+        if (clientX < startX)
             return FrameHitTest::Caption;
     }
 

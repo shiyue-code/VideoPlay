@@ -36,12 +36,13 @@ private:
 
     bool m_running = false;
     bool m_dragging = false;
+    bool m_apiKeyVisible = false;
     int m_dragOffsetX = 0;
     int m_dragOffsetY = 0;
 
     int m_windowWidth = 500;
     int m_windowHeight = 320;
-    static constexpr int TITLE_HEIGHT = 40;
+    static constexpr int TITLE_HEIGHT = 32;
     static constexpr int INPUT_HEIGHT = 30;
     static constexpr int PADDING = 15;
 
@@ -53,6 +54,7 @@ private:
     // 按钮区域
     SDL_FRect m_saveBtnRect;
     SDL_FRect m_cancelBtnRect;
+    SDL_FRect m_apiKeyToggleRect;
 
     void calculateLayout();
     void render();

@@ -43,7 +43,7 @@ static constexpr uint8_t COLOR_BUTTON_HOVER[4] = {80, 80, 80, 255};
 static constexpr uint8_t COLOR_BUTTON_TEXT[4] = {255, 255, 255, 255};
 static constexpr uint8_t COLOR_CLOSE_HOVER[4] = {232, 17, 35, 255};
 
-static constexpr int TITLE_HEIGHT = 40;
+static constexpr int TITLE_HEIGHT = 32;
 
 CustomMessageBox::CustomMessageBox(SDL_Window* parentWindow, TTF_Font* font)
     : m_parentWindow(parentWindow), m_font(font) {
@@ -124,7 +124,7 @@ void CustomMessageBox::show(const std::string& title, const std::string& message
 }
 
 void CustomMessageBox::calculateSize() {
-    int titleWidth = getTextWidth(m_title) + 40;
+    int titleWidth = getTextWidth(m_title) + 80;
     int minTitleWidth = 300;
     m_windowWidth = std::max(minTitleWidth, titleWidth);
 
@@ -185,30 +185,32 @@ void CustomMessageBox::render() {
     SDL_RenderFillRect(m_renderer, &titleBar);
 
     // 绘制标题文本
-    drawText(m_title, 15, 10, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
+    int titleTextY = (TITLE_HEIGHT - getFontHeight()) / 2;
+    drawText(m_title, 15, titleTextY, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
 
     // 关闭按钮
-    int closeX = m_windowWidth - 35;
-    int closeY = 5;
-    int closeSize = 30;
+    constexpr int closeWidth = 46;
+    constexpr int closeIconSize = 10;
+    int closeX = m_windowWidth - closeWidth;
+    int closeY = 0;
 
     float mx, my;
     SDL_GetMouseState(&mx, &my);
-    bool closeHovered = (mx >= closeX && mx <= closeX + closeSize && my >= closeY && my <= closeY + closeSize);
+    bool closeHovered = (mx >= closeX && mx <= closeX + closeWidth && my >= closeY && my <= closeY + TITLE_HEIGHT);
 
     if (closeHovered) {
         SDL_SetRenderDrawColor(m_renderer, COLOR_CLOSE_HOVER[0], COLOR_CLOSE_HOVER[1], COLOR_CLOSE_HOVER[2], COLOR_CLOSE_HOVER[3]);
-    } else {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_BG[0], COLOR_BUTTON_BG[1], COLOR_BUTTON_BG[2], COLOR_BUTTON_BG[3]);
+        SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
+                              static_cast<float>(closeWidth), static_cast<float>(TITLE_HEIGHT)};
+        SDL_RenderFillRect(m_renderer, &closeBtn);
     }
-    SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
-                          static_cast<float>(closeSize), static_cast<float>(closeSize)};
-    SDL_RenderFillRect(m_renderer, &closeBtn);
 
     // 关闭按钮 X
     SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
-    SDL_RenderLine(m_renderer, closeX + 8, closeY + 8, closeX + closeSize - 8, closeY + closeSize - 8);
-    SDL_RenderLine(m_renderer, closeX + closeSize - 8, closeY + 8, closeX + 8, closeY + closeSize - 8);
+    int iconX = closeX + (closeWidth - closeIconSize) / 2;
+    int iconY = (TITLE_HEIGHT - closeIconSize) / 2;
+    SDL_RenderLine(m_renderer, iconX, iconY, iconX + closeIconSize, iconY + closeIconSize);
+    SDL_RenderLine(m_renderer, iconX + closeIconSize, iconY, iconX, iconY + closeIconSize);
 
     // 绘制消息文本
     auto lines = wrapText(m_message, m_windowWidth - 60);
@@ -257,10 +259,9 @@ void CustomMessageBox::handleEvents() {
                     int my = static_cast<int>(event.button.y);
 
                     // 关闭按钮点击
-                    int closeX = m_windowWidth - 35;
-                    int closeY = 5;
-                    int closeSize = 30;
-                    if (mx >= closeX && mx <= closeX + closeSize && my >= closeY && my <= closeY + closeSize) {
+                    constexpr int closeWidth = 46;
+                    int closeX = m_windowWidth - closeWidth;
+                    if (mx >= closeX && mx <= closeX + closeWidth && my >= 0 && my <= TITLE_HEIGHT) {
                         m_running = false;
                         break;
                     }

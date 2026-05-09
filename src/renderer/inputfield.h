@@ -46,6 +46,7 @@ private:
     int m_selectionStart = -1;
     int m_selectionEnd = -1;
     bool m_selecting = false;
+    int m_textOffsetX = 0;
 
     // 光标闪烁
     uint64_t m_cursorBlinkTime = 0;
@@ -53,6 +54,7 @@ private:
 
     // 辅助函数
     int getCursorPosFromMouseX(int mouseX) const;
+    void updateTextOffset(int contentWidth);
     void deleteSelection();
     void selectAll();
     void moveCursorHome();

@@ -504,7 +504,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                 }
             }
         }
-        int menuWidth = 20 + labelMaxW;
+        int menuWidth = 14 + 22 + labelMaxW + 14;
         if (shortcutMaxW > 0) menuWidth += 24 + shortcutMaxW;
         if (menuWidth < 140) menuWidth = 140;
         int menuHeight = (int)activeMenu.items.size() * 24 + 8;

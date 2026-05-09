@@ -232,11 +232,10 @@ void SDLRenderer::renderMenuBar() {
 
     //  无边框模式下的系统按�?
     if (m_borderless) {
-        int btnSize = 14;
-        int btnGap = 12;
-        int rightMargin = 14;
-        int btnY = (m_menuBarHeight - btnSize) / 2;
-        int startX = m_windowWidth - rightMargin - 3 * btnSize - 2 * btnGap;
+        constexpr int buttonWidth = 46;
+        constexpr int iconSize = 10;
+        int iconY = (m_menuBarHeight - iconSize) / 2;
+        int startX = m_windowWidth - 3 * buttonWidth;
 
         // 最小化按钮
         {
@@ -245,74 +244,74 @@ void SDLRenderer::renderMenuBar() {
             bool pressed = (m_pressedControl == ControlType::SysMinButton);
             const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
             if (pressed) {
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
             } else if (hovered) {
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
             }
             // 横线
-            int lineW = btnSize - 4;
+            int lineW = iconSize;
             int lineH = 2;
-            int lineX = bx + (btnSize - lineW) / 2;
-            int lineY = btnY + (btnSize - lineH) / 2;
+            int lineX = bx + (buttonWidth - lineW) / 2;
+            int lineY = iconY + iconSize - 3;
             fillRect(lineX, lineY, lineW, lineH, c[0], c[1], c[2], c[3]);
-            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysMinButton, 0});
+            m_controlRects.push_back({bx, 0, buttonWidth, m_menuBarHeight, ControlType::SysMinButton, 0});
         }
 
         // 最大化/还原按钮
         {
-            int bx = startX + btnSize + btnGap;
+            int bx = startX + buttonWidth;
             bool hovered = (m_hoveredControl == ControlType::SysMaxButton);
             bool pressed = (m_pressedControl == ControlType::SysMaxButton);
             const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
             if (pressed) {
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
             } else if (hovered) {
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_HOVER[0], COLOR_BUTTON_BG_HOVER[1], COLOR_BUTTON_BG_HOVER[2], COLOR_BUTTON_BG_HOVER[3]);
             }
             bool isMaximized = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED);
             if (isMaximized) {
                 // 还原：两个错位小方框
-                int s = btnSize - 6;
-                int ox = bx + 2;
-                int oy = btnY + 2;
+                int s = 8;
+                int ox = bx + (buttonWidth - iconSize) / 2 + 1;
+                int oy = iconY + 2;
                 drawRect(ox, oy + 2, s, s, c[0], c[1], c[2], c[3]);
                 drawRect(ox + 3, oy - 1, s, s, c[0], c[1], c[2], c[3]);
             } else {
                 //  最大化：空心方�?
-                int s = btnSize - 4;
-                int ox = bx + 2;
-                int oy = btnY + 2;
+                int s = iconSize;
+                int ox = bx + (buttonWidth - s) / 2;
+                int oy = iconY;
                 drawRect(ox, oy, s, s, c[0], c[1], c[2], c[3]);
             }
-            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysMaxButton, 0});
+            m_controlRects.push_back({bx, 0, buttonWidth, m_menuBarHeight, ControlType::SysMaxButton, 0});
         }
 
         // 关闭按钮
         {
-            int bx = startX + 2 * (btnSize + btnGap);
+            int bx = startX + 2 * buttonWidth;
             bool hovered = (m_hoveredControl == ControlType::SysCloseButton);
             bool pressed = (m_pressedControl == ControlType::SysCloseButton);
             const uint8_t* c = hovered ? COLOR_BUTTON_HOVER : COLOR_BUTTON;
             if (pressed) {
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4,
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
             } else if (hovered) {
                 //  关闭按钮 hover 用红色背景（现代风格�?
-                fillRect(bx - 2, btnY - 2, btnSize + 4, btnSize + 4, 232, 17, 35, 255);
+                fillRect(bx, 0, buttonWidth, m_menuBarHeight, 232, 17, 35, 255);
                 c = COLOR_BUTTON_HOVER;
             }
             // X
             SDL_SetRenderDrawColor(m_renderer, c[0], c[1], c[2], c[3]);
-            int pad = 3;
-            SDL_RenderLine(m_renderer, static_cast<float>(bx + pad), static_cast<float>(btnY + pad),
-                           static_cast<float>(bx + btnSize - 1 - pad), static_cast<float>(btnY + btnSize - 1 - pad));
-            SDL_RenderLine(m_renderer, static_cast<float>(bx + btnSize - 1 - pad), static_cast<float>(btnY + pad),
-                           static_cast<float>(bx + pad), static_cast<float>(btnY + btnSize - 1 - pad));
-            m_controlRects.push_back({bx, btnY, btnSize, btnSize, ControlType::SysCloseButton, 0});
+            int iconX = bx + (buttonWidth - iconSize) / 2;
+            SDL_RenderLine(m_renderer, static_cast<float>(iconX), static_cast<float>(iconY),
+                           static_cast<float>(iconX + iconSize), static_cast<float>(iconY + iconSize));
+            SDL_RenderLine(m_renderer, static_cast<float>(iconX + iconSize), static_cast<float>(iconY),
+                           static_cast<float>(iconX), static_cast<float>(iconY + iconSize));
+            m_controlRects.push_back({bx, 0, buttonWidth, m_menuBarHeight, ControlType::SysCloseButton, 0});
         }
     }
 }
@@ -324,7 +323,9 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     const int labelFontSize = 12;
     const int shortcutFontSize = 11;
     const int shortcutGap = 24; // 标签与快捷键之间的最小间距
-    const int hPadding = 20;    // 左右总内边距
+    const int leftPadding = 14;
+    const int rightPadding = 14;
+    const int checkColumnWidth = 22;
 
     // 预先计算所需宽度
     for (const auto& item : menu.items) {
@@ -338,7 +339,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
         }
     }
 
-    int menuWidth = hPadding + labelMaxW;
+    int menuWidth = leftPadding + checkColumnWidth + labelMaxW + rightPadding;
     if (shortcutMaxW > 0) {
         menuWidth += shortcutGap + shortcutMaxW;
     }
@@ -349,67 +350,62 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     uint8_t baseAlpha = static_cast<uint8_t>(240 * alpha);
 
     // 菜单背景
-    fillRect(x, y, menuWidth, menuHeight,
-             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
+    fillRoundRect(x, y, menuWidth, menuHeight, 8,
+                  COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
 
     //  菜单�?
     int itemY = y + 4;
     for (const auto& item : menu.items) {
         if (item.separator) {
             //  分隔�?
-            fillRect(x + 5, itemY + itemHeight/2 - 1, menuWidth - 10, 2, 100, 100, 100, static_cast<uint8_t>(255 * alpha));
+            fillRect(x + leftPadding, itemY + itemHeight / 2 - 1,
+                     menuWidth - leftPadding - rightPadding, 1,
+                     100, 100, 100, static_cast<uint8_t>(180 * alpha));
         } else {
             //  检测悬�?
             bool hovered = (m_mouseX >= x && m_mouseX <= x + menuWidth &&
                            m_mouseY >= itemY && m_mouseY <= itemY + itemHeight);
 
             if (hovered && item.enabled) {
-                fillRect(x + 2, itemY, menuWidth - 4, itemHeight,
-                         COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], static_cast<uint8_t>(COLOR_MENU_ACTIVE[3] * alpha));
+                fillRoundRect(x + 4, itemY + 2, menuWidth - 8, itemHeight - 4, 5,
+                              COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2],
+                              static_cast<uint8_t>(COLOR_MENU_ACTIVE[3] * alpha));
             }
 
             //  渲染菜单项文�?
             if (item.enabled) {
-                int labelX = x + 10;
+                int checkX = x + leftPadding;
+                int labelX = checkX + checkColumnWidth;
+                int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
+                int shortcutY = itemY + (itemHeight - getFontHeight(shortcutFontSize)) / 2;
+                bool checked = false;
+
                 // 循环模式菜单项：当前选中的前面打勾
                 if (item.id >= 60 && item.id <= 62) {
                     int mode = item.id - 60;
-                    if (mode == m_loopMode) {
-                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
-                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    } else {
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    }
+                    checked = (mode == m_loopMode);
                 }
                 // 画面比例菜单项：当前选中的前面打勾
                 if (item.id >= 70 && item.id <= 73) {
                     int mode = item.id - 70;
-                    if (mode == static_cast<int>(m_aspectMode)) {
-                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
-                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    } else {
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    }
+                    checked = (mode == static_cast<int>(m_aspectMode));
                 }
                 // 始终置顶菜单项：启用时前面打勾
                 if (item.id == 80) {
-                    if (m_alwaysOnTop) {
-                        drawText("\xE2\x9C\x93 ", labelX, itemY + 4,
-                                COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    } else {
-                        labelX += getTextWidth("\xE2\x9C\x93 ", labelFontSize);
-                    }
+                    checked = m_alwaysOnTop;
                 }
-                drawText(item.label, labelX, itemY + 4,
+
+                if (checked) {
+                    drawText("\xE2\x9C\x93", checkX, labelY,
+                             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                }
+                drawText(item.label, labelX, labelY,
                         COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
 
                 // 渲染快捷键（右对齐）
                 if (!item.shortcut.empty()) {
                     int sw = getTextWidth(item.shortcut, shortcutFontSize);
-                    drawText(item.shortcut, x + menuWidth - 10 - sw, itemY + 4,
+                    drawText(item.shortcut, x + menuWidth - rightPadding - sw, shortcutY,
                             150, 150, 150, shortcutFontSize);
                 }
             }
@@ -434,7 +430,8 @@ void SDLRenderer::renderContextMenu() {
     if (!m_showContextMenu) return;
 
     int itemHeight = 28;
-    int hPadding = 20;
+    int leftPadding = 18;
+    int rightPadding = 18;
     int labelFontSize = 14;
     int shortcutFontSize = 12;
     int labelMaxW = 0;
@@ -451,7 +448,7 @@ void SDLRenderer::renderContextMenu() {
         }
     }
 
-    int menuWidth = hPadding + labelMaxW;
+    int menuWidth = leftPadding + labelMaxW + rightPadding;
     if (shortcutMaxW > 0) {
         menuWidth += shortcutGap + shortcutMaxW;
     }
@@ -472,31 +469,34 @@ void SDLRenderer::renderContextMenu() {
     if (renderY < 0) renderY = 0;
 
     // 菜单背景
-    fillRect(renderX, renderY, menuWidth, menuHeight,
-             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], 240);
+    fillRoundRect(renderX, renderY, menuWidth, menuHeight, 8,
+                  COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], 240);
 
     // 菜单项
     int itemY = renderY + 4;
     for (const auto& item : m_contextMenu.items) {
         if (item.separator) {
-            fillRect(renderX + 5, itemY + itemHeight/2 - 1, menuWidth - 10, 2, 100, 100, 100, 255);
+            fillRect(renderX + leftPadding, itemY + itemHeight / 2 - 1,
+                     menuWidth - leftPadding - rightPadding, 1, 100, 100, 100, 180);
         } else {
             bool hovered = (m_mouseX >= renderX && m_mouseX <= renderX + menuWidth &&
                            m_mouseY >= itemY && m_mouseY <= itemY + itemHeight);
 
             if (hovered && item.enabled) {
-                fillRect(renderX + 2, itemY, menuWidth - 4, itemHeight,
-                         COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], COLOR_MENU_ACTIVE[3]);
+                fillRoundRect(renderX + 4, itemY + 2, menuWidth - 8, itemHeight - 4, 5,
+                              COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], COLOR_MENU_ACTIVE[3]);
             }
 
             if (item.enabled) {
-                int labelX = renderX + 10;
-                drawText(item.label, labelX, itemY + 4,
+                int labelX = renderX + leftPadding;
+                int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
+                int shortcutY = itemY + (itemHeight - getFontHeight(shortcutFontSize)) / 2;
+                drawText(item.label, labelX, labelY,
                         COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
 
                 if (!item.shortcut.empty()) {
                     int sw = getTextWidth(item.shortcut, shortcutFontSize);
-                    drawText(item.shortcut, renderX + menuWidth - 10 - sw, itemY + 4,
+                    drawText(item.shortcut, renderX + menuWidth - rightPadding - sw, shortcutY,
                             150, 150, 150, shortcutFontSize);
                 }
             }

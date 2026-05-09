@@ -1,8 +1,52 @@
 #include "renderer/inputfield.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cmath>
 
 namespace VideoPlay {
+
+namespace {
+void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
+                   uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    if (!renderer) return;
+
+    const int x = static_cast<int>(rect.x);
+    const int y = static_cast<int>(rect.y);
+    const int w = static_cast<int>(rect.w);
+    const int h = static_cast<int>(rect.h);
+    const int rr = std::max(0, std::min(static_cast<int>(radius), std::min(w, h) / 2));
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_FRect center = {static_cast<float>(x + rr), static_cast<float>(y),
+                        static_cast<float>(w - 2 * rr), static_cast<float>(h)};
+    SDL_RenderFillRect(renderer, &center);
+    SDL_FRect middle = {static_cast<float>(x), static_cast<float>(y + rr),
+                        static_cast<float>(w), static_cast<float>(h - 2 * rr)};
+    SDL_RenderFillRect(renderer, &middle);
+
+    auto drawCornerPixel = [&](int px, int py, float coverage) {
+        if (coverage <= 0.0f) return;
+        uint8_t alpha = static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * a);
+        SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
+        SDL_RenderPoint(renderer, static_cast<float>(px), static_cast<float>(py));
+    };
+
+    for (int dy = 0; dy < rr; ++dy) {
+        for (int dx = 0; dx < rr; ++dx) {
+            float cx = static_cast<float>(rr - dx) - 0.5f;
+            float cy = static_cast<float>(rr - dy) - 0.5f;
+            float distance = std::sqrt(cx * cx + cy * cy);
+            float coverage = static_cast<float>(rr) + 0.5f - distance;
+
+            drawCornerPixel(x + dx, y + dy, coverage);
+            drawCornerPixel(x + w - 1 - dx, y + dy, coverage);
+            drawCornerPixel(x + dx, y + h - 1 - dy, coverage);
+            drawCornerPixel(x + w - 1 - dx, y + h - 1 - dy, coverage);
+        }
+    }
+}
+}
 
 // 颜色常量
 static constexpr uint8_t COLOR_INPUT_BG[4] = {50, 50, 50, 255};
@@ -57,7 +101,7 @@ int InputField::getCursorPosFromMouseX(int mouseX) const {
     if (display.empty()) return 0;
 
     int textStartX = static_cast<int>(m_rect.x) + 5;
-    int relativeX = mouseX - textStartX;
+    int relativeX = mouseX - textStartX + m_textOffsetX;
 
     if (relativeX <= 0) return 0;
 
@@ -72,6 +116,28 @@ int InputField::getCursorPosFromMouseX(int mouseX) const {
     }
 
     return static_cast<int>(display.length());
+}
+
+void InputField::updateTextOffset(int contentWidth) {
+    const int padding = 5;
+    const int visibleWidth = std::max(0, static_cast<int>(m_rect.w) - padding * 2);
+    const int maxOffset = std::max(0, contentWidth - visibleWidth);
+
+    if (!m_active) {
+        m_textOffsetX = 0;
+        return;
+    }
+
+    std::string display = getDisplayValue();
+    int cursorX = getTextWidth(display.substr(0, static_cast<size_t>(m_cursorPos)));
+
+    if (cursorX - m_textOffsetX > visibleWidth) {
+        m_textOffsetX = cursorX - visibleWidth;
+    } else if (cursorX - m_textOffsetX < 0) {
+        m_textOffsetX = cursorX;
+    }
+
+    m_textOffsetX = std::clamp(m_textOffsetX, 0, maxOffset);
 }
 
 void InputField::deleteSelection() {
@@ -275,20 +341,42 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
     if (!renderer) return;
 
     // 背景
-    SDL_SetRenderDrawColor(renderer, COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
-    SDL_RenderFillRect(renderer, &m_rect);
+    fillRoundRect(renderer, m_rect, 7,
+                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
 
     // 边框
+    SDL_FRect borderRect = m_rect;
+    SDL_FRect innerRect = {
+        m_rect.x + 1.0f,
+        m_rect.y + 1.0f,
+        std::max(0.0f, m_rect.w - 2.0f),
+        std::max(0.0f, m_rect.h - 2.0f)
+    };
     if (m_active) {
-        SDL_SetRenderDrawColor(renderer, COLOR_INPUT_ACTIVE[0], COLOR_INPUT_ACTIVE[1], COLOR_INPUT_ACTIVE[2], COLOR_INPUT_ACTIVE[3]);
+        fillRoundRect(renderer, borderRect, 7,
+                      COLOR_INPUT_ACTIVE[0], COLOR_INPUT_ACTIVE[1],
+                      COLOR_INPUT_ACTIVE[2], COLOR_INPUT_ACTIVE[3]);
     } else {
-        SDL_SetRenderDrawColor(renderer, COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1], COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
+        fillRoundRect(renderer, borderRect, 7,
+                      COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
+                      COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
     }
-    SDL_RenderRect(renderer, &m_rect);
+    fillRoundRect(renderer, innerRect, 6,
+                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
 
     std::string display = getDisplayValue();
-    int textX = static_cast<int>(m_rect.x) + 5;
+    std::string visibleText = display.empty() && !m_active ? m_placeholder : display;
+    updateTextOffset(getTextWidth(visibleText));
+
+    int textX = static_cast<int>(m_rect.x) + 5 - m_textOffsetX;
     int textY = static_cast<int>(m_rect.y) + (static_cast<int>(m_rect.h) - getFontHeight()) / 2;
+    SDL_Rect clipRect = {
+        static_cast<int>(m_rect.x) + 5,
+        static_cast<int>(m_rect.y) + 1,
+        std::max(0, static_cast<int>(m_rect.w) - 10),
+        std::max(0, static_cast<int>(m_rect.h) - 2)
+    };
+    SDL_SetRenderClipRect(renderer, &clipRect);
 
     // 选区高亮
     if (m_active && m_selectionStart >= 0 && m_selectionEnd >= 0 && m_selectionStart != m_selectionEnd) {
@@ -332,6 +420,8 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
             SDL_RenderFillRect(renderer, &cursorRect);
         }
     }
+
+    SDL_SetRenderClipRect(renderer, nullptr);
 }
 
 void InputField::drawText(SDL_Renderer* renderer, const std::string& text, int x, int y,

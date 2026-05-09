@@ -1,6 +1,7 @@
 ﻿#include "renderer/settingsdialog.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cmath>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -25,6 +26,47 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("renderer.settings");
     return *logger;
+}
+
+void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
+                   uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    if (!renderer) return;
+
+    const int x = static_cast<int>(rect.x);
+    const int y = static_cast<int>(rect.y);
+    const int w = static_cast<int>(rect.w);
+    const int h = static_cast<int>(rect.h);
+    const int rr = std::max(0, std::min(static_cast<int>(radius), std::min(w, h) / 2));
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_FRect center = {static_cast<float>(x + rr), static_cast<float>(y),
+                        static_cast<float>(w - 2 * rr), static_cast<float>(h)};
+    SDL_RenderFillRect(renderer, &center);
+    SDL_FRect middle = {static_cast<float>(x), static_cast<float>(y + rr),
+                        static_cast<float>(w), static_cast<float>(h - 2 * rr)};
+    SDL_RenderFillRect(renderer, &middle);
+
+    auto drawCornerPixel = [&](int px, int py, float coverage) {
+        if (coverage <= 0.0f) return;
+        uint8_t alpha = static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * a);
+        SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
+        SDL_RenderPoint(renderer, static_cast<float>(px), static_cast<float>(py));
+    };
+
+    for (int dy = 0; dy < rr; ++dy) {
+        for (int dx = 0; dx < rr; ++dx) {
+            float cx = static_cast<float>(rr - dx) - 0.5f;
+            float cy = static_cast<float>(rr - dy) - 0.5f;
+            float distance = std::sqrt(cx * cx + cy * cy);
+            float coverage = static_cast<float>(rr) + 0.5f - distance;
+
+            drawCornerPixel(x + dx, y + dy, coverage);
+            drawCornerPixel(x + w - 1 - dx, y + dy, coverage);
+            drawCornerPixel(x + dx, y + h - 1 - dy, coverage);
+            drawCornerPixel(x + w - 1 - dx, y + h - 1 - dy, coverage);
+        }
+    }
 }
 }
 
@@ -54,6 +96,7 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     m_settings = currentSettings;
     m_saveCallback = onSave;
     m_dragging = false;
+    m_apiKeyVisible = false;
 
     // 创建输入框控件
     m_baseUrlInput = std::make_unique<InputField>(m_font);
@@ -65,7 +108,7 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     m_baseUrlInput->setPlaceholder("https://api.xiaomimimo.com/v1");
 
     m_apiKeyInput->setValue(m_settings.apiKey);
-    m_apiKeyInput->setPassword(true);
+    m_apiKeyInput->setPassword(!m_apiKeyVisible);
     m_apiKeyInput->setPlaceholder("tp-xxxxx");
 
     m_modelInput->setValue(m_settings.model);
@@ -136,8 +179,16 @@ void SettingsDialog::calculateLayout() {
                             static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
     y += INPUT_HEIGHT + PADDING;
 
+    int toggleWidth = 54;
+    int toggleGap = 8;
     m_apiKeyInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                           static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
+                           static_cast<float>(m_windowWidth - PADDING * 2 - 120 - toggleWidth - toggleGap), INPUT_HEIGHT});
+    m_apiKeyToggleRect = {
+        static_cast<float>(m_windowWidth - PADDING - toggleWidth),
+        static_cast<float>(y),
+        static_cast<float>(toggleWidth),
+        static_cast<float>(INPUT_HEIGHT)
+    };
     y += INPUT_HEIGHT + PADDING;
 
     m_modelInput->setRect({PADDING + 120.0f, static_cast<float>(y),
@@ -169,29 +220,31 @@ void SettingsDialog::render() {
     SDL_SetRenderDrawColor(m_renderer, COLOR_TITLE_BG[0], COLOR_TITLE_BG[1], COLOR_TITLE_BG[2], COLOR_TITLE_BG[3]);
     SDL_RenderFillRect(m_renderer, &titleBar);
 
-    drawText("AI 设置", 15, 10, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
+    int titleTextY = (TITLE_HEIGHT - getFontHeight()) / 2;
+    drawText("AI 设置", 15, titleTextY, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
 
     // 关闭按钮
-    int closeX = m_windowWidth - 35;
-    int closeY = 5;
-    int closeSize = 30;
+    constexpr int closeWidth = 46;
+    constexpr int closeIconSize = 10;
+    int closeX = m_windowWidth - closeWidth;
+    int closeY = 0;
 
     float mx, my;
     SDL_GetMouseState(&mx, &my);
-    bool closeHovered = (mx >= closeX && mx <= closeX + closeSize && my >= closeY && my <= closeY + closeSize);
+    bool closeHovered = (mx >= closeX && mx <= closeX + closeWidth && my >= closeY && my <= closeY + TITLE_HEIGHT);
 
     if (closeHovered) {
         SDL_SetRenderDrawColor(m_renderer, COLOR_CLOSE_HOVER[0], COLOR_CLOSE_HOVER[1], COLOR_CLOSE_HOVER[2], COLOR_CLOSE_HOVER[3]);
-    } else {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_BG[0], COLOR_BUTTON_BG[1], COLOR_BUTTON_BG[2], COLOR_BUTTON_BG[3]);
+        SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
+                              static_cast<float>(closeWidth), static_cast<float>(TITLE_HEIGHT)};
+        SDL_RenderFillRect(m_renderer, &closeBtn);
     }
-    SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
-                          static_cast<float>(closeSize), static_cast<float>(closeSize)};
-    SDL_RenderFillRect(m_renderer, &closeBtn);
 
     SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
-    SDL_RenderLine(m_renderer, closeX + 8, closeY + 8, closeX + closeSize - 8, closeY + closeSize - 8);
-    SDL_RenderLine(m_renderer, closeX + closeSize - 8, closeY + 8, closeX + 8, closeY + closeSize - 8);
+    int iconX = closeX + (closeWidth - closeIconSize) / 2;
+    int iconY = (TITLE_HEIGHT - closeIconSize) / 2;
+    SDL_RenderLine(m_renderer, iconX, iconY, iconX + closeIconSize, iconY + closeIconSize);
+    SDL_RenderLine(m_renderer, iconX + closeIconSize, iconY, iconX, iconY + closeIconSize);
 
     // 标签和输入框
     drawText("API 地址:", PADDING, TITLE_HEIGHT + PADDING + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
@@ -199,6 +252,7 @@ void SettingsDialog::render() {
 
     drawText("API Key:", PADDING, TITLE_HEIGHT + PADDING * 2 + INPUT_HEIGHT + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
     m_apiKeyInput->render(m_renderer, mx, my);
+    drawButton(m_apiKeyVisible ? "隐藏" : "显示", m_apiKeyToggleRect, isPointInRect(mx, my, m_apiKeyToggleRect));
 
     drawText("模型:", PADDING, TITLE_HEIGHT + PADDING * 3 + INPUT_HEIGHT * 2 + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
     m_modelInput->render(m_renderer, mx, my);
@@ -231,10 +285,9 @@ void SettingsDialog::handleEvents() {
                     int my = static_cast<int>(event.button.y);
 
                     // 关闭按钮
-                    int closeX = m_windowWidth - 35;
-                    int closeY = 5;
-                    int closeSize = 30;
-                    if (mx >= closeX && mx <= closeX + closeSize && my >= closeY && my <= closeY + closeSize) {
+                    constexpr int closeWidth = 46;
+                    int closeX = m_windowWidth - closeWidth;
+                    if (mx >= closeX && mx <= closeX + closeWidth && my >= 0 && my <= TITLE_HEIGHT) {
                         m_running = false;
                         break;
                     }
@@ -256,6 +309,13 @@ void SettingsDialog::handleEvents() {
                     // 取消按钮
                     if (isPointInRect(mx, my, m_cancelBtnRect)) {
                         m_running = false;
+                        break;
+                    }
+
+                    if (isPointInRect(mx, my, m_apiKeyToggleRect)) {
+                        m_apiKeyVisible = !m_apiKeyVisible;
+                        m_apiKeyInput->setPassword(!m_apiKeyVisible);
+                        m_apiKeyInput->setActive(true);
                         break;
                     }
 
@@ -360,11 +420,14 @@ void SettingsDialog::drawText(const std::string& text, int x, int y, uint8_t r, 
 
 void SettingsDialog::drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered) {
     if (isHovered) {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_PRIMARY_HOVER[0], COLOR_BUTTON_PRIMARY_HOVER[1], COLOR_BUTTON_PRIMARY_HOVER[2], COLOR_BUTTON_PRIMARY_HOVER[3]);
+        fillRoundRect(m_renderer, rect, 7,
+                      COLOR_BUTTON_PRIMARY_HOVER[0], COLOR_BUTTON_PRIMARY_HOVER[1],
+                      COLOR_BUTTON_PRIMARY_HOVER[2], COLOR_BUTTON_PRIMARY_HOVER[3]);
     } else {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_PRIMARY[0], COLOR_BUTTON_PRIMARY[1], COLOR_BUTTON_PRIMARY[2], COLOR_BUTTON_PRIMARY[3]);
+        fillRoundRect(m_renderer, rect, 7,
+                      COLOR_BUTTON_PRIMARY[0], COLOR_BUTTON_PRIMARY[1],
+                      COLOR_BUTTON_PRIMARY[2], COLOR_BUTTON_PRIMARY[3]);
     }
-    SDL_RenderFillRect(m_renderer, &rect);
 
     int textWidth = getTextWidth(text);
     int textX = static_cast<int>(rect.x) + (static_cast<int>(rect.w) - textWidth) / 2;

@@ -48,9 +48,7 @@ private:
 
     // 控件布局参数（与 SDLRenderer 保持一致）
     static constexpr int kMenuBarHeight = 32;
-    static constexpr int kSysBtnSize = 14;
-    static constexpr int kSysBtnGap = 12;
-    static constexpr int kSysBtnRightMargin = 14;
+    static constexpr int kSysBtnWidth = 46;
     static constexpr int kResizeBorder = 16;  // 内部 resize 热区宽度
     static constexpr int kShadowBorder = 8;   // ShadowWindow 外扩边框宽度
     static constexpr int kCornerRadius = 8;   // 窗口圆角半径
