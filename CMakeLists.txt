@@ -14,6 +14,12 @@ if(MSVC)
     set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "/DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF")
 endif()
 
+# 优先使用项目内置 FFmpeg，仍允许通过 -DFFmpeg_ROOT=... 覆盖
+set(VIDEOPLAY_BUNDLED_FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/3rdparty/FFmpeg")
+if(NOT DEFINED FFmpeg_ROOT AND EXISTS "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}/include/libavcodec/avcodec.h")
+    set(FFmpeg_ROOT "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}" CACHE PATH "FFmpeg root directory")
+endif()
+
 # 查找 FFmpeg
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -21,6 +27,13 @@ if(PkgConfig_FOUND)
 endif()
 
 if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
+    unset(FFMPEG_INCLUDE_DIR CACHE)
+    unset(FFMPEG_AVCODEC_LIB CACHE)
+    unset(FFMPEG_AVFORMAT_LIB CACHE)
+    unset(FFMPEG_AVUTIL_LIB CACHE)
+    unset(FFMPEG_SWSCALE_LIB CACHE)
+    unset(FFMPEG_SWRESAMPLE_LIB CACHE)
+
     find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
         PATHS ${FFmpeg_ROOT}/include
         NO_DEFAULT_PATH)
@@ -235,18 +248,20 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
 
-# Windows: 复制 FFmpeg DLLs
+# Windows: 复制 FFmpeg 运行时
 if(WIN32 AND FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
     set(FFMPEG_BIN_DIR "${FFmpeg_ROOT}/bin")
     if(EXISTS ${FFMPEG_BIN_DIR})
-        file(GLOB FFMPEG_DLLS "${FFMPEG_BIN_DIR}/*.dll")
-        foreach(FFMPEG_DLL ${FFMPEG_DLLS})
-            get_filename_component(DLL_NAME ${FFMPEG_DLL} NAME)
+        file(GLOB FFMPEG_RUNTIME_FILES
+            "${FFMPEG_BIN_DIR}/*.dll"
+            "${FFMPEG_BIN_DIR}/*.exe")
+        foreach(FFMPEG_RUNTIME_FILE ${FFMPEG_RUNTIME_FILES})
+            get_filename_component(RUNTIME_NAME ${FFMPEG_RUNTIME_FILE} NAME)
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${FFMPEG_DLL}
+                    ${FFMPEG_RUNTIME_FILE}
                     $<TARGET_FILE_DIR:${PROJECT_NAME}>
-                COMMENT "Copying ${DLL_NAME}"
+                COMMENT "Copying ${RUNTIME_NAME}"
             )
         endforeach()
     endif()

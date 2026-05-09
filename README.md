@@ -86,7 +86,8 @@
 
 - Visual Studio 2019 或更高版本
 - CMake 3.16+
-- FFmpeg Windows 构建版
+- FFmpeg Windows 构建版（已内置于 `3rdparty/FFmpeg/`）
+- Git LFS（用于拉取内置 FFmpeg 的 DLL/EXE/LIB）
 - Git (用于拉取 SDL3 submodule)
 
 ### macOS
@@ -112,9 +113,10 @@ git submodule update --init --recursive
 
 ```bash
 # Windows (PowerShell)
+git lfs install
+git lfs pull
 git submodule update --init --recursive
-cmake -B build -G "Visual Studio 16 2019" -A x64 `
-    -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared"
+cmake -B build -G "Visual Studio 16 2019" -A x64
 
 # macOS/Linux
 git submodule update --init --recursive

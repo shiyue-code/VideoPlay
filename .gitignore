@@ -50,6 +50,17 @@ tmp/
 ffmpeg/
 libav/
 libsw/
+!3rdparty/FFmpeg/
+!3rdparty/FFmpeg/bin/
+!3rdparty/FFmpeg/bin/*
+!3rdparty/FFmpeg/bin/*.exe
+!3rdparty/FFmpeg/include/
+!3rdparty/FFmpeg/include/**
+!3rdparty/FFmpeg/lib/
+!3rdparty/FFmpeg/lib/**
+!3rdparty/FFmpeg/presets/
+!3rdparty/FFmpeg/presets/**
+!3rdparty/FFmpeg/LICENSE.txt
 
 # Dependencies
 thirdparty/
@@ -66,6 +77,7 @@ packages/
 *.msi
 *.zip
 *.tar.gz
+!3rdparty/FFmpeg/bin/*.exe
 
 # Test coverage
 *.gcda
