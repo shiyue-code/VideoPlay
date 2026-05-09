@@ -36,10 +36,8 @@ private:
     bool m_enabled = false;
 
     // 控件布局参数（与 SDLRenderer 保持一致）
-    static constexpr int kMenuBarHeight = 24;
-    static constexpr int kSysBtnSize = 12;
-    static constexpr int kSysBtnGap = 8;
-    static constexpr int kSysBtnRightMargin = 10;
+    static constexpr int kMenuBarHeight = 32;
+    static constexpr int kSysBtnWidth = 46;
     static constexpr int kResizeBorder = 16;
 
     // 拖动状态

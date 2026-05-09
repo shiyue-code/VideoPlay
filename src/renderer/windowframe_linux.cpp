@@ -222,31 +222,29 @@ FrameHitTest WindowFrameLinux::hitTest(int clientX, int clientY) const {
     }
 
     const int menuBarHeight = kMenuBarHeight;
-    const int btnSize = kSysBtnSize;
-    const int btnGap = kSysBtnGap;
-    const int rightMargin = kSysBtnRightMargin;
+    const int btnWidth = kSysBtnWidth;
     const int border = kResizeBorder;
 
     // 系统按钮检测
     if (clientY >= 0 && clientY < menuBarHeight) {
-        int startX = w - rightMargin - 3 * btnSize - 2 * btnGap;
+        int startX = w - 3 * btnWidth;
 
-        int bxClose = startX + 2 * (btnSize + btnGap);
-        if (clientX >= bxClose - 2 && clientX < bxClose + btnSize + 2) {
+        int bxClose = startX + 2 * btnWidth;
+        if (clientX >= bxClose && clientX < bxClose + btnWidth) {
             return FrameHitTest::CloseButton;
         }
 
-        int bxMax = startX + btnSize + btnGap;
-        if (clientX >= bxMax - 2 && clientX < bxMax + btnSize + 2) {
+        int bxMax = startX + btnWidth;
+        if (clientX >= bxMax && clientX < bxMax + btnWidth) {
             return FrameHitTest::MaxButton;
         }
 
         int bxMin = startX;
-        if (clientX >= bxMin - 2 && clientX < bxMin + btnSize + 2) {
+        if (clientX >= bxMin && clientX < bxMin + btnWidth) {
             return FrameHitTest::MinButton;
         }
 
-        if (clientX < startX - 10) {
+        if (clientX < startX) {
             return FrameHitTest::Caption;
         }
     }
