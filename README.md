@@ -135,6 +135,20 @@ cmake --build build --config Release
 ./build/bin/Release/VideoPlay.exe [视频文件路径]
 ```
 
+## 自动构建与发版
+
+项目使用 GitHub Actions 自动构建 Windows x64 包：
+
+- push / pull request 会构建并上传 `VideoPlay-Windows-x64.zip` artifact
+- 推送 `v*` 标签会自动创建 GitHub Release 并上传同名 zip
+
+发布新版本：
+
+```bash
+git tag v2.0.1
+git push origin v2.0.1
+```
+
 ## 项目结构
 
 ```
