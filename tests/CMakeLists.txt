@@ -1,24 +1,25 @@
-# 测试目录的 CMakeLists.txt
-
 add_executable(test_subtitleparser
     test_subtitleparser.cpp
     ${CMAKE_SOURCE_DIR}/src/subtitles/subtitleparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
 )
 
 target_include_directories(test_subtitleparser
-    PRIVATE ${CMAKE_SOURCE_DIR}/src
-)
-
-target_link_libraries(test_subtitleparser
-    PRIVATE ${FFMPEG_LIBRARIES}
-)
-
-if(TARGET SDL3::SDL3)
-    target_link_libraries(test_subtitleparser PRIVATE SDL3::SDL3)
-endif()
-
-target_compile_definitions(test_subtitleparser PRIVATE
-    APP_VERSION="${PROJECT_VERSION}"
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/3rdparty
 )
 
 add_test(NAME SubtitleParserTest COMMAND test_subtitleparser)
+
+add_executable(test_playbackcontroller
+    test_playbackcontroller.cpp
+)
+
+target_include_directories(test_playbackcontroller
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/3rdparty
+)
+
+add_test(NAME PlaybackControllerTest COMMAND test_playbackcontroller)

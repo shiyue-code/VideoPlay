@@ -8,8 +8,10 @@
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -39,6 +41,33 @@ namespace {
     const int DEFAULT_HEIGHT = 720;
     const int MIN_VOLUME = 0;
     const int MAX_VOLUME = 100;
+
+    bool isNetworkUrl(const std::string& path) {
+        auto startsWith = [&path](const char* prefix) {
+            size_t len = std::strlen(prefix);
+            return path.size() >= len &&
+                   std::equal(prefix, prefix + len, path.begin(),
+                              [](char a, char b) {
+                                  return std::tolower(static_cast<unsigned char>(a)) ==
+                                         std::tolower(static_cast<unsigned char>(b));
+                              });
+        };
+        return startsWith("http://") || startsWith("https://") ||
+               startsWith("rtsp://") || startsWith("rtmp://");
+    }
+
+    std::string displayNameForSource(const std::string& path) {
+        if (!isNetworkUrl(path)) {
+            return std::filesystem::path(path).filename().string();
+        }
+        size_t query = path.find_first_of("?#");
+        std::string trimmed = query == std::string::npos ? path : path.substr(0, query);
+        size_t slash = trimmed.find_last_of('/');
+        if (slash != std::string::npos && slash + 1 < trimmed.size()) {
+            return trimmed.substr(slash + 1);
+        }
+        return path;
+    }
 }
 
 VideoPlayerApp::VideoPlayerApp() = default;
@@ -119,6 +148,9 @@ bool VideoPlayerApp::initialize() {
         m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
         if (m_player) {
             m_player->setVolume(m_volume);
+        }
+        if (m_renderer) {
+            m_renderer->showOSD("音量 " + std::to_string(m_volume) + "%");
         }
         logger().info("Volume set to: " + std::to_string(m_volume));
     });
@@ -275,7 +307,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
     if (argc <= 1) {
         auto session = Settings::instance().lastSession();
         if (session.hasValidSession && !session.filePath.empty() &&
-            std::filesystem::exists(session.filePath)) {
+            (isNetworkUrl(session.filePath) || std::filesystem::exists(session.filePath))) {
             logger().info("Restoring last session: " + session.filePath);
             // 重建单文件播放列表
             m_playlist.push_back(session.filePath);
@@ -284,9 +316,12 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
             if (m_player->loadFile(session.filePath)) {
                 m_currentFile = session.filePath;
                 m_renderer->setWindowTitle(
-                    std::filesystem::path(session.filePath).filename().string() + " - " + APP_TITLE);
-                loadSubtitle(session.filePath);
-                detectSeries(session.filePath);
+                    displayNameForSource(session.filePath) + " - " + APP_TITLE);
+                m_renderer->setMediaInfo(m_player->mediaInfo());
+                if (!isNetworkUrl(session.filePath)) {
+                    loadSubtitle(session.filePath);
+                    detectSeries(session.filePath);
+                }
                 play();
                 // 恢复播放位置（如果记忆位置开启且未接近结尾）
                 if (Settings::instance().rememberPosition() &&
@@ -302,7 +337,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
     // 处理命令行参数
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (std::filesystem::exists(arg)) {
+        if (isNetworkUrl(arg) || std::filesystem::exists(arg)) {
             addToPlaylist(arg);
         }
     }
@@ -551,7 +586,8 @@ void VideoPlayerApp::render() {
 }
 
 void VideoPlayerApp::openFile(const std::string& path) {
-    if (!std::filesystem::exists(path)) {
+    const bool networkSource = isNetworkUrl(path);
+    if (!networkSource && !std::filesystem::exists(path)) {
         logger().error("File not found: " + path);
         return;
     }
@@ -573,14 +609,23 @@ void VideoPlayerApp::openFile(const std::string& path) {
         Settings::instance().addRecentFile(path);
 
         // 更新窗口标题
-        std::string title = std::filesystem::path(path).filename().string() + " - " + APP_TITLE;
+        std::string title = displayNameForSource(path) + " - " + APP_TITLE;
         m_renderer->setWindowTitle(title);
 
-        // 尝试加载同名字幕
-        loadSubtitle(path);
+        if (m_renderer) {
+            m_renderer->setMediaInfo(m_player->mediaInfo());
+        }
 
-        // 检测剧集
-        detectSeries(path);
+        if (!networkSource) {
+            // 尝试加载同名字幕
+            loadSubtitle(path);
+
+            // 检测剧集
+            detectSeries(path);
+        } else if (m_subtitleParser) {
+            m_currentSubtitle.clear();
+            m_subtitleParser->clear();
+        }
 
         // 加载章节信息
         if (m_renderer) {
@@ -589,7 +634,7 @@ void VideoPlayerApp::openFile(const std::string& path) {
         }
 
         // 尝试加载 AI 分析缓存
-        if (m_aiAnalyzer && m_aiAnalyzer->hasCache(path)) {
+        if (!networkSource && m_aiAnalyzer && m_aiAnalyzer->hasCache(path)) {
             m_aiResult = m_aiAnalyzer->loadCache(path);
             if (m_aiResult.valid) {
                 // 使用 AI 分析的章节覆盖 FFmpeg 解析的章节

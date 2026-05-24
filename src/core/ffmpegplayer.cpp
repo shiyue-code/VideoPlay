@@ -3,6 +3,7 @@
 #include "utils/logger.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -25,6 +26,40 @@ namespace {
     const double CLOCK_SYNC_THRESHOLD = 0.01;
     const double VIDEO_FRAME_TOLERANCE = 0.005;
     const int AUDIO_QUEUE_SIZE = 100;
+
+    bool isNetworkUrl(const std::string& path) {
+        auto startsWith = [&path](const char* prefix) {
+            size_t len = std::strlen(prefix);
+            return path.size() >= len &&
+                   std::equal(prefix, prefix + len, path.begin(),
+                              [](char a, char b) {
+                                  return std::tolower(static_cast<unsigned char>(a)) ==
+                                         std::tolower(static_cast<unsigned char>(b));
+                              });
+        };
+        return startsWith("http://") || startsWith("https://") ||
+               startsWith("rtsp://") || startsWith("rtmp://");
+    }
+
+    double rationalToDouble(AVRational value) {
+        if (value.num == 0 || value.den == 0) {
+            return 0.0;
+        }
+        return static_cast<double>(value.num) / static_cast<double>(value.den);
+    }
+
+    std::string codecDisplayName(const AVCodec* codec, AVCodecID codecId) {
+        if (codec && codec->long_name) {
+            return codec->long_name;
+        }
+        const char* name = avcodec_get_name(codecId);
+        return name ? std::string(name) : std::string("Unknown");
+    }
+
+    std::string hardwareDeviceName(AVHWDeviceType type) {
+        const char* name = av_hwdevice_get_type_name(type);
+        return name ? std::string(name) : std::string();
+    }
 }
 
 FFmpegPlayer::FFmpegPlayer() {
@@ -46,7 +81,8 @@ void FFmpegPlayer::cleanup() {
 }
 
 bool FFmpegPlayer::loadFile(const std::string& filePath) {
-    if (!std::filesystem::exists(filePath)) {
+    const bool networkSource = isNetworkUrl(filePath);
+    if (!networkSource && !std::filesystem::exists(filePath)) {
         if (m_errorCallback) {
             m_errorCallback("File not found: " + filePath);
         }
@@ -67,7 +103,17 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         return false;
     }
     
-    if (avformat_open_input(&m_formatContext, filePath.c_str(), nullptr, nullptr) < 0) {
+    AVDictionary* inputOptions = nullptr;
+    if (networkSource) {
+        av_dict_set(&inputOptions, "rw_timeout", "10000000", 0);
+        av_dict_set(&inputOptions, "reconnect", "1", 0);
+        av_dict_set(&inputOptions, "reconnect_streamed", "1", 0);
+        av_dict_set(&inputOptions, "reconnect_delay_max", "5", 0);
+    }
+
+    int openRet = avformat_open_input(&m_formatContext, filePath.c_str(), nullptr, &inputOptions);
+    av_dict_free(&inputOptions);
+    if (openRet < 0) {
         if (m_errorCallback) {
             m_errorCallback("Cannot open file: " + filePath);
         }
@@ -84,7 +130,19 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         return false;
     }
     
-    m_duration = m_formatContext->duration / (AV_TIME_BASE / 1000);
+    m_duration = m_formatContext->duration > 0 ?
+        m_formatContext->duration / (AV_TIME_BASE / 1000) : 0;
+    m_mediaInfo = MediaInfo();
+    m_mediaInfo.source = filePath;
+    m_mediaInfo.durationMs = m_duration;
+    m_mediaInfo.bitrate = m_formatContext->bit_rate;
+    if (m_formatContext->iformat) {
+        if (m_formatContext->iformat->long_name) {
+            m_mediaInfo.container = m_formatContext->iformat->long_name;
+        } else if (m_formatContext->iformat->name) {
+            m_mediaInfo.container = m_formatContext->iformat->name;
+        }
+    }
     if (m_durationCallback && m_duration > 0) {
         m_durationCallback(m_duration);
     }
@@ -121,6 +179,16 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             logger().info("Found video stream: " + 
                                    std::to_string(codecPar->width) + "x" + 
                                    std::to_string(codecPar->height));
+
+            m_mediaInfo.hasVideo = true;
+            m_mediaInfo.videoCodec = codecDisplayName(codec, codecPar->codec_id);
+            m_mediaInfo.width = codecPar->width;
+            m_mediaInfo.height = codecPar->height;
+            m_mediaInfo.fps = rationalToDouble(stream->avg_frame_rate);
+            if (m_mediaInfo.fps <= 0.0) {
+                m_mediaInfo.fps = rationalToDouble(stream->r_frame_rate);
+            }
+            m_mediaInfo.videoBitrate = codecPar->bit_rate;
             
             m_videoCtx.stream = stream;
             m_videoCtx.codecContext = avcodec_alloc_context3(codec);
@@ -129,9 +197,26 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             avcodec_parameters_to_context(m_videoCtx.codecContext, codecPar);
             m_videoCtx.codecContext->thread_count = 4;
             m_videoCtx.codecContext->thread_type = FF_THREAD_FRAME;
-            if (avcodec_open2(m_videoCtx.codecContext, codec, nullptr) < 0) {
+
+            bool hardwareConfigured = setupHardwareDecoder(codec);
+            int openVideoRet = avcodec_open2(m_videoCtx.codecContext, codec, nullptr);
+            if (openVideoRet < 0 && hardwareConfigured) {
+                logger().warning("Hardware decoder failed to open, falling back to software decoder");
+                releaseHardwareDecoder();
+                m_videoCtx.codecContext->get_format = nullptr;
+                m_videoCtx.codecContext->opaque = nullptr;
+                openVideoRet = avcodec_open2(m_videoCtx.codecContext, codec, nullptr);
+            }
+
+            if (openVideoRet < 0) {
+                releaseHardwareDecoder();
                 avcodec_free_context(&m_videoCtx.codecContext);
                 continue;
+            }
+
+            if (m_hwDeviceCtx) {
+                m_mediaInfo.hardwareDecoder = true;
+                m_mediaInfo.hardwareDevice = hardwareDeviceName(m_hwDeviceType);
             }
             
             m_videoCtx.startTime = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : 0;
@@ -141,6 +226,12 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             logger().info("Found audio stream: " + 
                                    std::to_string(codecPar->ch_layout.nb_channels) + " channels, " +
                                    std::to_string(codecPar->sample_rate) + " Hz");
+
+            m_mediaInfo.hasAudio = true;
+            m_mediaInfo.audioCodec = codecDisplayName(codec, codecPar->codec_id);
+            m_mediaInfo.sampleRate = codecPar->sample_rate;
+            m_mediaInfo.channels = codecPar->ch_layout.nb_channels;
+            m_mediaInfo.audioBitrate = codecPar->bit_rate;
             
             m_audioCtx.stream = stream;
             m_audioCtx.codecContext = avcodec_alloc_context3(codec);
@@ -179,6 +270,7 @@ void FFmpegPlayer::closeFile() {
         sws_freeContext(m_videoCtx.swsContext);
         m_videoCtx.swsContext = nullptr;
     }
+    releaseHardwareDecoder();
     if (m_videoCtx.codecContext) {
         avcodec_free_context(&m_videoCtx.codecContext);
     }
@@ -197,6 +289,7 @@ void FFmpegPlayer::closeFile() {
     
     m_filePath.clear();
     m_duration = 0;
+    m_mediaInfo = MediaInfo();
     m_position = 0;
     m_state = PlaybackState::Stopped;
     m_chapters.clear();
@@ -215,6 +308,87 @@ std::string FFmpegPlayer::filePath() const {
 bool FFmpegPlayer::initializeVideoContext() {
     if (!m_videoCtx.codecContext) return false;
     return true;
+}
+
+bool FFmpegPlayer::setupHardwareDecoder(const AVCodec* codec) {
+    if (!codec || !m_videoCtx.codecContext) {
+        return false;
+    }
+
+    releaseHardwareDecoder();
+
+    std::vector<AVHWDeviceType> preferredTypes;
+#if defined(_WIN32)
+    preferredTypes = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
+#elif defined(__linux__)
+    preferredTypes = {AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_VDPAU, AV_HWDEVICE_TYPE_CUDA};
+#elif defined(__APPLE__)
+    preferredTypes = {AV_HWDEVICE_TYPE_VIDEOTOOLBOX};
+#else
+    preferredTypes = {AV_HWDEVICE_TYPE_CUDA};
+#endif
+
+    for (AVHWDeviceType deviceType : preferredTypes) {
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
+            if (!config) {
+                break;
+            }
+            if (config->device_type != deviceType ||
+                !(config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) {
+                continue;
+            }
+
+            AVBufferRef* deviceCtx = nullptr;
+            int ret = av_hwdevice_ctx_create(&deviceCtx, deviceType, nullptr, nullptr, 0);
+            if (ret < 0) {
+                logger().debug("Hardware device unavailable: " + hardwareDeviceName(deviceType));
+                continue;
+            }
+
+            m_hwDeviceCtx = deviceCtx;
+            m_hwPixelFormat = config->pix_fmt;
+            m_hwDeviceType = deviceType;
+            m_videoCtx.codecContext->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+            if (!m_videoCtx.codecContext->hw_device_ctx) {
+                releaseHardwareDecoder();
+                continue;
+            }
+            m_videoCtx.codecContext->opaque = this;
+            m_videoCtx.codecContext->get_format = FFmpegPlayer::selectHardwareFormat;
+
+            logger().info("Hardware decoder configured: " + hardwareDeviceName(deviceType));
+            return true;
+        }
+    }
+
+    logger().debug("No compatible hardware decoder found for codec: " +
+                   std::string(codec->name ? codec->name : "unknown"));
+    return false;
+}
+
+void FFmpegPlayer::releaseHardwareDecoder() {
+    if (m_videoCtx.codecContext && m_videoCtx.codecContext->hw_device_ctx) {
+        av_buffer_unref(&m_videoCtx.codecContext->hw_device_ctx);
+    }
+    if (m_hwDeviceCtx) {
+        av_buffer_unref(&m_hwDeviceCtx);
+    }
+    m_hwPixelFormat = AV_PIX_FMT_NONE;
+    m_hwDeviceType = AV_HWDEVICE_TYPE_NONE;
+}
+
+AVPixelFormat FFmpegPlayer::selectHardwareFormat(AVCodecContext* ctx, const AVPixelFormat* pixFmts) {
+    auto* player = static_cast<FFmpegPlayer*>(ctx ? ctx->opaque : nullptr);
+    if (player) {
+        for (const AVPixelFormat* fmt = pixFmts; *fmt != AV_PIX_FMT_NONE; ++fmt) {
+            if (*fmt == player->m_hwPixelFormat) {
+                return *fmt;
+            }
+        }
+        logger().warning("Decoder did not offer requested hardware pixel format");
+    }
+    return pixFmts[0];
 }
 
 bool FFmpegPlayer::initializeAudioContext() {
@@ -686,11 +860,40 @@ void FFmpegPlayer::decodeLoop() {
 
 VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     VideoFrame result;
-    if (!frame || !frame->data[0]) return result;
+    if (!frame) return result;
+
+    auto frameDeleter = [](AVFrame* value) {
+        if (value) {
+            av_frame_free(&value);
+        }
+    };
+    std::unique_ptr<AVFrame, decltype(frameDeleter)> transferredFrame(nullptr, frameDeleter);
+
+    AVFrame* sourceFrame = frame;
+    if (m_hwPixelFormat != AV_PIX_FMT_NONE &&
+        static_cast<AVPixelFormat>(frame->format) == m_hwPixelFormat) {
+        AVFrame* swFrame = av_frame_alloc();
+        if (!swFrame) {
+            logger().warning("Failed to allocate software frame for hardware transfer");
+            return result;
+        }
+        transferredFrame.reset(swFrame);
+
+        int transferRet = av_hwframe_transfer_data(transferredFrame.get(), frame, 0);
+        if (transferRet < 0) {
+            logger().warning("Hardware frame transfer failed");
+            return result;
+        }
+        av_frame_copy_props(transferredFrame.get(), frame);
+        sourceFrame = transferredFrame.get();
+    }
+
+    if (!sourceFrame->data[0]) return result;
     
-    int width = frame->width;
-    int height = frame->height;
-    AVPixelFormat srcFormat = static_cast<AVPixelFormat>(frame->format);
+    int width = sourceFrame->width;
+    int height = sourceFrame->height;
+    if (width <= 0 || height <= 0) return result;
+    AVPixelFormat srcFormat = static_cast<AVPixelFormat>(sourceFrame->format);
     // 使用 BGRA 以匹配 SDL 纹理格式 (Windows 小端字节序)
     AVPixelFormat dstFormat = AV_PIX_FMT_BGRA;
     
@@ -699,9 +902,9 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     int srcRange = 0;  // 0 = limited (16-235), 1 = full (0-255)
     
     // Check frame-level color range first
-    if (frame->color_range == AVCOL_RANGE_MPEG) {
+    if (sourceFrame->color_range == AVCOL_RANGE_MPEG) {
         srcRange = 0;  // Limited range (TV range)
-    } else if (frame->color_range == AVCOL_RANGE_JPEG) {
+    } else if (sourceFrame->color_range == AVCOL_RANGE_JPEG) {
         srcRange = 1;  // Full range (PC range)
     } else {
         // Default: most video files use limited range
@@ -717,11 +920,11 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
                    codecCtx->colorspace == AVCOL_SPC_SMPTE170M) {
             colorSpace = SWS_CS_ITU601;
         }
-    } else if (frame->colorspace != AVCOL_SPC_UNSPECIFIED) {
-        if (frame->colorspace == AVCOL_SPC_BT709) {
+    } else if (sourceFrame->colorspace != AVCOL_SPC_UNSPECIFIED) {
+        if (sourceFrame->colorspace == AVCOL_SPC_BT709) {
             colorSpace = SWS_CS_ITU709;
-        } else if (frame->colorspace == AVCOL_SPC_BT470BG || 
-                   frame->colorspace == AVCOL_SPC_SMPTE170M) {
+        } else if (sourceFrame->colorspace == AVCOL_SPC_BT470BG || 
+                   sourceFrame->colorspace == AVCOL_SPC_SMPTE170M) {
             colorSpace = SWS_CS_ITU601;
         }
     }
@@ -787,7 +990,7 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     uint8_t* dstData[4] = { m_videoCtx.swsBuffer.data(), nullptr, nullptr, nullptr };
     int dstStride[4] = { dstBytesPerRow, 0, 0, 0 };
     
-    int swsRet = sws_scale(m_videoCtx.swsContext, frame->data, frame->linesize, 0, height, dstData, dstStride);
+    int swsRet = sws_scale(m_videoCtx.swsContext, sourceFrame->data, sourceFrame->linesize, 0, height, dstData, dstStride);
     if (swsRet <= 0) {
         logger().warning("sws_scale failed or returned 0 lines");
         return result;
@@ -1000,6 +1203,11 @@ void FFmpegPlayer::setChapters(const std::vector<ChapterInfo>& chapters) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_chapters = chapters;
     logger().info("[FFmpeg] Chapters set: " + std::to_string(chapters.size()));
+}
+
+MediaInfo FFmpegPlayer::mediaInfo() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_mediaInfo;
 }
 
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {

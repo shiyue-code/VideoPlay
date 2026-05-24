@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <unordered_map>
 
 // SDL forward declarations
 struct SDL_Window;
@@ -166,6 +167,9 @@ public:
     void setPrevNextTooltip(const std::string& prevTooltip, const std::string& nextTooltip);
     void toggleEpisodePanel();
     void togglePlaylistPanel();
+    void toggleMediaInfoPanel();
+    void setMediaInfo(const MediaInfo& info);
+    void showOSD(const std::string& text);
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -257,6 +261,8 @@ private:
     void renderSubtitle(const std::string& subtitle);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
+    void renderOSD();
+    void renderMediaInfoPanel();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
@@ -324,6 +330,7 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
+    bool m_showMediaInfoPanel = false;
     int m_playlistScrollOffset = 0;
     int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
@@ -424,6 +431,10 @@ private:
     std::string m_tooltipNext;
     uint64_t m_tooltipTime = 0;
     uint64_t m_tooltipShowTime = 0;
+    std::string m_osdText;
+    uint64_t m_osdStartTime = 0;
+    static constexpr uint64_t OSD_DURATION_MS = 1400;
+    MediaInfo m_mediaInfo;
 
     // 回调
     FileDropCallback m_fileDropCallback;

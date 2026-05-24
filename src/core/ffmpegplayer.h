@@ -18,6 +18,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/time.h>
+#include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 }
@@ -80,6 +81,7 @@ public:
 
     std::vector<ChapterInfo> chapters() const;
     void setChapters(const std::vector<ChapterInfo>& chapters);
+    MediaInfo mediaInfo() const;
 
 private:
     struct StreamContext {
@@ -113,10 +115,17 @@ private:
     std::vector<float> resampleAudioFrame(AVFrame* frame);
     void handleSeek(int64_t positionMs);
     void synchronizeVideo(double pts);
+    bool setupHardwareDecoder(const AVCodec* codec);
+    void releaseHardwareDecoder();
+    static AVPixelFormat selectHardwareFormat(AVCodecContext* ctx, const AVPixelFormat* pixFmts);
 
     AVFormatContext* m_formatContext = nullptr;
     VideoContext m_videoCtx;
     AudioContext m_audioCtx;
+    MediaInfo m_mediaInfo;
+    AVBufferRef* m_hwDeviceCtx = nullptr;
+    AVPixelFormat m_hwPixelFormat = AV_PIX_FMT_NONE;
+    AVHWDeviceType m_hwDeviceType = AV_HWDEVICE_TYPE_NONE;
     
     std::unique_ptr<AudioPlayer> m_audioPlayer;
     std::thread m_decodeThread;

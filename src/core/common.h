@@ -35,6 +35,28 @@ struct ChapterInfo {
     std::string title;
 };
 
+struct MediaInfo {
+    std::string source;
+    std::string container;
+    int64_t durationMs = 0;
+    int64_t bitrate = 0;
+
+    bool hasVideo = false;
+    std::string videoCodec;
+    int width = 0;
+    int height = 0;
+    double fps = 0.0;
+    int64_t videoBitrate = 0;
+    bool hardwareDecoder = false;
+    std::string hardwareDevice;
+
+    bool hasAudio = false;
+    std::string audioCodec;
+    int sampleRate = 0;
+    int channels = 0;
+    int64_t audioBitrate = 0;
+};
+
 enum class PlaybackSpeed {
     Speed_0_25 = 0,
     Speed_0_5,

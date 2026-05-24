@@ -734,6 +734,20 @@ void SDLRenderer::togglePlaylistPanel() {
     m_showPlaylistPanel = !m_showPlaylistPanel;
 }
 
+void SDLRenderer::toggleMediaInfoPanel() {
+    m_showMediaInfoPanel = !m_showMediaInfoPanel;
+    showOSD(m_showMediaInfoPanel ? "媒体信息" : "关闭媒体信息");
+}
+
+void SDLRenderer::setMediaInfo(const MediaInfo& info) {
+    m_mediaInfo = info;
+}
+
+void SDLRenderer::showOSD(const std::string& text) {
+    m_osdText = text;
+    m_osdStartTime = SDL_GetTicks();
+}
+
 void SDLRenderer::setEpisodeProgress(const std::vector<float>& progress) {
     m_episodeProgress = progress;
 }

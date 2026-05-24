@@ -25,6 +25,9 @@ void VideoPlayerApp::play() {
     logger().info("Playing");
     m_player->play();
     m_isPlaying = true;
+    if (m_renderer) {
+        m_renderer->showOSD("播放");
+    }
 }
 
 void VideoPlayerApp::pause() {
@@ -33,6 +36,9 @@ void VideoPlayerApp::pause() {
     logger().info("Pausing");
     m_player->pause();
     m_isPlaying = false;
+    if (m_renderer) {
+        m_renderer->showOSD("暂停");
+    }
 }
 
 void VideoPlayerApp::togglePlayPause() {
@@ -66,6 +72,9 @@ void VideoPlayerApp::seek(double deltaMs) {
     m_player->seek(targetPos);
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
+    if (m_renderer) {
+        m_renderer->showOSD(formatTime(targetPos));
+    }
 }
 
 void VideoPlayerApp::seekTo(double position) {
@@ -78,6 +87,9 @@ void VideoPlayerApp::seekTo(double position) {
     m_player->seek(targetPos);
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
+    if (m_renderer) {
+        m_renderer->showOSD(formatTime(targetPos));
+    }
 }
 
 void VideoPlayerApp::setVolume(int delta) {
@@ -89,6 +101,9 @@ void VideoPlayerApp::setVolume(int delta) {
     }
     
     logger().info("Volume set to: {}", m_volume);
+    if (m_renderer) {
+        m_renderer->showOSD("音量 " + std::to_string(m_volume) + "%");
+    }
 }
 
 void VideoPlayerApp::toggleMute() {
@@ -99,6 +114,9 @@ void VideoPlayerApp::toggleMute() {
     }
     
     logger().info(m_isMuted ? "Muted" : "Unmuted");
+    if (m_renderer) {
+        m_renderer->showOSD(m_isMuted ? "静音" : "取消静音");
+    }
 }
 
 void VideoPlayerApp::setSpeed(double speed) {
@@ -109,6 +127,9 @@ void VideoPlayerApp::setSpeed(double speed) {
     }
     
     logger().info("Playback speed set to: {}x", m_speed);
+    if (m_renderer) {
+        m_renderer->showOSD("速度 " + std::to_string(m_speed).substr(0, 4) + "x");
+    }
 }
 
 void VideoPlayerApp::cycleSpeed() {
