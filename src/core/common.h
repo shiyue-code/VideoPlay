@@ -35,8 +35,35 @@ struct ChapterInfo {
     std::string title;
 };
 
+enum class SourceType {
+    LocalFile = 0,
+    NetworkStream = 1
+};
+
+enum class NetworkState {
+    Idle = 0,
+    Connecting,
+    Buffering,
+    Playing,
+    Reconnecting,
+    Failed
+};
+
+inline const char* networkStateText(NetworkState state) {
+    switch (state) {
+        case NetworkState::Idle:         return "";
+        case NetworkState::Connecting:   return "正在连接";
+        case NetworkState::Buffering:    return "正在缓冲";
+        case NetworkState::Playing:      return "";
+        case NetworkState::Reconnecting: return "正在重连";
+        case NetworkState::Failed:       return "网络错误";
+    }
+    return "";
+}
+
 struct MediaInfo {
     std::string source;
+    SourceType sourceType = SourceType::LocalFile;
     std::string container;
     int64_t durationMs = 0;
     int64_t bitrate = 0;
@@ -56,6 +83,72 @@ struct MediaInfo {
     int channels = 0;
     int64_t audioBitrate = 0;
 };
+
+enum class AudioFilterPreset {
+    Off = 0,
+    Voice = 1,
+    Bass = 2,
+    Night = 3
+};
+
+struct EQBand {
+    double frequency = 1000.0;
+    double width = 1.0;
+    double gainDb = 0.0;
+};
+
+struct AudioFilterConfig {
+    bool enabled = false;
+    AudioFilterPreset preset = AudioFilterPreset::Off;
+    double preampDb = 0.0;
+    bool limiterEnabled = false;
+    bool dynamicNormalizerEnabled = false;
+    std::vector<EQBand> eqBands;
+};
+
+inline const char* audioFilterPresetName(AudioFilterPreset preset) {
+    switch (preset) {
+        case AudioFilterPreset::Off:   return "关闭";
+        case AudioFilterPreset::Voice: return "语音增强";
+        case AudioFilterPreset::Bass:  return "低音增强";
+        case AudioFilterPreset::Night: return "夜间模式";
+    }
+    return "关闭";
+}
+
+inline AudioFilterConfig audioFilterConfigForPreset(AudioFilterPreset preset) {
+    AudioFilterConfig config;
+    config.preset = preset;
+    config.enabled = preset != AudioFilterPreset::Off;
+
+    switch (preset) {
+        case AudioFilterPreset::Voice:
+            config.eqBands = {
+                {120.0, 0.8, -4.0},
+                {2500.0, 1.0, 4.0},
+                {6000.0, 1.0, 2.0}
+            };
+            config.limiterEnabled = true;
+            break;
+        case AudioFilterPreset::Bass:
+            config.eqBands = {
+                {80.0, 1.0, 5.0},
+                {160.0, 1.0, 3.0}
+            };
+            config.limiterEnabled = true;
+            break;
+        case AudioFilterPreset::Night:
+            config.preampDb = -3.0;
+            config.dynamicNormalizerEnabled = true;
+            config.limiterEnabled = true;
+            break;
+        case AudioFilterPreset::Off:
+        default:
+            break;
+    }
+
+    return config;
+}
 
 enum class PlaybackSpeed {
     Speed_0_25 = 0,

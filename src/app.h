@@ -113,6 +113,7 @@ private:
     int m_volume = 100;
     bool m_isMuted = false;
     double m_speed = 1.0;
+    std::atomic<NetworkState> m_networkState{NetworkState::Idle};
 
     // 剧集
     std::optional<SeriesGroup> m_currentSeries;

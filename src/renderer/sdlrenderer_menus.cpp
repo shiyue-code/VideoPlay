@@ -42,6 +42,11 @@ void SDLRenderer::initMenus() {
         {91, "AB循环: 设置B点", "]", false, true},
         {92, "AB循环: 清除", "\\", false, true},
         {0, "", "", true},
+        {93, "音频滤镜: 关闭", "", false, true},
+        {94, "音频滤镜: 语音增强", "", false, true},
+        {95, "音频滤镜: 低音增强", "", false, true},
+        {96, "音频滤镜: 夜间模式", "", false, true},
+        {0, "", "", true},
         {60, "循环: 不循环", "", false, true},
         {61, "循环: 单曲循环", "", false, true},
         {62, "循环: 列表循环", "", false, true},
@@ -114,6 +119,11 @@ void SDLRenderer::initMenus() {
         {90, "AB循环: 设置A点", "[", false, true},
         {91, "AB循环: 设置B点", "]", false, true},
         {92, "AB循环: 清除", "\\", false, true},
+        {0, "", "", true},
+        {93, "音频滤镜: 关闭", "", false, true},
+        {94, "音频滤镜: 语音增强", "", false, true},
+        {95, "音频滤镜: 低音增强", "", false, true},
+        {96, "音频滤镜: 夜间模式", "", false, true},
         {0, "", "", true},
         {300, "AI 分析当前视频", "", false, true},
         {302, "搜索内容", "Ctrl+F", false, true},
@@ -391,9 +401,12 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                     checked = (mode == static_cast<int>(m_aspectMode));
                 }
                 // 始终置顶菜单项：启用时前面打勾
-                if (item.id == 80) {
-                    checked = m_alwaysOnTop;
-                }
+        if (item.id == 80) {
+            checked = m_alwaysOnTop;
+        }
+        if (item.id >= 93 && item.id <= 96) {
+            checked = (item.id - 93) == static_cast<int>(m_audioFilterPreset);
+        }
 
                 if (checked) {
                     drawText("\xE2\x9C\x93", checkX, labelY,

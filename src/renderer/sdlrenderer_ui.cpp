@@ -105,6 +105,8 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         renderSubtitle(subtitle);
     }
 
+    renderNetworkState();
+
     if (m_showMediaInfoPanel) {
         renderMediaInfoPanel();
     }
@@ -200,6 +202,7 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
 void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying) {
     int barY = controlY + 14;
     int barHeight = 6;
+    bool isLiveNetwork = m_mediaInfo.sourceType == SourceType::NetworkStream && duration <= 0;
 
     //  根据动画状态计算进度条宽度和边�?
     int fullBarWidth = m_windowWidth - 44 * 2;
@@ -224,6 +227,15 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
     m_lastDuration = duration;
     m_lastBarX = margin;
     m_lastBarW = barWidth;
+
+    if (isLiveNetwork) {
+        int liveW = getTextWidth("LIVE", 11) + 18;
+        int liveX = margin + barWidth - liveW;
+        int liveY = barY - 8;
+        fillRoundRect(liveX, liveY, liveW, 20, 10, 210, 40, 60, 220);
+        drawText("LIVE", liveX + 9, liveY + 3, 255, 255, 255, 11);
+        return;
+    }
 
     // 章节标记（进度条上方书签形状）
     if (duration > 0 && !m_chapters.empty()) {
@@ -401,7 +413,12 @@ void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration, int cont
     int y = controlY + 32;
     
     //  格式化时�?
-    std::string timeText = VideoPlay::formatTime(position) + " / " + VideoPlay::formatTime(duration);
+    std::string timeText;
+    if (m_mediaInfo.sourceType == SourceType::NetworkStream && duration <= 0) {
+        timeText = "直播流";
+    } else {
+        timeText = VideoPlay::formatTime(position) + " / " + VideoPlay::formatTime(duration);
+    }
     
     // 渲染时间文字
     drawText(timeText, x, y + (m_buttonSize - getFontHeight()) / 2,
@@ -528,10 +545,30 @@ void SDLRenderer::renderOSD() {
     const int fontSize = 22;
     const int paddingX = 28;
     const int paddingY = 16;
+    const int iconSize = 36;
+    auto iconType = [this]() -> std::string {
+        switch (m_osdType) {
+            case OSDType::Play:         return "play";
+            case OSDType::Pause:        return "pause";
+            case OSDType::Volume:       return "volume";
+            case OSDType::Mute:         return "mute";
+            case OSDType::SeekBackward: return "prev";
+            case OSDType::SeekForward:  return "next";
+            case OSDType::Info:         return "playlist";
+            case OSDType::Speed:
+            case OSDType::Message:
+            default:                    return {};
+        }
+    }();
+    bool hasIcon = !iconType.empty();
+    bool hasSpeedBadge = m_osdType == OSDType::Speed;
     int textW = getTextWidth(m_osdText, fontSize);
     int textH = getFontHeight(fontSize);
-    int boxW = textW + paddingX * 2;
-    int boxH = textH + paddingY * 2;
+    bool hasProgress = m_osdProgress >= 0.0f && m_osdProgress <= 1.0f;
+    int progressH = hasProgress ? 14 : 0;
+    int contentW = textW + (hasIcon ? iconSize + 14 : (hasSpeedBadge ? 58 : 0));
+    int boxW = contentW + paddingX * 2;
+    int boxH = std::max(textH, hasIcon ? iconSize : 0) + paddingY * 2 + progressH;
     int x = (m_windowWidth - boxW) / 2;
     int y = (m_windowHeight - boxH) / 2;
 
@@ -541,7 +578,67 @@ void SDLRenderer::renderOSD() {
 
     fillRoundRect(x - 1, y - 1, boxW + 2, boxH + 2, 12, 255, 255, 255, borderAlpha);
     fillRoundRect(x, y, boxW, boxH, 12, 18, 20, 24, bgAlpha);
-    drawText(m_osdText, x + paddingX, y + paddingY, 255, 255, 255, fontSize, textAlpha);
+
+    int contentX = x + paddingX;
+    int centerY = y + paddingY + std::max(textH, hasIcon ? iconSize : 0) / 2;
+    if (hasIcon) {
+        drawIcon(contentX + iconSize / 2, centerY, iconType, false, 1.0f);
+        contentX += iconSize + 14;
+    } else if (hasSpeedBadge) {
+        fillRoundRect(contentX, centerY - 15, 44, 30, 8, 0, 170, 255, static_cast<uint8_t>(180 * alphaRatio));
+        drawText("x", contentX + 17, centerY - getFontHeight(18) / 2, 255, 255, 255, 18, textAlpha);
+        contentX += 58;
+    }
+
+    drawText(m_osdText, contentX, centerY - textH / 2, 255, 255, 255, fontSize, textAlpha);
+
+    if (hasProgress) {
+        int barX = x + paddingX;
+        int barY = y + boxH - paddingY - 6;
+        int barW = boxW - paddingX * 2;
+        int fillW = static_cast<int>(barW * std::clamp(m_osdProgress, 0.0f, 1.0f));
+        fillRoundRect(barX, barY, barW, 6, 3, 255, 255, 255, static_cast<uint8_t>(45 * alphaRatio));
+        fillRoundRect(barX, barY, std::max(6, fillW), 6, 3, 0, 170, 255, static_cast<uint8_t>(220 * alphaRatio));
+    }
+}
+
+void SDLRenderer::renderNetworkState() {
+    if (m_mediaInfo.sourceType != SourceType::NetworkStream) {
+        return;
+    }
+
+    const char* text = networkStateText(m_networkState);
+    if (!text || text[0] == '\0') {
+        return;
+    }
+
+    int fontSize = 13;
+    int textW = getTextWidth(text, fontSize);
+    int textH = getFontHeight(fontSize);
+    int paddingX = 14;
+    int paddingY = 8;
+    int w = textW + paddingX * 2 + 16;
+    int h = textH + paddingY * 2;
+    int x = (m_windowWidth - w) / 2;
+    int y = m_menuBarHeight + 16;
+
+    uint8_t r = 0;
+    uint8_t g = 170;
+    uint8_t b = 255;
+    if (m_networkState == NetworkState::Failed) {
+        r = 230;
+        g = 70;
+        b = 70;
+    } else if (m_networkState == NetworkState::Reconnecting) {
+        r = 255;
+        g = 170;
+        b = 50;
+    }
+
+    fillRoundRect(x - 1, y - 1, w + 2, h + 2, 10, 255, 255, 255, 45);
+    fillRoundRect(x, y, w, h, 10, 20, 22, 28, 220);
+    fillCircle(x + paddingX - 2, y + h / 2, 4, r, g, b, 255);
+    drawText(text, x + paddingX + 10, y + paddingY, 255, 255, 255, fontSize);
 }
 
 void SDLRenderer::renderMediaInfoPanel() {
@@ -554,6 +651,7 @@ void SDLRenderer::renderMediaInfoPanel() {
 
     std::vector<std::pair<std::string, std::string>> rows;
     rows.push_back({"来源", m_mediaInfo.source.empty() ? "N/A" : m_mediaInfo.source});
+    rows.push_back({"类型", m_mediaInfo.sourceType == SourceType::NetworkStream ? "网络流" : "本地文件"});
     rows.push_back({"容器", m_mediaInfo.container.empty() ? "N/A" : m_mediaInfo.container});
     rows.push_back({"时长", formatTime(m_mediaInfo.durationMs)});
     rows.push_back({"总码率", formatBitrate(m_mediaInfo.bitrate)});

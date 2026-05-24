@@ -52,6 +52,24 @@ void testDefaultFrameState() {
     CHECK(frame.pts == 0, "Frame pts defaults to 0");
 }
 
+void testAudioFilterPresets() {
+    std::cout << "[TEST] Audio filter presets" << std::endl;
+
+    auto off = audioFilterConfigForPreset(AudioFilterPreset::Off);
+    CHECK(!off.enabled, "Off preset disables filters");
+    CHECK(off.eqBands.empty(), "Off preset has no EQ bands");
+
+    auto voice = audioFilterConfigForPreset(AudioFilterPreset::Voice);
+    CHECK(voice.enabled, "Voice preset enables filters");
+    CHECK(!voice.eqBands.empty(), "Voice preset has EQ bands");
+    CHECK(voice.limiterEnabled, "Voice preset enables limiter");
+
+    auto night = audioFilterConfigForPreset(AudioFilterPreset::Night);
+    CHECK(night.enabled, "Night preset enables filters");
+    CHECK(night.dynamicNormalizerEnabled, "Night preset enables dynamic normalizer");
+    CHECK(night.preampDb < 0.0, "Night preset lowers preamp");
+}
+
 } // namespace
 
 int main() {
@@ -60,6 +78,7 @@ int main() {
     testFormatTime();
     testPlaybackSpeedMapping();
     testDefaultFrameState();
+    testAudioFilterPresets();
 
     std::cout << "\n=== Results: " << passCount << "/" << testCount << " passed ===" << std::endl;
     return (passCount == testCount) ? 0 : 1;

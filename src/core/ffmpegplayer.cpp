@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 
 extern "C" {
 #include <libavutil/channel_layout.h>
@@ -82,6 +84,10 @@ void FFmpegPlayer::cleanup() {
 
 bool FFmpegPlayer::loadFile(const std::string& filePath) {
     const bool networkSource = isNetworkUrl(filePath);
+    m_sourceType = networkSource ? SourceType::NetworkStream : SourceType::LocalFile;
+    if (networkSource) {
+        setNetworkState(NetworkState::Connecting);
+    }
     if (!networkSource && !std::filesystem::exists(filePath)) {
         if (m_errorCallback) {
             m_errorCallback("File not found: " + filePath);
@@ -114,6 +120,9 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     int openRet = avformat_open_input(&m_formatContext, filePath.c_str(), nullptr, &inputOptions);
     av_dict_free(&inputOptions);
     if (openRet < 0) {
+        if (networkSource) {
+            setNetworkState(NetworkState::Failed);
+        }
         if (m_errorCallback) {
             m_errorCallback("Cannot open file: " + filePath);
         }
@@ -123,6 +132,9 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     }
     
     if (avformat_find_stream_info(m_formatContext, nullptr) < 0) {
+        if (networkSource) {
+            setNetworkState(NetworkState::Failed);
+        }
         if (m_errorCallback) {
             m_errorCallback("Cannot find stream information");
         }
@@ -134,6 +146,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         m_formatContext->duration / (AV_TIME_BASE / 1000) : 0;
     m_mediaInfo = MediaInfo();
     m_mediaInfo.source = filePath;
+    m_mediaInfo.sourceType = m_sourceType;
     m_mediaInfo.durationMs = m_duration;
     m_mediaInfo.bitrate = m_formatContext->bit_rate;
     if (m_formatContext->iformat) {
@@ -278,6 +291,10 @@ void FFmpegPlayer::closeFile() {
     if (m_audioCtx.swrContext) {
         swr_free(&m_audioCtx.swrContext);
     }
+    {
+        std::lock_guard<std::mutex> filterLock(m_audioFilterMutex);
+        cleanupAudioFilterGraph();
+    }
     if (m_audioCtx.codecContext) {
         avcodec_free_context(&m_audioCtx.codecContext);
     }
@@ -290,6 +307,8 @@ void FFmpegPlayer::closeFile() {
     m_filePath.clear();
     m_duration = 0;
     m_mediaInfo = MediaInfo();
+    m_sourceType = SourceType::LocalFile;
+    setNetworkState(NetworkState::Idle);
     m_position = 0;
     m_state = PlaybackState::Stopped;
     m_chapters.clear();
@@ -411,6 +430,205 @@ bool FFmpegPlayer::initializeAudioContext() {
     return true;
 }
 
+std::string FFmpegPlayer::buildAudioFilterDescription() const {
+    if (!m_audioFilterConfig.enabled) {
+        return {};
+    }
+
+    std::vector<std::string> filters;
+    if (std::abs(m_audioFilterConfig.preampDb) > 0.01) {
+        std::ostringstream oss;
+        oss << "volume=" << m_audioFilterConfig.preampDb << "dB";
+        filters.push_back(oss.str());
+    }
+
+    for (const auto& band : m_audioFilterConfig.eqBands) {
+        if (band.frequency <= 0.0 || band.width <= 0.0 ||
+            std::abs(band.gainDb) <= 0.01) {
+            continue;
+        }
+        std::ostringstream oss;
+        oss << "equalizer=f=" << band.frequency
+            << ":width_type=o:width=" << band.width
+            << ":g=" << band.gainDb;
+        filters.push_back(oss.str());
+    }
+
+    if (m_audioFilterConfig.dynamicNormalizerEnabled) {
+        filters.push_back("dynaudnorm=f=150:g=8");
+    }
+    if (m_audioFilterConfig.limiterEnabled) {
+        filters.push_back("alimiter=limit=0.95");
+    }
+
+    if (filters.empty()) {
+        return {};
+    }
+
+    std::ostringstream desc;
+    for (size_t i = 0; i < filters.size(); ++i) {
+        if (i > 0) {
+            desc << ",";
+        }
+        desc << filters[i];
+    }
+    return desc.str();
+}
+
+void FFmpegPlayer::cleanupAudioFilterGraph() {
+    if (m_audioFilterGraph) {
+        avfilter_graph_free(&m_audioFilterGraph);
+    }
+    m_audioFilterSrc = nullptr;
+    m_audioFilterSink = nullptr;
+    m_audioFilterSampleRate = 0;
+    m_audioFilterChannels = 0;
+    m_audioFilterSampleFormat = AV_SAMPLE_FMT_NONE;
+    m_audioFilterDescription.clear();
+}
+
+bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
+    if (!frame || !m_audioFilterConfig.enabled || m_audioFilterRuntimeDisabled) {
+        return false;
+    }
+
+    std::string description = buildAudioFilterDescription();
+    if (description.empty()) {
+        return false;
+    }
+
+    int channels = frame->ch_layout.nb_channels;
+    if (channels <= 0) {
+        channels = m_audioCtx.codecContext ? m_audioCtx.codecContext->ch_layout.nb_channels : 0;
+    }
+    if (channels <= 0 || frame->sample_rate <= 0) {
+        return false;
+    }
+
+    AVSampleFormat sampleFormat = static_cast<AVSampleFormat>(frame->format);
+    bool graphMatches =
+        m_audioFilterGraph &&
+        m_audioFilterSampleRate == frame->sample_rate &&
+        m_audioFilterChannels == channels &&
+        m_audioFilterSampleFormat == sampleFormat &&
+        m_audioFilterDescription == description;
+    if (graphMatches) {
+        return true;
+    }
+
+    cleanupAudioFilterGraph();
+
+    AVFilterGraph* graph = avfilter_graph_alloc();
+    if (!graph) {
+        logger().warning("Failed to allocate audio filter graph");
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    const AVFilter* bufferSrc = avfilter_get_by_name("abuffer");
+    const AVFilter* bufferSink = avfilter_get_by_name("abuffersink");
+    if (!bufferSrc || !bufferSink) {
+        logger().warning("Required audio filter endpoints are unavailable");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    AVFilterContext* src = nullptr;
+    AVFilterContext* sink = nullptr;
+    int ret = avfilter_graph_create_filter(&src, bufferSrc, "in", nullptr, nullptr, graph);
+    if (ret < 0) {
+        logger().warning("Failed to create audio filter source");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    AVBufferSrcParameters* params = av_buffersrc_parameters_alloc();
+    if (!params) {
+        logger().warning("Failed to allocate audio filter source parameters");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    params->format = frame->format;
+    params->sample_rate = frame->sample_rate;
+    params->time_base = m_audioCtx.stream ? m_audioCtx.stream->time_base : AVRational{1, frame->sample_rate};
+    if (frame->ch_layout.nb_channels > 0 &&
+        av_channel_layout_check(&frame->ch_layout)) {
+        av_channel_layout_copy(&params->ch_layout, &frame->ch_layout);
+    } else {
+        av_channel_layout_default(&params->ch_layout, channels);
+    }
+
+    ret = av_buffersrc_parameters_set(src, params);
+    av_channel_layout_uninit(&params->ch_layout);
+    av_free(params);
+    if (ret < 0) {
+        logger().warning("Failed to set audio filter source parameters");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    ret = avfilter_graph_create_filter(&sink, bufferSink, "out", nullptr, nullptr, graph);
+    if (ret < 0) {
+        logger().warning("Failed to create audio filter sink");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    AVFilterInOut* outputs = avfilter_inout_alloc();
+    AVFilterInOut* inputs = avfilter_inout_alloc();
+    if (!outputs || !inputs) {
+        avfilter_inout_free(&outputs);
+        avfilter_inout_free(&inputs);
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = src;
+    outputs->pad_idx = 0;
+    outputs->next = nullptr;
+
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = sink;
+    inputs->pad_idx = 0;
+    inputs->next = nullptr;
+
+    ret = avfilter_graph_parse_ptr(graph, description.c_str(), &inputs, &outputs, nullptr);
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    if (ret < 0) {
+        logger().warning("Failed to parse audio filter graph: " + description);
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    ret = avfilter_graph_config(graph, nullptr);
+    if (ret < 0) {
+        logger().warning("Failed to configure audio filter graph: " + description);
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    m_audioFilterGraph = graph;
+    m_audioFilterSrc = src;
+    m_audioFilterSink = sink;
+    m_audioFilterSampleRate = frame->sample_rate;
+    m_audioFilterChannels = channels;
+    m_audioFilterSampleFormat = sampleFormat;
+    m_audioFilterDescription = description;
+    logger().info("Audio filter graph enabled: " + description);
+    return true;
+}
+
 void FFmpegPlayer::play() {
     bool wasPaused = false;
     bool needNewThread = false;
@@ -450,6 +668,9 @@ void FFmpegPlayer::play() {
         if (m_audioPlayer) {
             m_audioPlayer->play();
         }
+        if (m_sourceType == SourceType::NetworkStream) {
+            setNetworkState(NetworkState::Playing);
+        }
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_condition.notify_all();
@@ -461,6 +682,9 @@ void FFmpegPlayer::play() {
         // 首次播放：进入预缓冲状态，由主线程轮询 checkPreloadComplete()
         m_preloading = true;
         m_preloadStartTime = std::chrono::steady_clock::now();
+        if (m_sourceType == SourceType::NetworkStream) {
+            setNetworkState(NetworkState::Buffering);
+        }
         logger().debug("Preload started");
     }
 }
@@ -566,6 +790,11 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
         m_audioPlayer->reset();
         m_audioPlayer->play(); // 确保音频设备在清空后恢复播放
     }
+
+    {
+        std::lock_guard<std::mutex> filterLock(m_audioFilterMutex);
+        cleanupAudioFilterGraph();
+    }
     
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
@@ -618,6 +847,9 @@ bool FFmpegPlayer::checkPreloadComplete() {
         m_preloading = false;
         if (m_audioPlayer) {
             m_audioPlayer->play();
+        }
+        if (m_sourceType == SourceType::NetworkStream) {
+            setNetworkState(NetworkState::Playing);
         }
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -672,6 +904,7 @@ void FFmpegPlayer::decodeLoop() {
     int pktCount = 0;
     int vframeCount = 0;
     int aframeCount = 0;
+    int consecutiveReadErrors = 0;
 
     while (!m_abortRequest) {
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -724,9 +957,27 @@ void FFmpegPlayer::decodeLoop() {
                     m_audioPlayer->stop();
                     m_audioPlayer->reset();
                 }
+                if (m_sourceType == SourceType::NetworkStream) {
+                    setNetworkState(NetworkState::Idle);
+                }
                 break;
             }
+            if (m_sourceType == SourceType::NetworkStream) {
+                consecutiveReadErrors++;
+                if (consecutiveReadErrors == 1) {
+                    setNetworkState(NetworkState::Reconnecting);
+                } else if (consecutiveReadErrors > 200) {
+                    setNetworkState(NetworkState::Failed);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
             continue;
+        }
+        if (m_sourceType == SourceType::NetworkStream) {
+            if (consecutiveReadErrors > 0) {
+                setNetworkState(NetworkState::Playing);
+            }
+            consecutiveReadErrors = 0;
         }
 
         if (m_videoCtx.stream && packet->stream_index == m_videoCtx.stream->index && m_videoCtx.codecContext) {
@@ -791,7 +1042,7 @@ void FFmpegPlayer::decodeLoop() {
             if (ret == AVERROR(EAGAIN)) {
                 while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
                     auto t3 = HRClock::now();
-                    auto audioData = resampleAudioFrame(aframe);
+                    auto audioData = processAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
                         if (aframe->pts != AV_NOPTS_VALUE) {
@@ -815,7 +1066,7 @@ void FFmpegPlayer::decodeLoop() {
             if (ret >= 0) {
                 while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
                     auto t3 = HRClock::now();
-                    auto audioData = resampleAudioFrame(aframe);
+                    auto audioData = processAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
                         if (aframe->pts != AV_NOPTS_VALUE) {
@@ -1005,6 +1256,51 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     return result;
 }
 
+std::vector<float> FFmpegPlayer::processAudioFrame(AVFrame* frame) {
+    if (!frame) {
+        return {};
+    }
+
+    {
+        std::lock_guard<std::mutex> filterLock(m_audioFilterMutex);
+        if (ensureAudioFilterGraph(frame)) {
+            int ret = av_buffersrc_add_frame_flags(m_audioFilterSrc, frame, AV_BUFFERSRC_FLAG_KEEP_REF);
+            if (ret < 0) {
+                logger().warning("Failed to feed audio filter graph; using unfiltered audio");
+                m_audioFilterRuntimeDisabled = true;
+                cleanupAudioFilterGraph();
+                return resampleAudioFrame(frame);
+            }
+
+            std::vector<float> result;
+            AVFrame* filteredFrame = av_frame_alloc();
+            if (!filteredFrame) {
+                return result;
+            }
+
+            while (true) {
+                ret = av_buffersink_get_frame(m_audioFilterSink, filteredFrame);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                    break;
+                }
+                if (ret < 0) {
+                    logger().warning("Failed to read audio filter graph output");
+                    break;
+                }
+
+                auto chunk = resampleAudioFrame(filteredFrame);
+                result.insert(result.end(), chunk.begin(), chunk.end());
+                av_frame_unref(filteredFrame);
+            }
+
+            av_frame_free(&filteredFrame);
+            return result;
+        }
+    }
+
+    return resampleAudioFrame(frame);
+}
+
 std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
     std::vector<float> result;
     if (!frame || !frame->data[0]) return result;
@@ -1013,8 +1309,24 @@ std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
     int srcChannels = frame->ch_layout.nb_channels;
     int dstRate = m_audioCtx.format.sampleRate;
     int dstChannels = m_audioCtx.format.channels;
+    if (srcRate <= 0) {
+        srcRate = dstRate;
+    }
+    if (srcChannels <= 0) {
+        srcChannels = dstChannels > 0 ? dstChannels : 2;
+    }
     
-    if (!m_audioCtx.swrContext) {
+    AVSampleFormat srcFormat = static_cast<AVSampleFormat>(frame->format);
+    bool needsNewSwr =
+        !m_audioCtx.swrContext ||
+        m_audioCtx.lastSrcRate != srcRate ||
+        m_audioCtx.lastSrcChannels != srcChannels ||
+        m_audioCtx.lastSrcFormat != srcFormat;
+
+    if (needsNewSwr) {
+        if (m_audioCtx.swrContext) {
+            swr_free(&m_audioCtx.swrContext);
+        }
         m_audioCtx.swrContext = swr_alloc();
         if (!m_audioCtx.swrContext) return result;
         
@@ -1024,7 +1336,7 @@ std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
         
         av_opt_set_chlayout(m_audioCtx.swrContext, "in_chlayout", &srcLayout, 0);
         av_opt_set_int(m_audioCtx.swrContext, "in_sample_rate", srcRate, 0);
-        av_opt_set_sample_fmt(m_audioCtx.swrContext, "in_sample_fmt", static_cast<AVSampleFormat>(frame->format), 0);
+        av_opt_set_sample_fmt(m_audioCtx.swrContext, "in_sample_fmt", srcFormat, 0);
         
         av_opt_set_chlayout(m_audioCtx.swrContext, "out_chlayout", &dstLayout, 0);
         av_opt_set_int(m_audioCtx.swrContext, "out_sample_rate", dstRate, 0);
@@ -1034,6 +1346,10 @@ std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
             swr_free(&m_audioCtx.swrContext);
             return result;
         }
+
+        m_audioCtx.lastSrcRate = srcRate;
+        m_audioCtx.lastSrcChannels = srcChannels;
+        m_audioCtx.lastSrcFormat = srcFormat;
     }
     
     int64_t delay = swr_get_delay(m_audioCtx.swrContext, srcRate);
@@ -1154,6 +1470,27 @@ bool FFmpegPlayer::isMuted() const {
     return m_muted.load();
 }
 
+void FFmpegPlayer::setAudioFilterConfig(const AudioFilterConfig& config) {
+    std::lock_guard<std::mutex> lock(m_audioFilterMutex);
+    m_audioFilterConfig = config;
+    m_audioFilterRuntimeDisabled = false;
+    cleanupAudioFilterGraph();
+    logger().info("Audio filter preset: " +
+                  std::string(audioFilterPresetName(m_audioFilterConfig.preset)));
+}
+
+AudioFilterConfig FFmpegPlayer::audioFilterConfig() const {
+    std::lock_guard<std::mutex> lock(m_audioFilterMutex);
+    return m_audioFilterConfig;
+}
+
+void FFmpegPlayer::setNetworkState(NetworkState state) {
+    NetworkState previous = m_networkState.exchange(state);
+    if (previous != state && m_networkStateCallback) {
+        m_networkStateCallback(state);
+    }
+}
+
 void FFmpegPlayer::setStateCallback(StateCallback callback) {
     m_stateCallback = callback;
 }
@@ -1184,6 +1521,10 @@ void FFmpegPlayer::setMuteCallback(MuteCallback callback) {
 
 void FFmpegPlayer::setVideoFrameCallback(VideoFrameCallback callback) {
     m_videoFrameCallback = callback;
+}
+
+void FFmpegPlayer::setNetworkStateCallback(NetworkStateCallback callback) {
+    m_networkStateCallback = callback;
 }
 
 void FFmpegPlayer::pushVideoFrame(VideoFrame&& frame) {

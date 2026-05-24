@@ -744,8 +744,22 @@ void SDLRenderer::setMediaInfo(const MediaInfo& info) {
 }
 
 void SDLRenderer::showOSD(const std::string& text) {
+    showOSD(OSDType::Message, text, -1.0f);
+}
+
+void SDLRenderer::showOSD(OSDType type, const std::string& text, float progress) {
     m_osdText = text;
+    m_osdType = type;
+    m_osdProgress = progress;
     m_osdStartTime = SDL_GetTicks();
+}
+
+void SDLRenderer::setAudioFilterPreset(AudioFilterPreset preset) {
+    m_audioFilterPreset = preset;
+}
+
+void SDLRenderer::setNetworkState(NetworkState state) {
+    m_networkState = state;
 }
 
 void SDLRenderer::setEpisodeProgress(const std::vector<float>& progress) {
