@@ -3,8 +3,39 @@
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
+#include <utility>
+
+namespace {
+
+std::string formatBitrate(int64_t bitrate) {
+    if (bitrate <= 0) {
+        return "N/A";
+    }
+    std::ostringstream oss;
+    if (bitrate >= 1000 * 1000) {
+        oss << std::fixed << std::setprecision(2)
+            << (static_cast<double>(bitrate) / 1000.0 / 1000.0) << " Mbps";
+    } else {
+        oss << std::fixed << std::setprecision(0)
+            << (static_cast<double>(bitrate) / 1000.0) << " Kbps";
+    }
+    return oss.str();
+}
+
+std::string formatFps(double fps) {
+    if (fps <= 0.0) {
+        return "N/A";
+    }
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(2) << fps;
+    return oss.str();
+}
+
+} // namespace
 
 namespace VideoPlay {
 
@@ -73,6 +104,12 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     if (!subtitle.empty()) {
         renderSubtitle(subtitle);
     }
+
+    if (m_showMediaInfoPanel) {
+        renderMediaInfoPanel();
+    }
+
+    renderOSD();
 
     // 预缓冲加载动画已集成到进度条�?    
     //  渲染打开的菜�?
@@ -466,6 +503,118 @@ void SDLRenderer::renderSubtitle(const std::string& subtitle) {
         textY += lineHeight;
     }
 #endif
+}
+
+void SDLRenderer::renderOSD() {
+    if (m_osdText.empty() || m_osdStartTime == 0) {
+        return;
+    }
+
+    uint64_t now = SDL_GetTicks();
+    uint64_t elapsed = now - m_osdStartTime;
+    if (elapsed >= OSD_DURATION_MS) {
+        m_osdText.clear();
+        m_osdStartTime = 0;
+        return;
+    }
+
+    float fadeStart = OSD_DURATION_MS * 0.65f;
+    float alphaRatio = 1.0f;
+    if (elapsed > static_cast<uint64_t>(fadeStart)) {
+        alphaRatio = 1.0f - (elapsed - fadeStart) / (OSD_DURATION_MS - fadeStart);
+    }
+    alphaRatio = std::max(0.0f, std::min(1.0f, alphaRatio));
+
+    const int fontSize = 22;
+    const int paddingX = 28;
+    const int paddingY = 16;
+    int textW = getTextWidth(m_osdText, fontSize);
+    int textH = getFontHeight(fontSize);
+    int boxW = textW + paddingX * 2;
+    int boxH = textH + paddingY * 2;
+    int x = (m_windowWidth - boxW) / 2;
+    int y = (m_windowHeight - boxH) / 2;
+
+    uint8_t bgAlpha = static_cast<uint8_t>(210 * alphaRatio);
+    uint8_t borderAlpha = static_cast<uint8_t>(80 * alphaRatio);
+    uint8_t textAlpha = static_cast<uint8_t>(255 * alphaRatio);
+
+    fillRoundRect(x - 1, y - 1, boxW + 2, boxH + 2, 12, 255, 255, 255, borderAlpha);
+    fillRoundRect(x, y, boxW, boxH, 12, 18, 20, 24, bgAlpha);
+    drawText(m_osdText, x + paddingX, y + paddingY, 255, 255, 255, fontSize, textAlpha);
+}
+
+void SDLRenderer::renderMediaInfoPanel() {
+    fillRect(0, 0, m_windowWidth, m_windowHeight, 0, 0, 0, 95);
+
+    int panelW = std::min(560, std::max(320, m_windowWidth - 80));
+    int panelX = (m_windowWidth - panelW) / 2;
+    int panelY = std::max(m_menuBarHeight + 30, (m_windowHeight - 360) / 2);
+    int radius = 12;
+
+    std::vector<std::pair<std::string, std::string>> rows;
+    rows.push_back({"来源", m_mediaInfo.source.empty() ? "N/A" : m_mediaInfo.source});
+    rows.push_back({"容器", m_mediaInfo.container.empty() ? "N/A" : m_mediaInfo.container});
+    rows.push_back({"时长", formatTime(m_mediaInfo.durationMs)});
+    rows.push_back({"总码率", formatBitrate(m_mediaInfo.bitrate)});
+
+    if (m_mediaInfo.hasVideo) {
+        rows.push_back({"视频编码", m_mediaInfo.videoCodec.empty() ? "N/A" : m_mediaInfo.videoCodec});
+        rows.push_back({"分辨率", std::to_string(m_mediaInfo.width) + " x " +
+                                  std::to_string(m_mediaInfo.height)});
+        rows.push_back({"帧率", formatFps(m_mediaInfo.fps)});
+        rows.push_back({"视频码率", formatBitrate(m_mediaInfo.videoBitrate)});
+        rows.push_back({"硬件解码", m_mediaInfo.hardwareDecoder ?
+                                  ("已启用 " + m_mediaInfo.hardwareDevice) : "未启用"});
+    }
+
+    if (m_mediaInfo.hasAudio) {
+        rows.push_back({"音频编码", m_mediaInfo.audioCodec.empty() ? "N/A" : m_mediaInfo.audioCodec});
+        rows.push_back({"采样率", m_mediaInfo.sampleRate > 0 ?
+                                  std::to_string(m_mediaInfo.sampleRate) + " Hz" : "N/A"});
+        rows.push_back({"声道", m_mediaInfo.channels > 0 ?
+                                std::to_string(m_mediaInfo.channels) : "N/A"});
+        rows.push_back({"音频码率", formatBitrate(m_mediaInfo.audioBitrate)});
+    }
+
+    const int titleFont = 18;
+    const int rowFont = 12;
+    const int padding = 24;
+    const int rowH = 24;
+    int panelH = padding * 2 + getFontHeight(titleFont) + 14 +
+                 static_cast<int>(rows.size()) * rowH;
+    if (panelY + panelH > m_windowHeight - 24) {
+        panelY = std::max(m_menuBarHeight + 12, m_windowHeight - panelH - 24);
+    }
+
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 100);
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1,
+                  255, 255, 255, 60);
+    fillRoundRect(panelX, panelY, panelW, panelH, radius, 24, 26, 32, 238);
+
+    drawText("媒体信息", panelX + padding, panelY + padding,
+             255, 255, 255, titleFont);
+
+    int y = panelY + padding + getFontHeight(titleFont) + 14;
+    int labelW = 78;
+    int valueX = panelX + padding + labelW + 18;
+    int valueMaxW = panelW - padding * 2 - labelW - 18;
+    for (const auto& row : rows) {
+        drawText(row.first, panelX + padding, y, 160, 168, 178, rowFont);
+
+        std::string value = row.second;
+        int valueW = getTextWidth(value, rowFont);
+        if (valueW > valueMaxW) {
+            const std::string ellipsis = "...";
+            while (!value.empty() &&
+                   getTextWidth(value + ellipsis, rowFont) > valueMaxW) {
+                value.pop_back();
+            }
+            value += ellipsis;
+        }
+        drawText(value, valueX, y, 235, 238, 242, rowFont);
+        y += rowH;
+    }
 }
 
 void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex) {

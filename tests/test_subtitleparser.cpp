@@ -88,8 +88,8 @@ void testOffset() {
     CHECK(parser.subtitleAt(2500) == "Offset test", "Before offset");
     parser.adjustOffset(1000);
     CHECK(parser.offset() == 1000, "Offset is +1000ms");
-    CHECK(parser.subtitleAt(1500) == "Offset test", "After +1000ms offset");
-    CHECK(parser.subtitleAt(3500) == "", "After offset, 3500ms should be empty");
+    CHECK(parser.subtitleAt(1500) == "", "After +1000ms offset, 1500ms should be empty");
+    CHECK(parser.subtitleAt(3500) == "Offset test", "After +1000ms offset");
 
     parser.setOffset(-500);
     CHECK(parser.subtitleAt(3000) == "Offset test", "After -500ms offset");

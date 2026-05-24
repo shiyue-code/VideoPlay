@@ -63,6 +63,9 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         closeAllMenus();
                         hideContextMenu();
                         break;
+                    case SDLK_TAB:
+                        toggleMediaInfoPanel();
+                        break;
                     case SDLK_F:
                         toggleFullscreen();
                         break;

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(VideoPlay VERSION 2.0.0 LANGUAGES C CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -301,6 +303,10 @@ if(WIN32 AND SDL3_TTF_FOUND)
             $<TARGET_FILE_DIR:${PROJECT_NAME}>/icons
         COMMENT "Copying icons"
     )
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()
 
 message(STATUS "VideoPlay configuration complete")
