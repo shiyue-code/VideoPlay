@@ -25,7 +25,7 @@ endif()
 # 查找 FFmpeg
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale libswresample)
+    pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale libswresample libavfilter)
 endif()
 
 if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
@@ -35,6 +35,7 @@ if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
     unset(FFMPEG_AVUTIL_LIB CACHE)
     unset(FFMPEG_SWSCALE_LIB CACHE)
     unset(FFMPEG_SWRESAMPLE_LIB CACHE)
+    unset(FFMPEG_AVFILTER_LIB CACHE)
 
     find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
         PATHS ${FFmpeg_ROOT}/include
@@ -54,8 +55,11 @@ if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
     find_library(FFMPEG_SWRESAMPLE_LIB swresample
         PATHS ${FFmpeg_ROOT}/lib
         NO_DEFAULT_PATH)
+    find_library(FFMPEG_AVFILTER_LIB avfilter
+        PATHS ${FFmpeg_ROOT}/lib
+        NO_DEFAULT_PATH)
 
-    if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIB)
+    if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIB AND FFMPEG_AVFILTER_LIB)
         set(FFMPEG_FOUND TRUE)
         set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIR})
         set(FFMPEG_LIBRARIES
@@ -63,7 +67,8 @@ if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
             ${FFMPEG_AVFORMAT_LIB}
             ${FFMPEG_AVUTIL_LIB}
             ${FFMPEG_SWSCALE_LIB}
-            ${FFMPEG_SWRESAMPLE_LIB})
+            ${FFMPEG_SWRESAMPLE_LIB}
+            ${FFMPEG_AVFILTER_LIB})
     endif()
 endif()
 

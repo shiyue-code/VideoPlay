@@ -89,6 +89,8 @@ public:
     AspectMode aspectMode() const;
     void setAlwaysOnTop(bool enabled);
     bool alwaysOnTop() const;
+    void setAudioFilterConfig(const AudioFilterConfig& config);
+    AudioFilterConfig audioFilterConfig() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);

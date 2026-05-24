@@ -97,6 +97,9 @@ bool VideoPlayerApp::initialize() {
 
     // 创建播放器
     m_player = std::make_unique<FFmpegPlayer>();
+    auto audioFilterConfig = Settings::instance().audioFilterConfig();
+    m_player->setAudioFilterConfig(audioFilterConfig);
+    m_renderer->setAudioFilterPreset(audioFilterConfig.preset);
     
     // 设置回调
     m_player->setPositionCallback([this](int64_t pos) {
@@ -110,6 +113,9 @@ bool VideoPlayerApp::initialize() {
     });
     m_player->setErrorCallback([this](const std::string& err) {
         onError(err);
+    });
+    m_player->setNetworkStateCallback([this](NetworkState state) {
+        m_networkState = state;
     });
 
     // 设置渲染器回调
@@ -150,7 +156,8 @@ bool VideoPlayerApp::initialize() {
             m_player->setVolume(m_volume);
         }
         if (m_renderer) {
-            m_renderer->showOSD("音量 " + std::to_string(m_volume) + "%");
+            m_renderer->showOSD(OSDType::Volume, "音量 " + std::to_string(m_volume) + "%",
+                                m_volume / 100.0f);
         }
         logger().info("Volume set to: " + std::to_string(m_volume));
     });
@@ -523,6 +530,9 @@ void VideoPlayerApp::render() {
     }
 
     // 渲染 UI
+    if (m_renderer) {
+        m_renderer->setNetworkState(m_networkState.load());
+    }
     m_renderer->renderUI(
         m_position,
         m_duration,

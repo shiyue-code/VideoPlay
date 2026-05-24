@@ -26,7 +26,7 @@ void VideoPlayerApp::play() {
     m_player->play();
     m_isPlaying = true;
     if (m_renderer) {
-        m_renderer->showOSD("播放");
+        m_renderer->showOSD(OSDType::Play, "播放");
     }
 }
 
@@ -37,7 +37,7 @@ void VideoPlayerApp::pause() {
     m_player->pause();
     m_isPlaying = false;
     if (m_renderer) {
-        m_renderer->showOSD("暂停");
+        m_renderer->showOSD(OSDType::Pause, "暂停");
     }
 }
 
@@ -73,7 +73,8 @@ void VideoPlayerApp::seek(double deltaMs) {
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
     if (m_renderer) {
-        m_renderer->showOSD(formatTime(targetPos));
+        m_renderer->showOSD(deltaMs >= 0 ? OSDType::SeekForward : OSDType::SeekBackward,
+                            formatTime(targetPos));
     }
 }
 
@@ -88,7 +89,8 @@ void VideoPlayerApp::seekTo(double position) {
     m_seekTargetPosition = targetPos;
     m_displayFrame = VideoFrame(); // 清空当前帧，避免 seek 后短暂显示旧画面
     if (m_renderer) {
-        m_renderer->showOSD(formatTime(targetPos));
+        m_renderer->showOSD(OSDType::Info, formatTime(targetPos),
+                            m_duration > 0 ? static_cast<float>(targetPos) / static_cast<float>(m_duration) : -1.0f);
     }
 }
 
@@ -102,7 +104,8 @@ void VideoPlayerApp::setVolume(int delta) {
     
     logger().info("Volume set to: {}", m_volume);
     if (m_renderer) {
-        m_renderer->showOSD("音量 " + std::to_string(m_volume) + "%");
+        m_renderer->showOSD(OSDType::Volume, "音量 " + std::to_string(m_volume) + "%",
+                            m_volume / 100.0f);
     }
 }
 
@@ -115,7 +118,9 @@ void VideoPlayerApp::toggleMute() {
     
     logger().info(m_isMuted ? "Muted" : "Unmuted");
     if (m_renderer) {
-        m_renderer->showOSD(m_isMuted ? "静音" : "取消静音");
+        m_renderer->showOSD(m_isMuted ? OSDType::Mute : OSDType::Volume,
+                            m_isMuted ? "静音" : "取消静音",
+                            m_isMuted ? 0.0f : m_volume / 100.0f);
     }
 }
 
@@ -128,7 +133,7 @@ void VideoPlayerApp::setSpeed(double speed) {
     
     logger().info("Playback speed set to: {}x", m_speed);
     if (m_renderer) {
-        m_renderer->showOSD("速度 " + std::to_string(m_speed).substr(0, 4) + "x");
+        m_renderer->showOSD(OSDType::Speed, "速度 " + std::to_string(m_speed).substr(0, 4) + "x");
     }
 }
 

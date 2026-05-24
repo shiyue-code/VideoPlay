@@ -47,6 +47,18 @@ using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = d
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
 using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
 
+enum class OSDType {
+    Message,
+    Play,
+    Pause,
+    Volume,
+    Mute,
+    SeekBackward,
+    SeekForward,
+    Speed,
+    Info
+};
+
 // 控件类型
 enum class ControlType {
     None,
@@ -170,6 +182,9 @@ public:
     void toggleMediaInfoPanel();
     void setMediaInfo(const MediaInfo& info);
     void showOSD(const std::string& text);
+    void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
+    void setAudioFilterPreset(AudioFilterPreset preset);
+    void setNetworkState(NetworkState state);
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -263,6 +278,7 @@ private:
     void renderTooltip();
     void renderOSD();
     void renderMediaInfoPanel();
+    void renderNetworkState();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
@@ -335,6 +351,8 @@ private:
     int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
+    AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
+    NetworkState m_networkState = NetworkState::Idle;
     AspectMode m_aspectMode = AspectMode::Original;
     bool m_alwaysOnTop = false;
     std::vector<float> m_episodeProgress;
@@ -432,6 +450,8 @@ private:
     uint64_t m_tooltipTime = 0;
     uint64_t m_tooltipShowTime = 0;
     std::string m_osdText;
+    OSDType m_osdType = OSDType::Message;
+    float m_osdProgress = -1.0f;
     uint64_t m_osdStartTime = 0;
     static constexpr uint64_t OSD_DURATION_MS = 1400;
     MediaInfo m_mediaInfo;

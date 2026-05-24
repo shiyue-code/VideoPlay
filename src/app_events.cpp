@@ -133,6 +133,24 @@ void VideoPlayerApp::handleMenu(int menuId) {
         case 92: // AB循环: 清除
             clearLoop();
             break;
+        case 93:
+        case 94:
+        case 95:
+        case 96: {
+            auto preset = static_cast<AudioFilterPreset>(menuId - 93);
+            auto config = audioFilterConfigForPreset(preset);
+            Settings::instance().setAudioFilterConfig(config);
+            Settings::instance().save();
+            if (m_player) {
+                m_player->setAudioFilterConfig(config);
+            }
+            if (m_renderer) {
+                m_renderer->setAudioFilterPreset(preset);
+                m_renderer->showOSD(OSDType::Info,
+                                    std::string("音频滤镜 ") + audioFilterPresetName(preset));
+            }
+            break;
+        }
         case 300: // AI 分析当前视频
             startAIAnalysis();
             break;
@@ -215,6 +233,7 @@ void VideoPlayerApp::showHelp() {
         "[             - AB循环: 设置A点\n"
         "]             - AB循环: 设置B点\n"
         "\\             - AB循环: 清除\n"
+        "播放菜单      - 切换音频滤镜预设\n"
         "F12           - 截图\n"
         "Ctrl+E        - 切换选集面板\n"
         "Ctrl+L        - 切换播放列表\n"

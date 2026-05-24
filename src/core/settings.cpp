@@ -71,7 +71,15 @@ void Settings::load() {
                 {"speed", 1.0},
                 {"loopMode", 2},
                 {"aspectMode", 0},
-                {"alwaysOnTop", false}
+                {"alwaysOnTop", false},
+                {"audioFilter", {
+                    {"enabled", false},
+                    {"preset", 0},
+                    {"preampDb", 0.0},
+                    {"limiterEnabled", false},
+                    {"dynamicNormalizerEnabled", false},
+                    {"eqBands", nlohmann::json::array()}
+                }}
             }},
             {"recentFiles", nlohmann::json::array()},
             {"subtitle", {
@@ -120,6 +128,19 @@ void Settings::load() {
             {"maxFileSize", 5 * 1024 * 1024},
             {"maxFiles", 3},
             {"flushOnWarning", true}
+        };
+    }
+    if (!m_config.contains("playback")) {
+        m_config["playback"] = nlohmann::json::object();
+    }
+    if (!m_config["playback"].contains("audioFilter")) {
+        m_config["playback"]["audioFilter"] = {
+            {"enabled", false},
+            {"preset", 0},
+            {"preampDb", 0.0},
+            {"limiterEnabled", false},
+            {"dynamicNormalizerEnabled", false},
+            {"eqBands", nlohmann::json::array()}
         };
     }
 }
@@ -250,6 +271,63 @@ bool Settings::alwaysOnTop() const {
         return m_config["playback"].value("alwaysOnTop", false);
     }
     return false;
+}
+
+void Settings::setAudioFilterConfig(const AudioFilterConfig& config) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    nlohmann::json eqBands = nlohmann::json::array();
+    for (const auto& band : config.eqBands) {
+        eqBands.push_back({
+            {"frequency", band.frequency},
+            {"width", band.width},
+            {"gainDb", band.gainDb}
+        });
+    }
+
+    m_config["playback"]["audioFilter"] = {
+        {"enabled", config.enabled},
+        {"preset", static_cast<int>(config.preset)},
+        {"preampDb", config.preampDb},
+        {"limiterEnabled", config.limiterEnabled},
+        {"dynamicNormalizerEnabled", config.dynamicNormalizerEnabled},
+        {"eqBands", eqBands}
+    };
+}
+
+AudioFilterConfig Settings::audioFilterConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    AudioFilterConfig config;
+    if (!m_config.contains("playback") ||
+        !m_config["playback"].contains("audioFilter")) {
+        return config;
+    }
+
+    const auto& audio = m_config["playback"]["audioFilter"];
+    config.enabled = audio.value("enabled", false);
+    int preset = audio.value("preset", 0);
+    if (preset < 0 || preset > 3) {
+        preset = 0;
+    }
+    config.preset = static_cast<AudioFilterPreset>(preset);
+    config.preampDb = audio.value("preampDb", 0.0);
+    config.limiterEnabled = audio.value("limiterEnabled", false);
+    config.dynamicNormalizerEnabled = audio.value("dynamicNormalizerEnabled", false);
+
+    if (audio.contains("eqBands") && audio["eqBands"].is_array()) {
+        for (const auto& item : audio["eqBands"]) {
+            EQBand band;
+            band.frequency = item.value("frequency", 1000.0);
+            band.width = item.value("width", 1.0);
+            band.gainDb = item.value("gainDb", 0.0);
+            if (band.frequency > 0.0 && band.width > 0.0) {
+                config.eqBands.push_back(band);
+            }
+        }
+    }
+
+    return config;
 }
 
 // 最近文件
