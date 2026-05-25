@@ -762,6 +762,32 @@ void SDLRenderer::setNetworkState(NetworkState state) {
     m_networkState = state;
 }
 
+void SDLRenderer::setAIAnalysisState(bool active, float progress, const std::string& status) {
+    uint64_t now = SDL_GetTicks();
+    bool wasActive = m_aiAnalysisActive;
+    float safeProgress = std::isfinite(progress) ? progress : 0.0f;
+
+    m_aiAnalysisProgress = std::clamp(safeProgress, 0.0f, 1.0f);
+    m_aiAnalysisStatus = status;
+    m_aiAnalysisActive = active;
+    bool terminalStatus = status.find("分析完成") == 0 || status.find("分析失败") == 0;
+
+    if (active && !wasActive) {
+        m_aiAnalysisStartTime = now;
+        m_aiAnalysisNoticeText.clear();
+        m_aiAnalysisNoticeProgress = -1.0f;
+        m_aiAnalysisNoticeStartTime = 0;
+    } else if (!active && wasActive && !status.empty()) {
+        m_aiAnalysisNoticeText = status;
+        m_aiAnalysisNoticeProgress = m_aiAnalysisProgress;
+        m_aiAnalysisNoticeStartTime = now;
+    } else if (!active && terminalStatus && status != m_aiAnalysisNoticeText) {
+        m_aiAnalysisNoticeText = status;
+        m_aiAnalysisNoticeProgress = m_aiAnalysisProgress;
+        m_aiAnalysisNoticeStartTime = now;
+    }
+}
+
 void SDLRenderer::setEpisodeProgress(const std::vector<float>& progress) {
     m_episodeProgress = progress;
 }

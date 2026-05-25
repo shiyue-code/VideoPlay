@@ -286,27 +286,38 @@ void VideoPlayerApp::startAIAnalysis() {
         return;
     }
 
-    if (m_aiAnalyzing) {
-        logger().info("AI analysis already in progress");
-        return;
-    }
+    {
+        std::lock_guard<std::mutex> lock(m_aiStateMutex);
+        if (m_aiAnalyzing) {
+            logger().info("AI analysis already in progress");
+            if (m_renderer) {
+                m_renderer->showOSD(OSDType::Info, "AI 分析正在进行");
+            }
+            return;
+        }
 
-    m_aiAnalyzing = true;
-    m_aiProgress = 0.0f;
-    m_aiStatus = "开始分析...";
+        m_aiAnalyzing = true;
+        m_aiProgress = 0.0f;
+        m_aiStatus = "准备分析视频...";
+    }
 
     logger().info("[AI] Starting analysis for: " + m_currentFile);
 
     m_aiAnalyzer->analyze(m_currentFile,
         [this](const AIAnalysisResult& result) {
             m_aiResult = result;
-            m_aiAnalyzing = false;
-            m_aiProgress = 1.0f;
-            m_aiStatus = "分析完成";
+            {
+                std::lock_guard<std::mutex> lock(m_aiStateMutex);
+                m_aiAnalyzing = false;
+                m_aiProgress = 1.0f;
+                m_aiStatus = "分析完成，生成 " + std::to_string(result.chapters.size()) + " 个章节";
+            }
 
             if (!result.chapters.empty() && m_player) {
                 m_player->setChapters(result.chapters);
-                m_renderer->setChapters(result.chapters);
+                if (m_renderer) {
+                    m_renderer->setChapters(result.chapters);
+                }
             }
 
             if (m_searchEngine) {
@@ -317,10 +328,12 @@ void VideoPlayerApp::startAIAnalysis() {
                 std::to_string(result.chapters.size()) + " chapters");
         },
         [this](float progress, const std::string& status) {
+            std::lock_guard<std::mutex> lock(m_aiStateMutex);
             m_aiProgress = progress;
-            m_aiStatus = status;
+            m_aiStatus = status.empty() ? "正在分析视频内容..." : status;
         },
         [this](const std::string& error) {
+            std::lock_guard<std::mutex> lock(m_aiStateMutex);
             m_aiAnalyzing = false;
             m_aiStatus = "分析失败: " + error;
             logger().error("[AI] Analysis failed: " + error);
