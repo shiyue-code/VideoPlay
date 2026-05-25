@@ -44,14 +44,22 @@ private:
     std::atomic<bool> m_cancelled{false};
     mutable std::mutex m_mutex;
 
+    AIConfig snapshotConfig() const;
     std::string extractAudio(const std::string& videoPath, ProgressCallback onProgress);
     std::vector<TranscriptSegment> transcribe(const std::string& audioPath, ProgressCallback onProgress);
     AIAnalysisResult analyzeWithGPT(const std::vector<TranscriptSegment>& transcript,
                                      const std::string& videoPath,
                                      ProgressCallback onProgress);
-    AIAnalysisResult analyzeWithVideoUnderstanding(const std::string& videoPath,
-                                                    ProgressCallback onProgress);
-    std::string extractVideoForAI(const std::string& videoPath, ProgressCallback onProgress);
+    AIAnalysisResult analyzeWithMimoVideoUnderstanding(const std::string& videoPath,
+                                                       const AIConfig& config,
+                                                       ProgressCallback onProgress);
+    AIAnalysisResult analyzeWithGeminiVideoUnderstanding(const std::string& videoPath,
+                                                         const AIConfig& config,
+                                                         ProgressCallback onProgress);
+    std::string extractVideoForAI(const std::string& videoPath,
+                                  ProgressCallback onProgress,
+                                  int64_t maxOutputBytes,
+                                  int maxDurationSeconds);
     std::string fileToBase64(const std::string& filePath);
     std::string findSubtitleFile(const std::string& videoPath);
     std::vector<TranscriptSegment> loadSubtitleAsTranscript(const std::string& subtitlePath);

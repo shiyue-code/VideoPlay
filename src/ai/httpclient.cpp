@@ -35,6 +35,11 @@ void HttpClient::setApiKey(const std::string& key) {
     m_apiKey = key;
 }
 
+void HttpClient::setAuthHeader(const std::string& headerName, const std::string& valuePrefix) {
+    m_authHeaderName = headerName;
+    m_authHeaderPrefix = valuePrefix;
+}
+
 void HttpClient::setTimeout(int seconds) {
     m_timeout = seconds;
 }
@@ -42,8 +47,8 @@ void HttpClient::setTimeout(int seconds) {
 std::map<std::string, std::string> HttpClient::defaultHeaders() const {
     std::map<std::string, std::string> headers;
     headers["Accept"] = "application/json";
-    if (!m_apiKey.empty()) {
-        headers["Authorization"] = "Bearer " + m_apiKey;
+    if (!m_apiKey.empty() && !m_authHeaderName.empty()) {
+        headers[m_authHeaderName] = m_authHeaderPrefix + m_apiKey;
     }
     return headers;
 }
@@ -62,7 +67,11 @@ std::string HttpClient::buildUrl(const std::string& path) const {
     if (base.size() >= 3 && base.substr(base.size() - 3) == "/v1") {
         if (adjustedPath.substr(0, 4) == "/v1/") {
             adjustedPath = adjustedPath.substr(3);
+        } else if (adjustedPath.substr(0, 3) == "v1/") {
+            adjustedPath = adjustedPath.substr(2);
         } else if (adjustedPath == "/v1") {
+            adjustedPath = "";
+        } else if (adjustedPath == "v1") {
             adjustedPath = "";
         }
     }
@@ -237,7 +246,9 @@ HttpResponse HttpClient::get(const std::string& path,
     logger().debug("[HTTP] GET " + url);
 
     auto mergedHeaders = defaultHeaders();
-    mergedHeaders.insert(headers.begin(), headers.end());
+    for (const auto& [key, value] : headers) {
+        mergedHeaders[key] = value;
+    }
 
     return winHttpRequest(url, L"GET", "", mergedHeaders, m_timeout);
 }
@@ -249,7 +260,9 @@ HttpResponse HttpClient::post(const std::string& path, const std::string& jsonBo
 
     auto mergedHeaders = defaultHeaders();
     mergedHeaders["Content-Type"] = "application/json";
-    mergedHeaders.insert(headers.begin(), headers.end());
+    for (const auto& [key, value] : headers) {
+        mergedHeaders[key] = value;
+    }
 
     return winHttpRequest(url, L"POST", jsonBody, mergedHeaders, m_timeout);
 }
@@ -263,7 +276,9 @@ HttpResponse HttpClient::uploadFile(const std::string& path,
     logger().debug("[HTTP] UPLOAD " + url + " file=" + filePath);
 
     auto mergedHeaders = defaultHeaders();
-    mergedHeaders.insert(headers.begin(), headers.end());
+    for (const auto& [key, value] : headers) {
+        mergedHeaders[key] = value;
+    }
 
     auto parsed = parseUrl(url);
     
