@@ -1,7 +1,9 @@
-﻿#include "renderer/settingsdialog.h"
+#include "renderer/settingsdialog.h"
 #include "utils/logger.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -26,6 +28,55 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("renderer.settings");
     return *logger;
+}
+
+std::string trimCopy(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+std::string lowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string normalizeProvider(std::string provider) {
+    provider = lowerCopy(trimCopy(provider));
+    if (provider.empty() || provider == "auto") {
+        return "mimo";
+    }
+    if (provider == "google") {
+        return "gemini";
+    }
+    if (provider == "xiaomi" || provider == "xiaomimimo") {
+        return "mimo";
+    }
+    return provider;
+}
+
+AIProviderSettings defaultProviderSettings(const std::string& provider) {
+    if (provider == "gemini") {
+        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-3.5-flash"};
+    }
+    return {"https://api.xiaomimimo.com", std::string(), "mimo-v2.5"};
+}
+
+std::vector<std::string> modelOptionsForProvider(const std::string& provider) {
+    if (provider == "gemini") {
+        return {"gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"};
+    }
+    return {"mimo-v2.5", "mimo-v2-omni"};
+}
+
+bool containsOption(const std::vector<std::string>& options, const std::string& option) {
+    return std::find(options.begin(), options.end(), option) != options.end();
 }
 
 void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
@@ -70,18 +121,17 @@ void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
 }
 }
 
-
-// 颜色常量
 static constexpr uint8_t COLOR_BG[4] = {30, 30, 30, 240};
 static constexpr uint8_t COLOR_TITLE_BG[4] = {40, 40, 40, 255};
 static constexpr uint8_t COLOR_TITLE_TEXT[4] = {255, 255, 255, 255};
 static constexpr uint8_t COLOR_LABEL[4] = {180, 180, 180, 255};
-static constexpr uint8_t COLOR_BUTTON_BG[4] = {60, 60, 60, 255};
-static constexpr uint8_t COLOR_BUTTON_HOVER[4] = {80, 80, 80, 255};
+static constexpr uint8_t COLOR_INPUT_BG[4] = {50, 50, 50, 255};
+static constexpr uint8_t COLOR_INPUT_BORDER[4] = {80, 80, 80, 255};
 static constexpr uint8_t COLOR_BUTTON_PRIMARY[4] = {50, 120, 200, 255};
 static constexpr uint8_t COLOR_BUTTON_PRIMARY_HOVER[4] = {70, 140, 220, 255};
 static constexpr uint8_t COLOR_BUTTON_TEXT[4] = {255, 255, 255, 255};
 static constexpr uint8_t COLOR_CLOSE_HOVER[4] = {232, 17, 35, 255};
+static constexpr uint8_t COLOR_DROPDOWN_HOVER[4] = {65, 75, 90, 255};
 
 SettingsDialog::SettingsDialog(SDL_Window* parentWindow, TTF_Font* font)
     : m_parentWindow(parentWindow), m_font(font) {
@@ -94,26 +144,25 @@ SettingsDialog::~SettingsDialog() {
 
 void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave) {
     m_settings = currentSettings;
+    m_settings.provider = normalizeProvider(m_settings.provider);
     m_saveCallback = onSave;
     m_dragging = false;
     m_apiKeyVisible = false;
+    m_providerDropdownOpen = false;
+    m_modelDropdownOpen = false;
+    m_providerOptions = {"mimo", "gemini"};
 
-    // 创建输入框控件
+    ensureProviderSettings();
+
     m_baseUrlInput = std::make_unique<InputField>(m_font);
     m_apiKeyInput = std::make_unique<InputField>(m_font);
-    m_modelInput = std::make_unique<InputField>(m_font);
 
-    // 设置输入框属性
-    m_baseUrlInput->setValue(m_settings.baseUrl);
-    m_baseUrlInput->setPlaceholder("https://api.xiaomimimo.com/v1");
-
-    m_apiKeyInput->setValue(m_settings.apiKey);
+    m_baseUrlInput->setPlaceholder("https://api.xiaomimimo.com");
     m_apiKeyInput->setPassword(!m_apiKeyVisible);
-    m_apiKeyInput->setPlaceholder("tp-xxxxx");
+    m_apiKeyInput->setPlaceholder("MiMo 或 Gemini API Key");
 
-    m_modelInput->setValue(m_settings.model);
-    m_modelInput->setPlaceholder("mimo-v2.5");
-
+    updateModelOptions();
+    loadProviderFields(m_settings.provider);
     calculateLayout();
 
     m_window = SDL_CreateWindow("AI 设置", m_windowWidth, m_windowHeight, SDL_WINDOW_BORDERLESS);
@@ -172,8 +221,126 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     }
 }
 
+AIProviderSettings& SettingsDialog::currentProviderSettings() {
+    m_settings.provider = normalizeProvider(m_settings.provider);
+    auto it = m_settings.providers.find(m_settings.provider);
+    if (it == m_settings.providers.end()) {
+        it = m_settings.providers.emplace(m_settings.provider,
+                                          defaultProviderSettings(m_settings.provider)).first;
+    }
+    return it->second;
+}
+
+void SettingsDialog::ensureProviderSettings() {
+    for (const auto& provider : m_providerOptions) {
+        if (m_settings.providers.find(provider) == m_settings.providers.end()) {
+            m_settings.providers[provider] = defaultProviderSettings(provider);
+        }
+    }
+    currentProviderSettings();
+}
+
+void SettingsDialog::saveCurrentProviderFields() {
+    AIProviderSettings& providerSettings = currentProviderSettings();
+    if (m_baseUrlInput) {
+        providerSettings.baseUrl = m_baseUrlInput->getValue();
+    }
+    if (m_apiKeyInput) {
+        providerSettings.apiKey = m_apiKeyInput->getValue();
+    }
+    if (providerSettings.model.empty()) {
+        updateModelOptions();
+        if (!m_modelOptions.empty()) {
+            providerSettings.model = m_modelOptions.front();
+        }
+    }
+}
+
+void SettingsDialog::loadProviderFields(const std::string& provider) {
+    m_settings.provider = normalizeProvider(provider);
+    AIProviderSettings& providerSettings = currentProviderSettings();
+    updateModelOptions();
+    if (providerSettings.model.empty() && !m_modelOptions.empty()) {
+        providerSettings.model = m_modelOptions.front();
+    }
+    if (m_baseUrlInput) {
+        m_baseUrlInput->setValue(providerSettings.baseUrl);
+        m_baseUrlInput->setActive(false);
+    }
+    if (m_apiKeyInput) {
+        m_apiKeyInput->setValue(providerSettings.apiKey);
+        m_apiKeyInput->setActive(false);
+    }
+}
+
+void SettingsDialog::updateModelOptions() {
+    m_modelOptions = modelOptionsForProvider(m_settings.provider);
+    std::string currentModel = currentProviderSettings().model;
+    if (!currentModel.empty() && !containsOption(m_modelOptions, currentModel)) {
+        m_modelOptions.insert(m_modelOptions.begin(), currentModel);
+    }
+}
+
+bool SettingsDialog::handleDropdownClick(int mx, int my) {
+    auto selectProvider = [&](const std::string& provider) {
+        saveCurrentProviderFields();
+        m_settings.provider = provider;
+        m_providerDropdownOpen = false;
+        m_modelDropdownOpen = false;
+        loadProviderFields(provider);
+    };
+
+    if (isPointInRect(mx, my, m_providerDropdownRect)) {
+        m_providerDropdownOpen = !m_providerDropdownOpen;
+        m_modelDropdownOpen = false;
+        if (m_baseUrlInput) m_baseUrlInput->setActive(false);
+        if (m_apiKeyInput) m_apiKeyInput->setActive(false);
+        return true;
+    }
+
+    if (m_providerDropdownOpen) {
+        for (size_t i = 0; i < m_providerOptions.size(); ++i) {
+            SDL_FRect optionRect = m_providerDropdownRect;
+            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            if (isPointInRect(mx, my, optionRect)) {
+                selectProvider(m_providerOptions[i]);
+                return true;
+            }
+        }
+        m_providerDropdownOpen = false;
+    }
+
+    if (isPointInRect(mx, my, m_modelDropdownRect)) {
+        updateModelOptions();
+        m_modelDropdownOpen = !m_modelDropdownOpen;
+        m_providerDropdownOpen = false;
+        if (m_baseUrlInput) m_baseUrlInput->setActive(false);
+        if (m_apiKeyInput) m_apiKeyInput->setActive(false);
+        return true;
+    }
+
+    if (m_modelDropdownOpen) {
+        for (size_t i = 0; i < m_modelOptions.size(); ++i) {
+            SDL_FRect optionRect = m_modelDropdownRect;
+            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            if (isPointInRect(mx, my, optionRect)) {
+                currentProviderSettings().model = m_modelOptions[i];
+                m_modelDropdownOpen = false;
+                return true;
+            }
+        }
+        m_modelDropdownOpen = false;
+    }
+
+    return false;
+}
+
 void SettingsDialog::calculateLayout() {
     int y = TITLE_HEIGHT + PADDING;
+
+    m_providerDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
+                              static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
+    y += INPUT_HEIGHT + PADDING;
 
     m_baseUrlInput->setRect({PADDING + 120.0f, static_cast<float>(y),
                             static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
@@ -191,9 +358,8 @@ void SettingsDialog::calculateLayout() {
     };
     y += INPUT_HEIGHT + PADDING;
 
-    m_modelInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                           static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
-    y += INPUT_HEIGHT + PADDING * 2;
+    m_modelDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
+                           static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
 
     int btnWidth = 80;
     int btnHeight = 30;
@@ -210,12 +376,10 @@ void SettingsDialog::render() {
     SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 0);
     SDL_RenderClear(m_renderer);
 
-    // 主背景
     SDL_FRect bgRect = {0, 0, static_cast<float>(m_windowWidth), static_cast<float>(m_windowHeight)};
     SDL_SetRenderDrawColor(m_renderer, COLOR_BG[0], COLOR_BG[1], COLOR_BG[2], COLOR_BG[3]);
     SDL_RenderFillRect(m_renderer, &bgRect);
 
-    // 标题栏
     SDL_FRect titleBar = {0, 0, static_cast<float>(m_windowWidth), static_cast<float>(TITLE_HEIGHT)};
     SDL_SetRenderDrawColor(m_renderer, COLOR_TITLE_BG[0], COLOR_TITLE_BG[1], COLOR_TITLE_BG[2], COLOR_TITLE_BG[3]);
     SDL_RenderFillRect(m_renderer, &titleBar);
@@ -223,7 +387,6 @@ void SettingsDialog::render() {
     int titleTextY = (TITLE_HEIGHT - getFontHeight()) / 2;
     drawText("AI 设置", 15, titleTextY, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
 
-    // 关闭按钮
     constexpr int closeWidth = 46;
     constexpr int closeIconSize = 10;
     int closeX = m_windowWidth - closeWidth;
@@ -234,39 +397,48 @@ void SettingsDialog::render() {
     bool closeHovered = (mx >= closeX && mx <= closeX + closeWidth && my >= closeY && my <= closeY + TITLE_HEIGHT);
 
     if (closeHovered) {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_CLOSE_HOVER[0], COLOR_CLOSE_HOVER[1], COLOR_CLOSE_HOVER[2], COLOR_CLOSE_HOVER[3]);
+        SDL_SetRenderDrawColor(m_renderer, COLOR_CLOSE_HOVER[0], COLOR_CLOSE_HOVER[1],
+                               COLOR_CLOSE_HOVER[2], COLOR_CLOSE_HOVER[3]);
         SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
                               static_cast<float>(closeWidth), static_cast<float>(TITLE_HEIGHT)};
         SDL_RenderFillRect(m_renderer, &closeBtn);
     }
 
-    SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
+    SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1],
+                           COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
     int iconX = closeX + (closeWidth - closeIconSize) / 2;
     int iconY = (TITLE_HEIGHT - closeIconSize) / 2;
     SDL_RenderLine(m_renderer, iconX, iconY, iconX + closeIconSize, iconY + closeIconSize);
     SDL_RenderLine(m_renderer, iconX + closeIconSize, iconY, iconX, iconY + closeIconSize);
 
-    // 标签和输入框
-    drawText("API 地址:", PADDING, TITLE_HEIGHT + PADDING + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
-    m_baseUrlInput->render(m_renderer, mx, my);
+    int formY = TITLE_HEIGHT + PADDING;
+    drawText("服务商:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    formY += INPUT_HEIGHT + PADDING;
 
-    drawText("API Key:", PADDING, TITLE_HEIGHT + PADDING * 2 + INPUT_HEIGHT + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    drawText("API 地址:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    m_baseUrlInput->render(m_renderer, mx, my);
+    formY += INPUT_HEIGHT + PADDING;
+
+    drawText("API Key:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
     m_apiKeyInput->render(m_renderer, mx, my);
     drawButton(m_apiKeyVisible ? "隐藏" : "显示", m_apiKeyToggleRect, isPointInRect(mx, my, m_apiKeyToggleRect));
+    formY += INPUT_HEIGHT + PADDING;
 
-    drawText("模型:", PADDING, TITLE_HEIGHT + PADDING * 3 + INPUT_HEIGHT * 2 + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
-    m_modelInput->render(m_renderer, mx, my);
+    drawText("模型:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
 
-    // 模型提示
-    drawText("视频理解: mimo-v2.5 / mimo-v2-omni", PADDING + 120, TITLE_HEIGHT + PADDING * 4 + INPUT_HEIGHT * 3 + 4,
-             COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
+    drawText("切换服务商会保留各自的地址、Key 和模型", PADDING + 120,
+             formY + INPUT_HEIGHT + 4, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
 
-    // 按钮
     bool saveHovered = isPointInRect(mx, my, m_saveBtnRect);
     bool cancelHovered = isPointInRect(mx, my, m_cancelBtnRect);
-
     drawButton("保存", m_saveBtnRect, saveHovered);
     drawButton("取消", m_cancelBtnRect, cancelHovered);
+
+    updateModelOptions();
+    drawDropdown(m_providerDropdownRect, m_settings.provider, m_providerDropdownOpen,
+                 m_providerOptions, mx, my);
+    drawDropdown(m_modelDropdownRect, currentProviderSettings().model, m_modelDropdownOpen,
+                 m_modelOptions, mx, my);
 
     SDL_RenderPresent(m_renderer);
 }
@@ -284,7 +456,6 @@ void SettingsDialog::handleEvents() {
                     int mx = static_cast<int>(event.button.x);
                     int my = static_cast<int>(event.button.y);
 
-                    // 关闭按钮
                     constexpr int closeWidth = 46;
                     int closeX = m_windowWidth - closeWidth;
                     if (mx >= closeX && mx <= closeX + closeWidth && my >= 0 && my <= TITLE_HEIGHT) {
@@ -292,13 +463,8 @@ void SettingsDialog::handleEvents() {
                         break;
                     }
 
-                    // 保存按钮
                     if (isPointInRect(mx, my, m_saveBtnRect)) {
-                        // 更新设置
-                        m_settings.baseUrl = m_baseUrlInput->getValue();
-                        m_settings.apiKey = m_apiKeyInput->getValue();
-                        m_settings.model = m_modelInput->getValue();
-
+                        saveCurrentProviderFields();
                         if (m_saveCallback) {
                             m_saveCallback(m_settings);
                         }
@@ -306,25 +472,30 @@ void SettingsDialog::handleEvents() {
                         break;
                     }
 
-                    // 取消按钮
                     if (isPointInRect(mx, my, m_cancelBtnRect)) {
                         m_running = false;
                         break;
                     }
 
+                    if (handleDropdownClick(mx, my)) {
+                        break;
+                    }
+
                     if (isPointInRect(mx, my, m_apiKeyToggleRect)) {
+                        m_providerDropdownOpen = false;
+                        m_modelDropdownOpen = false;
                         m_apiKeyVisible = !m_apiKeyVisible;
                         m_apiKeyInput->setPassword(!m_apiKeyVisible);
                         m_apiKeyInput->setActive(true);
                         break;
                     }
 
-                    // 输入框点击（由 InputField 自己处理）
+                    m_providerDropdownOpen = false;
+                    m_modelDropdownOpen = false;
+
                     m_baseUrlInput->handleEvent(event);
                     m_apiKeyInput->handleEvent(event);
-                    m_modelInput->handleEvent(event);
 
-                    // 标题栏拖动
                     if (my < TITLE_HEIGHT) {
 #ifdef _WIN32
                         SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
@@ -347,7 +518,6 @@ void SettingsDialog::handleEvents() {
                 m_dragging = false;
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_modelInput->handleEvent(event);
                 break;
 
             case SDL_EVENT_MOUSE_MOTION:
@@ -362,21 +532,21 @@ void SettingsDialog::handleEvents() {
                 }
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_modelInput->handleEvent(event);
                 break;
 
             case SDL_EVENT_KEY_DOWN: {
                 if (event.key.key == SDLK_ESCAPE) {
-                    m_running = false;
+                    if (m_providerDropdownOpen || m_modelDropdownOpen) {
+                        m_providerDropdownOpen = false;
+                        m_modelDropdownOpen = false;
+                    } else {
+                        m_running = false;
+                    }
                     break;
                 }
 
                 if (event.key.key == SDLK_RETURN) {
-                    // 更新设置
-                    m_settings.baseUrl = m_baseUrlInput->getValue();
-                    m_settings.apiKey = m_apiKeyInput->getValue();
-                    m_settings.model = m_modelInput->getValue();
-
+                    saveCurrentProviderFields();
                     if (m_saveCallback) {
                         m_saveCallback(m_settings);
                     }
@@ -384,23 +554,69 @@ void SettingsDialog::handleEvents() {
                     break;
                 }
 
-                // 传递给输入框
                 if (m_baseUrlInput->handleEvent(event)) break;
                 if (m_apiKeyInput->handleEvent(event)) break;
-                if (m_modelInput->handleEvent(event)) break;
                 break;
             }
 
             case SDL_EVENT_TEXT_INPUT:
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                m_modelInput->handleEvent(event);
                 break;
         }
     }
 }
 
-void SettingsDialog::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void SettingsDialog::drawDropdown(const SDL_FRect& rect,
+                                  const std::string& value,
+                                  bool open,
+                                  const std::vector<std::string>& options,
+                                  float mouseX,
+                                  float mouseY) {
+    fillRoundRect(m_renderer, rect, 7,
+                  COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
+                  COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
+    SDL_FRect innerRect = {rect.x + 1.0f, rect.y + 1.0f,
+                           std::max(0.0f, rect.w - 2.0f),
+                           std::max(0.0f, rect.h - 2.0f)};
+    fillRoundRect(m_renderer, innerRect, 6,
+                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
+
+    int textY = static_cast<int>(rect.y) + (static_cast<int>(rect.h) - getFontHeight()) / 2;
+    drawText(value, static_cast<int>(rect.x) + 8, textY,
+             COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
+
+    int arrowX = static_cast<int>(rect.x + rect.w - 20.0f);
+    int arrowY = static_cast<int>(rect.y + rect.h / 2.0f) - 2;
+    SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1],
+                           COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
+    SDL_RenderLine(m_renderer, arrowX, arrowY, arrowX + 5, arrowY + 5);
+    SDL_RenderLine(m_renderer, arrowX + 10, arrowY, arrowX + 5, arrowY + 5);
+
+    if (!open) {
+        return;
+    }
+
+    for (size_t i = 0; i < options.size(); ++i) {
+        SDL_FRect optionRect = rect;
+        optionRect.y += rect.h * static_cast<float>(i + 1);
+        bool hovered = isPointInRect(mouseX, mouseY, optionRect);
+        const uint8_t* bg = hovered ? COLOR_DROPDOWN_HOVER : COLOR_INPUT_BG;
+        fillRoundRect(m_renderer, optionRect, 5, bg[0], bg[1], bg[2], bg[3]);
+
+        SDL_SetRenderDrawColor(m_renderer, COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
+                               COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
+        SDL_RenderRect(m_renderer, &optionRect);
+
+        int optionTextY = static_cast<int>(optionRect.y) +
+                          (static_cast<int>(optionRect.h) - getFontHeight()) / 2;
+        drawText(options[i], static_cast<int>(optionRect.x) + 8, optionTextY,
+                 COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
+    }
+}
+
+void SettingsDialog::drawText(const std::string& text, int x, int y,
+                              uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (!m_renderer || text.empty() || !m_font) return;
 
     SDL_Color color = {r, g, b, a};

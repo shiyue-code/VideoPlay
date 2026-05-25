@@ -2,18 +2,27 @@
 #define SETTINGSDIALOG_H
 
 #include "renderer/inputfield.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
-#include <string>
+
 #include <functional>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace VideoPlay {
 
-struct AISettings {
+struct AIProviderSettings {
     std::string baseUrl;
     std::string apiKey;
     std::string model;
+};
+
+struct AISettings {
+    std::string provider;
+    std::unordered_map<std::string, AIProviderSettings> providers;
 };
 
 class SettingsDialog {
@@ -41,25 +50,47 @@ private:
     int m_dragOffsetY = 0;
 
     int m_windowWidth = 500;
-    int m_windowHeight = 320;
+    int m_windowHeight = 370;
     static constexpr int TITLE_HEIGHT = 32;
     static constexpr int INPUT_HEIGHT = 30;
     static constexpr int PADDING = 15;
 
-    // 输入框控件
+    std::vector<std::string> m_providerOptions;
+    std::vector<std::string> m_modelOptions;
+    bool m_providerDropdownOpen = false;
+    bool m_modelDropdownOpen = false;
+    SDL_FRect m_providerDropdownRect;
+    SDL_FRect m_modelDropdownRect;
+
     std::unique_ptr<InputField> m_baseUrlInput;
     std::unique_ptr<InputField> m_apiKeyInput;
-    std::unique_ptr<InputField> m_modelInput;
 
-    // 按钮区域
     SDL_FRect m_saveBtnRect;
     SDL_FRect m_cancelBtnRect;
     SDL_FRect m_apiKeyToggleRect;
 
+    AIProviderSettings& currentProviderSettings();
+    void ensureProviderSettings();
+    void saveCurrentProviderFields();
+    void loadProviderFields(const std::string& provider);
+    void updateModelOptions();
+    bool handleDropdownClick(int mx, int my);
+    void drawDropdown(const SDL_FRect& rect,
+                      const std::string& value,
+                      bool open,
+                      const std::vector<std::string>& options,
+                      float mouseX,
+                      float mouseY);
     void calculateLayout();
     void render();
     void handleEvents();
-    void drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
+    void drawText(const std::string& text,
+                  int x,
+                  int y,
+                  uint8_t r,
+                  uint8_t g,
+                  uint8_t b,
+                  uint8_t a = 255);
     void drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered);
     int getTextWidth(const std::string& text);
     int getFontHeight();

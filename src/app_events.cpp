@@ -5,6 +5,8 @@
 #include "utils/logger.h"
 #include "subtitles/subtitleparser.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 
 namespace VideoPlay {
@@ -13,6 +15,23 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("app.events");
     return *logger;
+}
+
+std::string trimCopy(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+std::string lowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
 }
 }
 
@@ -453,48 +472,73 @@ void VideoPlayerApp::showAISettings() {
     AIConfig currentConfig = Settings::instance().aiConfig();
     
     AISettings settings;
-    settings.baseUrl = currentConfig.baseUrl;
-    settings.apiKey = currentConfig.apiKey;
-    settings.model = currentConfig.model;
+    settings.provider = currentConfig.provider;
+    for (const auto& entry : currentConfig.providers) {
+        settings.providers[entry.first] = {
+            entry.second.baseUrl,
+            entry.second.apiKey,
+            entry.second.model
+        };
+    }
+    if (settings.providers.find(settings.provider) == settings.providers.end()) {
+        settings.providers[settings.provider] = {
+            currentConfig.baseUrl,
+            currentConfig.apiKey,
+            currentConfig.model
+        };
+    }
 
     SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont());
     dialog.show(settings, [this](const AISettings& newSettings) {
-        AIConfig config;
-        config.baseUrl = newSettings.baseUrl;
-        config.apiKey = newSettings.apiKey;
-        config.model = newSettings.model;
-        
-        // 清理 URL - 移除重复的协议和路径
-        std::string& url = config.baseUrl;
-        
-        // 查找第一个 "https://" 的位置
-        size_t firstHttps = url.find("https://");
-        if (firstHttps != std::string::npos) {
-            // 查找第二个 "https://" 
-            size_t secondHttps = url.find("https://", firstHttps + 1);
-            if (secondHttps != std::string::npos) {
-                // 只保留第一个 URL
-                url = url.substr(0, secondHttps);
+        AIConfig config = Settings::instance().aiConfig();
+        config.provider = lowerCopy(trimCopy(newSettings.provider));
+        if (config.provider.empty() || config.provider == "auto") {
+            config.provider = "mimo";
+        } else if (config.provider == "google") {
+            config.provider = "gemini";
+        } else if (config.provider == "xiaomi" || config.provider == "xiaomimimo") {
+            config.provider = "mimo";
+        }
+
+        config.providers.clear();
+        for (const auto& entry : newSettings.providers) {
+            std::string providerId = lowerCopy(trimCopy(entry.first));
+            if (providerId.empty() || providerId == "auto") {
+                providerId = "mimo";
+            } else if (providerId == "google") {
+                providerId = "gemini";
+            } else if (providerId == "xiaomi" || providerId == "xiaomimimo") {
+                providerId = "mimo";
             }
+
+            config.providers[providerId] = {
+                trimCopy(entry.second.baseUrl),
+                entry.second.apiKey,
+                trimCopy(entry.second.model)
+            };
         }
-        
-        // 移除末尾的斜杠
-        while (!url.empty() && url.back() == '/') {
-            url.pop_back();
-        }
-        
-        // 移除末尾的 /v1（如果存在）
-        if (url.size() >= 3 && url.substr(url.size() - 3) == "/v1") {
-            url = url.substr(0, url.size() - 3);
+
+        auto activeIt = config.providers.find(config.provider);
+        if (activeIt != config.providers.end()) {
+            config.baseUrl = activeIt->second.baseUrl;
+            config.apiKey = activeIt->second.apiKey;
+            config.model = activeIt->second.model;
+        } else {
+            config.baseUrl.clear();
+            config.apiKey.clear();
+            config.model.clear();
         }
         
         Settings::instance().setAIConfig(config);
+        config = Settings::instance().aiConfig();
         
         if (m_aiAnalyzer) {
             m_aiAnalyzer->configure(config);
         }
         
-        logger().info("[AI] Settings saved, baseUrl: " + config.baseUrl);
+        logger().info("[AI] Settings saved, provider: " + config.provider +
+                      ", baseUrl: " + config.baseUrl +
+                      ", model: " + config.model);
     });
 }
 
