@@ -614,6 +614,10 @@ void VideoPlayerApp::openFile(const std::string& path) {
     // 加载文件
     if (m_player->loadFile(path)) {
         m_currentFile = path;
+        m_aiResult = AIAnalysisResult();
+        if (m_searchEngine) {
+            m_searchEngine->clearIndex();
+        }
 
         // 添加到最近文件
         Settings::instance().addRecentFile(path);

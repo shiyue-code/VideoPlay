@@ -112,7 +112,7 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     m_apiKeyInput->setPlaceholder("tp-xxxxx");
 
     m_modelInput->setValue(m_settings.model);
-    m_modelInput->setPlaceholder("mimo-v2-pro");
+    m_modelInput->setPlaceholder("mimo-v2.5");
 
     calculateLayout();
 
@@ -258,7 +258,7 @@ void SettingsDialog::render() {
     m_modelInput->render(m_renderer, mx, my);
 
     // 模型提示
-    drawText("mimo-v2-pro / mimo-v2.5-pro", PADDING + 120, TITLE_HEIGHT + PADDING * 4 + INPUT_HEIGHT * 3 + 4, 
+    drawText("视频理解: mimo-v2.5 / mimo-v2-omni", PADDING + 120, TITLE_HEIGHT + PADDING * 4 + INPUT_HEIGHT * 3 + 4,
              COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
 
     // 按钮

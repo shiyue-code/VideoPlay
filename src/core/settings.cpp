@@ -532,7 +532,7 @@ AIConfig Settings::aiConfig() const {
         const auto& ai = m_config["ai"];
         config.baseUrl = ai.value("baseUrl", "https://api.xiaomimimo.com/v1");
         config.apiKey = ai.value("apiKey", std::string());
-        config.model = ai.value("model", "mimo-v2-pro");
+        config.model = ai.value("model", "mimo-v2.5");
         config.cacheDir = ai.value("cacheDir", std::string());
         config.autoAnalyze = ai.value("autoAnalyze", false);
     }

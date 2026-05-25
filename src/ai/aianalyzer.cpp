@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <chrono>
 #include <cstring>
@@ -24,6 +25,167 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("ai");
     return *logger;
+}
+
+std::string trim(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+int64_t parseTimeStringMs(const std::string& rawValue) {
+    std::string value = trim(rawValue);
+    if (value.empty()) {
+        return -1;
+    }
+
+    size_t colonCount = std::count(value.begin(), value.end(), ':');
+    if (colonCount > 0) {
+        std::replace(value.begin(), value.end(), ',', '.');
+
+        std::vector<double> parts;
+        std::stringstream stream(value);
+        std::string part;
+        while (std::getline(stream, part, ':')) {
+            try {
+                parts.push_back(std::stod(part));
+            } catch (...) {
+                return -1;
+            }
+        }
+
+        double seconds = 0.0;
+        if (parts.size() == 3) {
+            seconds = parts[0] * 3600.0 + parts[1] * 60.0 + parts[2];
+        } else if (parts.size() == 2) {
+            seconds = parts[0] * 60.0 + parts[1];
+        } else if (parts.size() == 1) {
+            seconds = parts[0];
+        } else {
+            return -1;
+        }
+        return static_cast<int64_t>(seconds * 1000.0);
+    }
+
+    try {
+        double numericValue = std::stod(value);
+        if (numericValue >= 0.0 && numericValue < 1000.0) {
+            return static_cast<int64_t>(numericValue * 1000.0);
+        }
+        return static_cast<int64_t>(numericValue);
+    } catch (...) {
+        return -1;
+    }
+}
+
+int64_t parseTimeValueMs(const nlohmann::json& value) {
+    if (value.is_number()) {
+        double numericValue = value.get<double>();
+        if (numericValue >= 0.0 && numericValue < 1000.0) {
+            return static_cast<int64_t>(numericValue * 1000.0);
+        }
+        return static_cast<int64_t>(numericValue);
+    }
+
+    if (value.is_string()) {
+        return parseTimeStringMs(value.get<std::string>());
+    }
+
+    return -1;
+}
+
+int64_t chapterStartTimeMs(const nlohmann::json& chapterJson) {
+    static const char* keys[] = {
+        "startTime", "start_time", "start", "time", "timestamp", "begin"
+    };
+
+    for (const char* key : keys) {
+        if (chapterJson.contains(key)) {
+            int64_t timeMs = parseTimeValueMs(chapterJson[key]);
+            if (timeMs >= 0) {
+                return timeMs;
+            }
+        }
+    }
+
+    return -1;
+}
+
+std::string chapterTitle(const nlohmann::json& chapterJson, size_t index) {
+    static const char* keys[] = {"title", "name", "heading", "summary"};
+
+    for (const char* key : keys) {
+        if (chapterJson.contains(key) && chapterJson[key].is_string()) {
+            std::string title = trim(chapterJson[key].get<std::string>());
+            if (!title.empty()) {
+                return title;
+            }
+        }
+    }
+
+    return "章节 " + std::to_string(index + 1);
+}
+
+std::vector<ChapterInfo> parseChapters(const nlohmann::json& aiResult,
+                                       int64_t fallbackEndTimeMs) {
+    std::vector<ChapterInfo> chapters;
+    if (!aiResult.contains("chapters") || !aiResult["chapters"].is_array()) {
+        return chapters;
+    }
+
+    for (const auto& ch : aiResult["chapters"]) {
+        if (!ch.is_object()) {
+            continue;
+        }
+
+        int64_t startTime = chapterStartTimeMs(ch);
+        if (startTime < 0) {
+            continue;
+        }
+
+        ChapterInfo chapter;
+        chapter.startTime = startTime;
+        chapter.title = chapterTitle(ch, chapters.size());
+        chapters.push_back(chapter);
+    }
+
+    std::sort(chapters.begin(), chapters.end(), [](const ChapterInfo& lhs,
+                                                   const ChapterInfo& rhs) {
+        return lhs.startTime < rhs.startTime;
+    });
+
+    chapters.erase(std::unique(chapters.begin(), chapters.end(),
+        [](const ChapterInfo& lhs, const ChapterInfo& rhs) {
+            return lhs.startTime == rhs.startTime;
+        }), chapters.end());
+
+    for (size_t i = 0; i < chapters.size(); ++i) {
+        if (i + 1 < chapters.size()) {
+            chapters[i].endTime = chapters[i + 1].startTime;
+        } else if (fallbackEndTimeMs > chapters[i].startTime) {
+            chapters[i].endTime = fallbackEndTimeMs;
+        } else {
+            chapters[i].endTime = chapters[i].startTime + 10000;
+        }
+    }
+
+    return chapters;
+}
+
+bool hasUsableAnalysis(const AIAnalysisResult& result) {
+    return !result.chapters.empty();
+}
+
+std::string videoUnderstandingModel(std::string model) {
+    model = trim(model);
+    if (model.empty() || model == "mimo-v2-pro" || model == "mimo-v2.5-pro") {
+        return "mimo-v2.5";
+    }
+    return model;
 }
 }
 
@@ -123,7 +285,6 @@ AIAnalysisResult AIAnalyzer::loadCache(const std::string& videoPath) const {
         result.summary = j.value("summary", std::string());
         result.language = j.value("language", std::string());
         result.analyzedAt = j.value("analyzedAt", int64_t(0));
-        result.valid = true;
 
         if (j.contains("chapters") && j["chapters"].is_array()) {
             for (const auto& ch : j["chapters"]) {
@@ -146,7 +307,13 @@ AIAnalysisResult AIAnalyzer::loadCache(const std::string& videoPath) const {
             }
         }
 
-        logger().info("[AI] Loaded cache for: " + videoPath);
+        result.valid = hasUsableAnalysis(result);
+        if (result.valid) {
+            logger().info("[AI] Loaded cache for: " + videoPath +
+                " (" + std::to_string(result.chapters.size()) + " chapters)");
+        } else {
+            logger().warning("[AI] Ignoring incomplete cache without chapters: " + videoPath);
+        }
     } catch (const std::exception& e) {
         logger().error("[AI] Failed to load cache: " + std::string(e.what()));
         result.valid = false;
@@ -156,6 +323,11 @@ AIAnalysisResult AIAnalyzer::loadCache(const std::string& videoPath) const {
 }
 
 void AIAnalyzer::saveCache(const std::string& videoPath, const AIAnalysisResult& result) {
+    if (!hasUsableAnalysis(result)) {
+        logger().warning("[AI] Skip saving incomplete analysis without chapters: " + videoPath);
+        return;
+    }
+
     std::string path = getCachePath(videoPath);
 
     try {
@@ -521,26 +693,20 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
         result.summary = aiResult.value("summary", std::string());
         result.language = aiResult.value("language", std::string());
 
-        if (aiResult.contains("chapters") && aiResult["chapters"].is_array()) {
-            for (size_t i = 0; i < aiResult["chapters"].size(); i++) {
-                const auto& ch = aiResult["chapters"][i];
-                ChapterInfo chapter;
-                chapter.startTime = ch.value("startTime", int64_t(0));
-                if (i + 1 < aiResult["chapters"].size()) {
-                    chapter.endTime = aiResult["chapters"][i + 1].value("startTime", int64_t(0));
-                } else {
-                    chapter.endTime = transcript.back().endTime;
-                }
-                chapter.title = ch.value("title", "章节 " + std::to_string(i + 1));
-                result.chapters.push_back(chapter);
-            }
-        }
+        int64_t transcriptEndTime = transcript.empty() ? 0 : transcript.back().endTime;
+        result.chapters = parseChapters(aiResult, transcriptEndTime);
 
         result.transcript = transcript;
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
-        result.valid = true;
+        result.valid = hasUsableAnalysis(result);
 
-        logger().info("[AI] GPT analysis complete: " + std::to_string(result.chapters.size()) + " chapters");
+        if (result.valid) {
+            logger().info("[AI] GPT analysis complete: " +
+                std::to_string(result.chapters.size()) + " chapters");
+        } else {
+            logger().warning("[AI] GPT analysis returned no usable chapters. Content: " +
+                content.substr(0, 500));
+        }
     } catch (const std::exception& e) {
         logger().error("[AI] Failed to parse GPT response: " + std::string(e.what()));
     }
@@ -593,7 +759,10 @@ void AIAnalyzer::analyze(const std::string& videoPath,
                 return;
             }
             if (!result.valid) {
-                if (onError) onError("MiMo 视频分析失败，请检查:\n1. API Key 和地址是否正确\n2. 视频是否小于 90 秒\n3. 模型名称是否正确");
+                if (onError) onError("MiMo 视频分析没有生成有效章节，请检查:\n"
+                                      "1. 当前模型是否支持 video_url/base64 视频输入\n"
+                                      "2. API Key、地址和模型名称是否正确\n"
+                                      "3. 视频是否小于 90 秒并成功转码");
                 return;
             }
 
@@ -643,7 +812,7 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
     std::string baseUrl;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        model = m_config.model;
+        model = videoUnderstandingModel(m_config.model);
         apiKey = m_config.apiKey;
         baseUrl = m_config.baseUrl;
     }
@@ -654,7 +823,14 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
     nlohmann::json requestBody = {
         {"model", model},
         {"messages", {
+            {{"role", "system"}, {"content", "你是 MiMo 视频理解助手。请基于用户提供的视频内容进行分析。"}},
             {{"role", "user"}, {"content", {
+                {
+                    {"type", "video_url"},
+                    {"video_url", {{"url", videoUrl}}},
+                    {"fps", 2},
+                    {"media_resolution", "default"}
+                },
                 {{"type", "text"}, {"text", R"(请分析这个视频，完成以下任务：
 1. 生成简洁的中文摘要（100-200字）
 2. 根据内容主题变化自动划分章节（每个章节至少10秒，最多10个章节）
@@ -667,10 +843,9 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
     {"title": "章节标题", "startTime": 开始时间毫秒}
   ]
 })"}},
-                {{"type", "video_url"}, {"video_url", {{"url", videoUrl}}}}
             }}}
         }},
-        {"max_tokens", 4096}
+        {"max_completion_tokens", 4096}
     };
 
     logger().info("[AI] Calling MiMo video understanding: " + baseUrl + "/v1/chat/completions");
@@ -704,26 +879,18 @@ AIAnalysisResult AIAnalyzer::analyzeWithVideoUnderstanding(const std::string& vi
         result.summary = aiResult.value("summary", std::string());
         result.language = aiResult.value("language", std::string());
 
-        if (aiResult.contains("chapters") && aiResult["chapters"].is_array()) {
-            for (size_t i = 0; i < aiResult["chapters"].size(); i++) {
-                const auto& ch = aiResult["chapters"][i];
-                ChapterInfo chapter;
-                chapter.startTime = ch.value("startTime", int64_t(0));
-                if (i + 1 < aiResult["chapters"].size()) {
-                    chapter.endTime = aiResult["chapters"][i + 1].value("startTime", int64_t(0));
-                } else {
-                    chapter.endTime = chapter.startTime + 10000; // 默认 10 秒
-                }
-                chapter.title = ch.value("title", "章节 " + std::to_string(i + 1));
-                result.chapters.push_back(chapter);
-            }
-        }
+        result.chapters = parseChapters(aiResult, 0);
 
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
-        result.valid = true;
+        result.valid = hasUsableAnalysis(result);
 
-        logger().info("[AI] MiMo video analysis complete: " + 
-            std::to_string(result.chapters.size()) + " chapters");
+        if (result.valid) {
+            logger().info("[AI] MiMo video analysis complete: " +
+                std::to_string(result.chapters.size()) + " chapters");
+        } else {
+            logger().warning("[AI] MiMo video analysis returned no usable chapters. Content: " +
+                content.substr(0, 500));
+        }
     } catch (const std::exception& e) {
         logger().error("[AI] Failed to parse MiMo response: " + std::string(e.what()));
         logger().error("[AI] Response body: " + response.body.substr(0, 500));
