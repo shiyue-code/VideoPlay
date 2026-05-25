@@ -754,6 +754,10 @@ void SDLRenderer::showOSD(OSDType type, const std::string& text, float progress)
     m_osdStartTime = SDL_GetTicks();
 }
 
+void SDLRenderer::setHardwareDecodingEnabled(bool enabled) {
+    m_hardwareDecodingEnabled = enabled;
+}
+
 void SDLRenderer::setAudioFilterPreset(AudioFilterPreset preset) {
     m_audioFilterPreset = preset;
 }

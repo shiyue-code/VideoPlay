@@ -72,6 +72,7 @@ void Settings::load() {
                 {"loopMode", 2},
                 {"aspectMode", 0},
                 {"alwaysOnTop", false},
+                {"hardwareDecodingEnabled", true},
                 {"audioFilter", {
                     {"enabled", false},
                     {"preset", 0},
@@ -142,6 +143,9 @@ void Settings::load() {
             {"dynamicNormalizerEnabled", false},
             {"eqBands", nlohmann::json::array()}
         };
+    }
+    if (!m_config["playback"].contains("hardwareDecodingEnabled")) {
+        m_config["playback"]["hardwareDecodingEnabled"] = true;
     }
 }
 
@@ -271,6 +275,19 @@ bool Settings::alwaysOnTop() const {
         return m_config["playback"].value("alwaysOnTop", false);
     }
     return false;
+}
+
+void Settings::setHardwareDecodingEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["hardwareDecodingEnabled"] = enabled;
+}
+
+bool Settings::hardwareDecodingEnabled() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("hardwareDecodingEnabled", true);
+    }
+    return true;
 }
 
 void Settings::setAudioFilterConfig(const AudioFilterConfig& config) {

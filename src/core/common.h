@@ -74,6 +74,7 @@ struct MediaInfo {
     int height = 0;
     double fps = 0.0;
     int64_t videoBitrate = 0;
+    bool hardwareDecoderEnabled = true;
     bool hardwareDecoder = false;
     std::string hardwareDevice;
 

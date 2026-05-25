@@ -151,6 +151,23 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
+        case 97: {
+            bool enabled = !Settings::instance().hardwareDecodingEnabled();
+            Settings::instance().setHardwareDecodingEnabled(enabled);
+            Settings::instance().save();
+            if (m_player) {
+                m_player->setHardwareDecodingEnabled(enabled);
+            }
+            if (m_renderer) {
+                m_renderer->setHardwareDecodingEnabled(enabled);
+                std::string text = enabled ? "硬件解码 已开启" : "硬件解码 已关闭";
+                if (!m_currentFile.empty()) {
+                    text += "，重新打开文件后生效";
+                }
+                m_renderer->showOSD(OSDType::Info, text);
+            }
+            break;
+        }
         case 300: // AI 分析当前视频
             startAIAnalysis();
             break;
@@ -234,6 +251,8 @@ void VideoPlayerApp::showHelp() {
         "]             - AB循环: 设置B点\n"
         "\\             - AB循环: 清除\n"
         "播放菜单      - 切换音频滤镜预设\n"
+        "播放菜单      - 切换硬件解码\n"
+        "Tab           - 媒体信息\n"
         "F12           - 截图\n"
         "Ctrl+E        - 切换选集面板\n"
         "Ctrl+L        - 切换播放列表\n"
