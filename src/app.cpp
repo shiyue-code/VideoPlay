@@ -532,6 +532,16 @@ void VideoPlayerApp::render() {
     // 渲染 UI
     if (m_renderer) {
         m_renderer->setNetworkState(m_networkState.load());
+        bool aiAnalyzing = false;
+        float aiProgress = 0.0f;
+        std::string aiStatus;
+        {
+            std::lock_guard<std::mutex> lock(m_aiStateMutex);
+            aiAnalyzing = m_aiAnalyzing;
+            aiProgress = m_aiProgress;
+            aiStatus = m_aiStatus;
+        }
+        m_renderer->setAIAnalysisState(aiAnalyzing, aiProgress, aiStatus);
     }
     m_renderer->renderUI(
         m_position,

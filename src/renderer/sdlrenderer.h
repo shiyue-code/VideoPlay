@@ -185,6 +185,7 @@ public:
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
     void setAudioFilterPreset(AudioFilterPreset preset);
     void setNetworkState(NetworkState state);
+    void setAIAnalysisState(bool active, float progress, const std::string& status);
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -279,6 +280,7 @@ private:
     void renderOSD();
     void renderMediaInfoPanel();
     void renderNetworkState();
+    void renderAIAnalysisOverlay();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
@@ -353,6 +355,14 @@ private:
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
     NetworkState m_networkState = NetworkState::Idle;
+    bool m_aiAnalysisActive = false;
+    float m_aiAnalysisProgress = 0.0f;
+    std::string m_aiAnalysisStatus;
+    std::string m_aiAnalysisNoticeText;
+    float m_aiAnalysisNoticeProgress = -1.0f;
+    uint64_t m_aiAnalysisStartTime = 0;
+    uint64_t m_aiAnalysisNoticeStartTime = 0;
+    static constexpr uint64_t AI_ANALYSIS_NOTICE_DURATION_MS = 2600;
     AspectMode m_aspectMode = AspectMode::Original;
     bool m_alwaysOnTop = false;
     std::vector<float> m_episodeProgress;

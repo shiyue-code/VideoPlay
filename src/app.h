@@ -13,6 +13,7 @@
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <mutex>
 
 namespace VideoPlay {
 
@@ -143,6 +144,7 @@ private:
     std::unique_ptr<AIAnalyzer> m_aiAnalyzer;
     std::unique_ptr<SearchEngine> m_searchEngine;
     AIAnalysisResult m_aiResult;
+    std::mutex m_aiStateMutex;
     bool m_aiAnalyzing = false;
     float m_aiProgress = 0.0f;
     std::string m_aiStatus;

@@ -106,6 +106,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     }
 
     renderNetworkState();
+    renderAIAnalysisOverlay();
 
     if (m_showMediaInfoPanel) {
         renderMediaInfoPanel();
@@ -639,6 +640,135 @@ void SDLRenderer::renderNetworkState() {
     fillRoundRect(x, y, w, h, 10, 20, 22, 28, 220);
     fillCircle(x + paddingX - 2, y + h / 2, 4, r, g, b, 255);
     drawText(text, x + paddingX + 10, y + paddingY, 255, 255, 255, fontSize);
+}
+
+void SDLRenderer::renderAIAnalysisOverlay() {
+    if (!m_renderer) return;
+
+    uint64_t now = SDL_GetTicks();
+    bool showNotice = !m_aiAnalysisNoticeText.empty() &&
+        m_aiAnalysisNoticeStartTime > 0 &&
+        now - m_aiAnalysisNoticeStartTime < AI_ANALYSIS_NOTICE_DURATION_MS;
+    if (!m_aiAnalysisActive && !showNotice) {
+        return;
+    }
+
+    bool failed = !m_aiAnalysisActive &&
+        m_aiAnalysisNoticeText.find("失败") != std::string::npos;
+    std::string title = m_aiAnalysisActive ? "AI 分析中" :
+        (failed ? "AI 分析失败" : "AI 分析完成");
+    std::string status = m_aiAnalysisActive ? m_aiAnalysisStatus : m_aiAnalysisNoticeText;
+    if (status.empty()) {
+        status = "正在分析视频内容...";
+    }
+
+    auto fitText = [this](std::string text, int maxWidth, int fontSize) {
+        if (getTextWidth(text, fontSize) <= maxWidth) {
+            return text;
+        }
+
+        const std::string suffix = "...";
+        int suffixW = getTextWidth(suffix, fontSize);
+        while (!text.empty() && getTextWidth(text, fontSize) + suffixW > maxWidth) {
+            text.pop_back();
+        }
+        return text + suffix;
+    };
+
+    int maxPanelW = std::max(260, m_windowWidth - 48);
+    int minPanelW = std::min(360, maxPanelW);
+    int panelW = std::clamp(getTextWidth(status, 12) + 136, minPanelW, maxPanelW);
+    int panelH = 78;
+    int panelX = (m_windowWidth - panelW) / 2;
+    int panelY = m_windowHeight < 260 ? 12 : m_menuBarHeight + 18;
+    int radius = 18;
+
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1,
+                  255, 255, 255, 45);
+    fillRoundRect(panelX, panelY, panelW, panelH, radius, 24, 27, 32, 230);
+
+    const int spinnerCx = panelX + 36;
+    const int spinnerCy = panelY + 31;
+    const int dotCount = 10;
+    const float pi = 3.14159265f;
+    float rotation = (now % 1100) / 1100.0f * 2.0f * pi;
+    for (int i = 0; i < dotCount; ++i) {
+        float angle = rotation + i * (2.0f * pi / dotCount);
+        int dotX = spinnerCx + static_cast<int>(std::cos(angle) * 12.0f);
+        int dotY = spinnerCy + static_cast<int>(std::sin(angle) * 12.0f);
+        float strength = (i + 1) / static_cast<float>(dotCount);
+        uint8_t alpha = static_cast<uint8_t>(55 + 180 * strength);
+        int dotR = 2 + static_cast<int>(strength * 2.0f);
+        uint8_t r = failed ? 255 : COLOR_PROGRESS_FILL[0];
+        uint8_t g = failed ? 95 : COLOR_PROGRESS_FILL[1];
+        uint8_t b = failed ? 95 : COLOR_PROGRESS_FILL[2];
+        if (!m_aiAnalysisActive) {
+            alpha = static_cast<uint8_t>(std::min<int>(255, alpha + 30));
+        }
+        fillCircle(dotX, dotY, dotR, r, g, b, alpha);
+    }
+
+    int textX = panelX + 64;
+    int textRight = panelX + panelW - 18;
+    int titleY = panelY + 14;
+    int statusY = panelY + 37;
+    float progress = showNotice ? m_aiAnalysisNoticeProgress : m_aiAnalysisProgress;
+    progress = std::clamp(progress, 0.0f, 1.0f);
+
+    std::string percentText;
+    if (progress > 0.0f || !m_aiAnalysisActive) {
+        percentText = std::to_string(static_cast<int>(std::round(progress * 100.0f))) + "%";
+    }
+    int percentW = percentText.empty() ? 0 : getTextWidth(percentText, 11);
+    int titleMaxW = textRight - textX - percentW - 12;
+    drawText(fitText(title, titleMaxW, 13), textX, titleY, 255, 255, 255, 13);
+    if (!percentText.empty()) {
+        drawText(percentText, textRight - percentW, titleY + 1, 190, 220, 235, 11);
+    }
+
+    int elapsedSeconds = 0;
+    if (m_aiAnalysisActive && m_aiAnalysisStartTime > 0) {
+        elapsedSeconds = static_cast<int>((now - m_aiAnalysisStartTime) / 1000);
+    }
+    std::string detail = status;
+    if (m_aiAnalysisActive && elapsedSeconds >= 3) {
+        detail += " / " + std::to_string(elapsedSeconds) + "s";
+    }
+    drawText(fitText(detail, textRight - textX, 12), textX, statusY,
+             205, 212, 220, 12);
+
+    int barX = panelX + 18;
+    int barY = panelY + panelH - 17;
+    int barW = panelW - 36;
+    int barH = 5;
+    fillRoundRect(barX, barY, barW, barH, barH / 2, 255, 255, 255, 45);
+
+    if (m_aiAnalysisActive && progress <= 0.01f) {
+        int sweepW = std::max(48, barW / 3);
+        int sweepTravel = barW + sweepW;
+        int sweepX = barX + static_cast<int>(((now % 1400) / 1400.0f) * sweepTravel) - sweepW;
+        int clippedX = std::max(barX, sweepX);
+        int clippedRight = std::min(barX + barW, sweepX + sweepW);
+        if (clippedRight > clippedX) {
+            fillRoundRect(clippedX, barY, clippedRight - clippedX, barH, barH / 2,
+                          COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1],
+                          COLOR_PROGRESS_FILL[2], 210);
+        }
+    } else {
+        int fillW = std::max(barH, static_cast<int>(barW * progress));
+        uint8_t r = failed ? 255 : COLOR_PROGRESS_FILL[0];
+        uint8_t g = failed ? 95 : COLOR_PROGRESS_FILL[1];
+        uint8_t b = failed ? 95 : COLOR_PROGRESS_FILL[2];
+        fillRoundRect(barX, barY, fillW, barH, barH / 2, r, g, b, 230);
+    }
+
+    if (m_aiAnalysisActive) {
+        int glowX = barX + static_cast<int>(((now % 1200) / 1200.0f) * barW);
+        renderGlowBar(glowX, barY + barH / 2, 72, barH + 7,
+                      COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1],
+                      COLOR_PROGRESS_FILL[2], 70, barX, barX + barW);
+    }
 }
 
 void SDLRenderer::renderMediaInfoPanel() {
