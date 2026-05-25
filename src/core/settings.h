@@ -52,7 +52,7 @@ struct SessionInfo {
 struct AIConfig {
     std::string baseUrl = "https://api.xiaomimimo.com/v1";
     std::string apiKey;
-    std::string model = "mimo-v2-pro";
+    std::string model = "mimo-v2.5";
     std::string cacheDir;
     bool autoAnalyze = false;
 };
