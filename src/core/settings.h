@@ -89,6 +89,8 @@ public:
     AspectMode aspectMode() const;
     void setAlwaysOnTop(bool enabled);
     bool alwaysOnTop() const;
+    void setHardwareDecodingEnabled(bool enabled);
+    bool hardwareDecodingEnabled() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
 

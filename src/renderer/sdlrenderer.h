@@ -183,6 +183,7 @@ public:
     void setMediaInfo(const MediaInfo& info);
     void showOSD(const std::string& text);
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
+    void setHardwareDecodingEnabled(bool enabled);
     void setAudioFilterPreset(AudioFilterPreset preset);
     void setNetworkState(NetworkState state);
     void setAIAnalysisState(bool active, float progress, const std::string& status);
@@ -353,6 +354,7 @@ private:
     int m_episodeScrollOffset = 0;
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
+    bool m_hardwareDecodingEnabled = true;
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
     NetworkState m_networkState = NetworkState::Idle;
     bool m_aiAnalysisActive = false;

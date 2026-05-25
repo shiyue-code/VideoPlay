@@ -69,6 +69,8 @@ public:
     int volume() const;
     void setMuted(bool muted);
     bool isMuted() const;
+    void setHardwareDecodingEnabled(bool enabled);
+    bool hardwareDecodingEnabled() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
 
@@ -167,6 +169,7 @@ private:
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};
     std::atomic<bool> m_muted{false};
+    std::atomic<bool> m_hardwareDecodingEnabled{true};
     std::atomic<PlaybackState> m_state{PlaybackState::Stopped};
     std::atomic<NetworkState> m_networkState{NetworkState::Idle};
     SourceType m_sourceType = SourceType::LocalFile;

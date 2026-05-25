@@ -792,8 +792,13 @@ void SDLRenderer::renderMediaInfoPanel() {
                                   std::to_string(m_mediaInfo.height)});
         rows.push_back({"帧率", formatFps(m_mediaInfo.fps)});
         rows.push_back({"视频码率", formatBitrate(m_mediaInfo.videoBitrate)});
-        rows.push_back({"硬件解码", m_mediaInfo.hardwareDecoder ?
-                                  ("已启用 " + m_mediaInfo.hardwareDevice) : "未启用"});
+        std::string hardwareStatus = "未启用";
+        if (!m_mediaInfo.hardwareDecoderEnabled) {
+            hardwareStatus = "已关闭";
+        } else if (m_mediaInfo.hardwareDecoder) {
+            hardwareStatus = "已启用 " + m_mediaInfo.hardwareDevice;
+        }
+        rows.push_back({"硬件解码", hardwareStatus});
     }
 
     if (m_mediaInfo.hasAudio) {

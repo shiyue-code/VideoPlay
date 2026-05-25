@@ -97,6 +97,9 @@ bool VideoPlayerApp::initialize() {
 
     // 创建播放器
     m_player = std::make_unique<FFmpegPlayer>();
+    bool hardwareDecodingEnabled = Settings::instance().hardwareDecodingEnabled();
+    m_player->setHardwareDecodingEnabled(hardwareDecodingEnabled);
+    m_renderer->setHardwareDecodingEnabled(hardwareDecodingEnabled);
     auto audioFilterConfig = Settings::instance().audioFilterConfig();
     m_player->setAudioFilterConfig(audioFilterConfig);
     m_renderer->setAudioFilterPreset(audioFilterConfig.preset);

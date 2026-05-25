@@ -149,6 +149,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     m_mediaInfo.sourceType = m_sourceType;
     m_mediaInfo.durationMs = m_duration;
     m_mediaInfo.bitrate = m_formatContext->bit_rate;
+    m_mediaInfo.hardwareDecoderEnabled = m_hardwareDecodingEnabled.load();
     if (m_formatContext->iformat) {
         if (m_formatContext->iformat->long_name) {
             m_mediaInfo.container = m_formatContext->iformat->long_name;
@@ -331,6 +332,10 @@ bool FFmpegPlayer::initializeVideoContext() {
 
 bool FFmpegPlayer::setupHardwareDecoder(const AVCodec* codec) {
     if (!codec || !m_videoCtx.codecContext) {
+        return false;
+    }
+    if (!m_hardwareDecodingEnabled.load()) {
+        logger().debug("Hardware decoder disabled by settings");
         return false;
     }
 
@@ -1468,6 +1473,14 @@ void FFmpegPlayer::setMuted(bool muted) {
 
 bool FFmpegPlayer::isMuted() const {
     return m_muted.load();
+}
+
+void FFmpegPlayer::setHardwareDecodingEnabled(bool enabled) {
+    m_hardwareDecodingEnabled = enabled;
+}
+
+bool FFmpegPlayer::hardwareDecodingEnabled() const {
+    return m_hardwareDecodingEnabled.load();
 }
 
 void FFmpegPlayer::setAudioFilterConfig(const AudioFilterConfig& config) {
