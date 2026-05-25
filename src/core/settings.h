@@ -49,12 +49,20 @@ struct SessionInfo {
     bool hasValidSession = false;
 };
 
+struct AIProviderConfig {
+    std::string baseUrl;
+    std::string apiKey;
+    std::string model;
+};
+
 struct AIConfig {
-    std::string baseUrl = "https://api.xiaomimimo.com/v1";
+    std::string provider = "mimo";
+    std::string baseUrl = "https://api.xiaomimimo.com";
     std::string apiKey;
     std::string model = "mimo-v2.5";
     std::string cacheDir;
     bool autoAnalyze = false;
+    std::unordered_map<std::string, AIProviderConfig> providers;
 };
 
 struct LogConfig {

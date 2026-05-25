@@ -22,6 +22,7 @@ public:
 
     void setBaseUrl(const std::string& url);
     void setApiKey(const std::string& key);
+    void setAuthHeader(const std::string& headerName, const std::string& valuePrefix);
     void setTimeout(int seconds);
 
     HttpResponse get(const std::string& path,
@@ -39,6 +40,8 @@ public:
 private:
     std::string m_baseUrl;
     std::string m_apiKey;
+    std::string m_authHeaderName = "Authorization";
+    std::string m_authHeaderPrefix = "Bearer ";
     int m_timeout = 60;
 
     std::map<std::string, std::string> defaultHeaders() const;

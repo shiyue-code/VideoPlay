@@ -1,6 +1,7 @@
 ﻿#include "core/settings.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -13,6 +14,96 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("settings");
     return *logger;
+}
+
+std::string trimSetting(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+std::string lowerSetting(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string normalizeAIProvider(std::string provider) {
+    provider = lowerSetting(trimSetting(provider));
+    if (provider.empty() || provider == "auto") {
+        return "mimo";
+    }
+    if (provider == "google") {
+        return "gemini";
+    }
+    if (provider == "xiaomi" || provider == "xiaomimimo") {
+        return "mimo";
+    }
+    return provider;
+}
+
+AIProviderConfig defaultAIProviderConfig(const std::string& provider) {
+    if (provider == "gemini") {
+        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-3.5-flash"};
+    }
+    return {"https://api.xiaomimimo.com", std::string(), "mimo-v2.5"};
+}
+
+void sanitizeAIBaseUrl(std::string& url) {
+    url = trimSetting(url);
+
+    size_t firstHttps = url.find("https://");
+    if (firstHttps != std::string::npos) {
+        size_t secondHttps = url.find("https://", firstHttps + 1);
+        if (secondHttps != std::string::npos) {
+            url = url.substr(0, secondHttps);
+        }
+    }
+
+    while (!url.empty() && url.back() == '/') {
+        url.pop_back();
+    }
+
+    if (url.size() >= 7 && url.substr(url.size() - 7) == "/v1beta") {
+        url = url.substr(0, url.size() - 7);
+    } else if (url.size() >= 3 && url.substr(url.size() - 3) == "/v1") {
+        url = url.substr(0, url.size() - 3);
+    }
+}
+
+void normalizeAIProviderConfig(const std::string& provider, AIProviderConfig& providerConfig) {
+    sanitizeAIBaseUrl(providerConfig.baseUrl);
+    providerConfig.model = trimSetting(providerConfig.model);
+
+    AIProviderConfig defaults = defaultAIProviderConfig(provider);
+    std::string lowerUrl = lowerSetting(providerConfig.baseUrl);
+    std::string lowerModel = lowerSetting(providerConfig.model);
+
+    if (provider == "gemini") {
+        if (providerConfig.baseUrl.empty() ||
+            lowerUrl.find("xiaomimimo") != std::string::npos) {
+            providerConfig.baseUrl = defaults.baseUrl;
+        }
+        if (providerConfig.model.empty() || lowerModel.find("mimo") != std::string::npos) {
+            providerConfig.model = defaults.model;
+        }
+        return;
+    }
+
+    if (provider == "mimo") {
+        if (providerConfig.baseUrl.empty() ||
+            lowerUrl.find("generativelanguage.googleapis.com") != std::string::npos) {
+            providerConfig.baseUrl = defaults.baseUrl;
+        }
+        if (providerConfig.model.empty() || lowerModel.find("gemini") != std::string::npos) {
+            providerConfig.model = defaults.model;
+        }
+    }
 }
 }
 
@@ -529,14 +620,57 @@ void Settings::clearLastSession() {
 
 // AI 配置
 void Settings::setAIConfig(const AIConfig& config) {
+    std::string provider = normalizeAIProvider(config.provider);
+
+    std::unordered_map<std::string, AIProviderConfig> providers;
+    for (const auto& entry : config.providers) {
+        std::string providerId = normalizeAIProvider(entry.first);
+        AIProviderConfig providerConfig = entry.second;
+        normalizeAIProviderConfig(providerId, providerConfig);
+        providers[providerId] = providerConfig;
+    }
+
+    AIProviderConfig activeConfig = {
+        config.baseUrl,
+        config.apiKey,
+        config.model
+    };
+
+    if (activeConfig.baseUrl.empty() && activeConfig.apiKey.empty() && activeConfig.model.empty()) {
+        auto activeIt = providers.find(provider);
+        activeConfig = (activeIt != providers.end()) ?
+            activeIt->second :
+            defaultAIProviderConfig(provider);
+    }
+    normalizeAIProviderConfig(provider, activeConfig);
+    providers[provider] = activeConfig;
+
+    if (providers.find("mimo") == providers.end()) {
+        providers["mimo"] = defaultAIProviderConfig("mimo");
+    }
+    if (providers.find("gemini") == providers.end()) {
+        providers["gemini"] = defaultAIProviderConfig("gemini");
+    }
+
+    nlohmann::json providersJson = nlohmann::json::object();
+    for (const auto& entry : providers) {
+        providersJson[entry.first] = {
+            {"baseUrl", entry.second.baseUrl},
+            {"apiKey", entry.second.apiKey},
+            {"model", entry.second.model}
+        };
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_config["ai"] = {
-            {"baseUrl", config.baseUrl},
-            {"apiKey", config.apiKey},
-            {"model", config.model},
+            {"provider", provider},
+            {"baseUrl", activeConfig.baseUrl},
+            {"apiKey", activeConfig.apiKey},
+            {"model", activeConfig.model},
             {"cacheDir", config.cacheDir},
-            {"autoAnalyze", config.autoAnalyze}
+            {"autoAnalyze", config.autoAnalyze},
+            {"providers", providersJson}
         };
     }
     save();
@@ -547,11 +681,64 @@ AIConfig Settings::aiConfig() const {
     AIConfig config;
     if (m_config.contains("ai")) {
         const auto& ai = m_config["ai"];
-        config.baseUrl = ai.value("baseUrl", "https://api.xiaomimimo.com/v1");
+        config.provider = ai.value("provider", std::string());
+        config.baseUrl = ai.value("baseUrl", "https://api.xiaomimimo.com");
         config.apiKey = ai.value("apiKey", std::string());
         config.model = ai.value("model", "mimo-v2.5");
         config.cacheDir = ai.value("cacheDir", std::string());
         config.autoAnalyze = ai.value("autoAnalyze", false);
+
+        if (config.provider.empty()) {
+            std::string lowerBaseUrl = config.baseUrl;
+            std::string lowerModel = config.model;
+            std::transform(lowerBaseUrl.begin(), lowerBaseUrl.end(), lowerBaseUrl.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            config.provider =
+                (lowerBaseUrl.find("generativelanguage.googleapis.com") != std::string::npos ||
+                 lowerModel.find("gemini") != std::string::npos) ? "gemini" : "mimo";
+        }
+
+        config.provider = normalizeAIProvider(config.provider);
+
+        if (ai.contains("providers") && ai["providers"].is_object()) {
+            for (const auto& entry : ai["providers"].items()) {
+                if (!entry.value().is_object()) {
+                    continue;
+                }
+                std::string providerId = normalizeAIProvider(entry.key());
+                AIProviderConfig providerConfig;
+                providerConfig.baseUrl = entry.value().value("baseUrl", std::string());
+                providerConfig.apiKey = entry.value().value("apiKey", std::string());
+                providerConfig.model = entry.value().value("model", std::string());
+                normalizeAIProviderConfig(providerId, providerConfig);
+                config.providers[providerId] = providerConfig;
+            }
+        }
+    }
+
+    AIProviderConfig legacyActive = {
+        config.baseUrl,
+        config.apiKey,
+        config.model
+    };
+    normalizeAIProviderConfig(config.provider, legacyActive);
+    if (config.providers.find(config.provider) == config.providers.end()) {
+        config.providers[config.provider] = legacyActive;
+    }
+    if (config.providers.find("mimo") == config.providers.end()) {
+        config.providers["mimo"] = defaultAIProviderConfig("mimo");
+    }
+    if (config.providers.find("gemini") == config.providers.end()) {
+        config.providers["gemini"] = defaultAIProviderConfig("gemini");
+    }
+
+    auto activeIt = config.providers.find(config.provider);
+    if (activeIt != config.providers.end()) {
+        config.baseUrl = activeIt->second.baseUrl;
+        config.apiKey = activeIt->second.apiKey;
+        config.model = activeIt->second.model;
     }
     return config;
 }
