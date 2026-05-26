@@ -43,6 +43,7 @@ using EpisodeItemCallback = std::function<void(size_t)>;
 using EpisodePrevCallback = std::function<void()>;
 using EpisodeNextCallback = std::function<void()>;
 using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
+using SearchCallback = std::function<void(const std::string&)>;
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
 using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
@@ -81,7 +82,12 @@ enum class ControlType {
     MenuItem,
     SysMinButton,
     SysMaxButton,
-    SysCloseButton
+    SysCloseButton,
+    SearchPanelToggle,
+    SearchCloseButton,
+    SearchInput,
+    SearchTimestamp,
+    PanelBackground
 };
 
 // 无边框窗口 resize 模式
@@ -111,6 +117,11 @@ struct Menu {
     std::string label;
     std::vector<MenuItem> items;
     bool open = false;
+};
+
+struct ChatMessage {
+    bool isUser;
+    std::string text;
 };
 
 class SDLRenderer {
@@ -164,12 +175,16 @@ public:
     void setEpisodePrevCallback(EpisodePrevCallback callback);
     void setEpisodeNextCallback(EpisodeNextCallback callback);
     void setLoopModeCallback(LoopModeCallback callback);
+    void setSearchCallback(SearchCallback callback);
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
     void setABLoopCallback(ABLoopCallback callback);
     void setChapterSeekCallback(ChapterSeekCallback callback);
 
     // 章节数据
     void setChapters(const std::vector<ChapterInfo>& chapters);
+
+    // 搜索热力图数据
+    void setSearchHighlights(const std::vector<int64_t>& timestamps);
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -179,6 +194,9 @@ public:
     void setPrevNextTooltip(const std::string& prevTooltip, const std::string& nextTooltip);
     void toggleEpisodePanel();
     void togglePlaylistPanel();
+    void showSearchPanel();
+    void toggleSearchPanel();
+    void addChatMessage(bool isUser, const std::string& text);
     void toggleMediaInfoPanel();
     void setMediaInfo(const MediaInfo& info);
     void showOSD(const std::string& text);
@@ -210,7 +228,9 @@ public:
     TTF_Font* getFont() const { return m_font; }
 
     // 显示消息框
-    void showMessageBox(const std::string& title, const std::string& message, bool isError = false);
+    void showMessageBox(const std::string& title, const std::string& message,
+                        bool isError = false,
+                        std::function<void(int64_t timestampMs)> timestampCallback = nullptr);
 
     // 更新文件菜单中的最近文件列表
     void updateRecentFilesMenu();
@@ -285,6 +305,7 @@ private:
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
+    void renderSearchPanel();
 
     // 创建/更新纹理
     void ensureTexture(int width, int height);
@@ -349,9 +370,16 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
+    bool m_showSearchPanel = false;
     bool m_showMediaInfoPanel = false;
     int m_playlistScrollOffset = 0;
     int m_episodeScrollOffset = 0;
+    int m_searchScrollOffset = 0;
+    std::string m_searchQuery;
+    bool m_isSearchInputFocused = false;
+    uint64_t m_lastSearchInputTime = 0;
+    std::vector<ChatMessage> m_chatHistory;
+    std::mutex m_chatMutex;
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     bool m_hardwareDecodingEnabled = true;
@@ -403,6 +431,7 @@ private:
     std::vector<Menu> m_menus;
     std::vector<ChapterInfo> m_chapters;
     bool m_hasChapters = false;
+    std::vector<int64_t> m_searchHighlights;
     int64_t m_lastDuration = 0;
     int m_lastBarX = 0;
     int m_lastBarW = 0;
@@ -488,6 +517,7 @@ private:
     EpisodePrevCallback m_episodePrevCallback;
     EpisodeNextCallback m_episodeNextCallback;
     LoopModeCallback m_loopModeCallback;
+    SearchCallback m_searchCallback;
     SubtitleSyncCallback m_subtitleSyncCallback;
     ABLoopCallback m_abLoopCallback;
     ChapterSeekCallback m_chapterSeekCallback;

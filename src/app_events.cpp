@@ -240,6 +240,9 @@ void VideoPlayerApp::loadSubtitleFile(const std::string& path) {
     if (m_subtitleParser->loadFile(path)) {
         m_currentSubtitle = path;
         logger().info("Loaded subtitle: " + path);
+        if (m_searchEngine) {
+            m_searchEngine->addSubtitleEntries(m_subtitleParser->entries());
+        }
     } else {
         logger().error("Failed to load subtitle: " + path);
         m_currentSubtitle.clear();
@@ -411,7 +414,15 @@ void VideoPlayerApp::showAISummary() {
     }
 
     if (m_renderer) {
-        m_renderer->showMessageBox("AI 摘要", summaryText, false);
+        m_renderer->showMessageBox("AI 摘要", summaryText, false,
+            [this](int64_t timestampMs) {
+                if (m_duration <= 0) {
+                    return;
+                }
+
+                double ratio = static_cast<double>(timestampMs) / static_cast<double>(m_duration);
+                seekTo(std::max(0.0, std::min(1.0, ratio)));
+            });
     }
 }
 
@@ -423,24 +434,8 @@ void VideoPlayerApp::showSearchPanel() {
         return;
     }
 
-    if (!m_searchEngine->hasIndex()) {
-        if (m_aiResult.valid) {
-            m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
-        } else if (m_aiAnalyzer->hasCache(m_currentFile)) {
-            m_aiResult = m_aiAnalyzer->loadCache(m_currentFile);
-            if (m_aiResult.valid) {
-                m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
-            }
-        }
-    }
-
-    if (!m_searchEngine->hasIndex()) {
-        if (m_renderer) {
-            m_renderer->showMessageBox("搜索", 
-                "当前视频没有可搜索的内容\n\n"
-                "请先执行 \"AI 分析当前视频\"", false);
-        }
-        return;
+    if (m_renderer) {
+        m_renderer->showSearchPanel();
     }
 
     logger().info("[Search] Search panel requested");
@@ -544,15 +539,54 @@ void VideoPlayerApp::showAISettings() {
 
 void VideoPlayerApp::performSearch(const std::string& query) {
     if (!m_searchEngine || !m_searchEngine->hasIndex() || query.empty()) {
+        if (m_renderer) {
+            m_renderer->setSearchHighlights({});
+        }
         return;
     }
 
     auto results = m_searchEngine->search(query, 20);
     logger().info("[Search] Query: " + query + " Results: " + std::to_string(results.size()));
 
-    if (!results.empty()) {
-        seek(results[0].timestamp - m_position);
+    if (m_renderer) {
+        std::vector<int64_t> highlights;
+        for (const auto& r : results) {
+            highlights.push_back(r.timestamp);
+        }
+        m_renderer->setSearchHighlights(highlights);
     }
+}
+
+void VideoPlayerApp::handleSearch(const std::string& query) {
+    if (query.empty() || !m_renderer) return;
+
+    m_renderer->addChatMessage(true, query);
+
+    if (!m_aiResult.valid && m_aiAnalyzer && m_aiAnalyzer->hasCache(m_currentFile)) {
+        m_aiResult = m_aiAnalyzer->loadCache(m_currentFile);
+    }
+
+    if (!m_aiResult.valid) {
+        m_renderer->addChatMessage(false, "当前视频没有可用的 AI 分析结果。请先在菜单中执行【AI 分析当前视频】。");
+        return;
+    }
+
+    if (!m_aiAnalyzer) return;
+
+    // 热力图展示
+    performSearch(query);
+
+    m_aiAnalyzer->askQuestion(query, m_aiResult,
+        [this](const std::string& answer) {
+            if (m_renderer) {
+                m_renderer->addChatMessage(false, answer);
+            }
+        },
+        [this](const std::string& error) {
+            if (m_renderer) {
+                m_renderer->addChatMessage(false, "API 请求失败: " + error);
+            }
+        });
 }
 
 } // namespace VideoPlay

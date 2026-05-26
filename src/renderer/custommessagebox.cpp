@@ -1,6 +1,8 @@
 ﻿#include "renderer/custommessagebox.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cstdio>
+#include <utility>
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
@@ -30,6 +32,46 @@ Logger& logger() {
     static auto logger = Logger::get("renderer.dialog");
     return *logger;
 }
+
+size_t utf8CharLength(const std::string& text, size_t pos) {
+    if (pos >= text.size()) {
+        return 0;
+    }
+
+    unsigned char ch = static_cast<unsigned char>(text[pos]);
+    if (ch < 0x80) {
+        return 1;
+    }
+    if ((ch & 0xE0) == 0xC0) {
+        return (pos + 1 < text.size()) ? 2 : 1;
+    }
+    if ((ch & 0xF0) == 0xE0) {
+        return (pos + 2 < text.size()) ? 3 : 1;
+    }
+    if ((ch & 0xF8) == 0xF0) {
+        return (pos + 3 < text.size()) ? 4 : 1;
+    }
+    return 1;
+}
+
+bool parseTimestampMs(const std::string& text, int64_t& timestampMs) {
+    int first = 0;
+    int second = 0;
+    int third = 0;
+    int colonCount = static_cast<int>(std::count(text.begin(), text.end(), ':'));
+
+    if (colonCount == 1 && sscanf(text.c_str(), "[%d:%d]", &first, &second) == 2) {
+        timestampMs = static_cast<int64_t>(first * 60 + second) * 1000;
+        return true;
+    }
+
+    if (colonCount == 2 && sscanf(text.c_str(), "[%d:%d:%d]", &first, &second, &third) == 3) {
+        timestampMs = static_cast<int64_t>(first * 3600 + second * 60 + third) * 1000;
+        return true;
+    }
+
+    return false;
+}
 }
 
 
@@ -54,10 +96,13 @@ CustomMessageBox::~CustomMessageBox() {
     if (m_window) SDL_DestroyWindow(m_window);
 }
 
-void CustomMessageBox::show(const std::string& title, const std::string& message, bool isError) {
+void CustomMessageBox::show(const std::string& title, const std::string& message, bool isError,
+                            TimestampClickCallback timestampCallback) {
     m_title = title;
     m_message = message;
     m_isError = isError;
+    m_timestampClickCallback = std::move(timestampCallback);
+    m_timestampRects.clear();
     m_dragging = false;
     m_dragOffsetX = 0;
     m_dragOffsetY = 0;
@@ -143,20 +188,28 @@ std::vector<std::string> CustomMessageBox::wrapText(const std::string& text, int
     std::vector<std::string> lines;
     std::string currentLine;
 
-    for (size_t i = 0; i < text.length(); i++) {
+    for (size_t i = 0; i < text.length();) {
+        if (text[i] == '\r') {
+            ++i;
+            continue;
+        }
         if (text[i] == '\n') {
             lines.push_back(currentLine);
             currentLine.clear();
+            ++i;
             continue;
         }
 
-        currentLine += text[i];
-        int width = getTextWidth(currentLine);
-        if (width > maxWidth && !currentLine.empty()) {
-            std::string lastChar = currentLine.substr(currentLine.length() - 1);
-            currentLine.pop_back();
+        size_t charLen = utf8CharLength(text, i);
+        std::string nextChar = text.substr(i, charLen);
+        i += charLen;
+
+        std::string candidate = currentLine + nextChar;
+        if (!currentLine.empty() && getTextWidth(candidate) > maxWidth) {
             lines.push_back(currentLine);
-            currentLine = lastChar;
+            currentLine = nextChar;
+        } else {
+            currentLine = candidate;
         }
     }
 
@@ -216,8 +269,48 @@ void CustomMessageBox::render() {
     auto lines = wrapText(m_message, m_windowWidth - 60);
     int lineHeight = getFontHeight() + 4;
     int textY = TITLE_HEIGHT + 20;
+    m_timestampRects.clear();
     for (const auto& line : lines) {
-        drawText(line, 30, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+        int textX = 30;
+        size_t pos = 0;
+        while (pos < line.size()) {
+            size_t start = line.find('[', pos);
+            if (start == std::string::npos) {
+                std::string text = line.substr(pos);
+                drawText(text, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+                break;
+            }
+
+            if (start > pos) {
+                std::string text = line.substr(pos, start - pos);
+                drawText(text, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+                textX += getTextWidth(text);
+            }
+
+            size_t end = line.find(']', start);
+            if (end == std::string::npos) {
+                std::string text = line.substr(start);
+                drawText(text, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+                break;
+            }
+
+            std::string token = line.substr(start, end - start + 1);
+            int64_t timestampMs = 0;
+            bool clickable = m_timestampClickCallback && parseTimestampMs(token, timestampMs);
+            int tokenW = getTextWidth(token);
+            if (clickable) {
+                drawText(token, textX, textY, 255, 200, 50, 255);
+                m_timestampRects.push_back({
+                    SDL_Rect{textX, textY, tokenW, lineHeight},
+                    timestampMs
+                });
+            } else {
+                drawText(token, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+            }
+
+            textX += tokenW;
+            pos = end + 1;
+        }
         textY += lineHeight;
     }
 
@@ -274,6 +367,21 @@ void CustomMessageBox::handleEvents() {
                     if (mx >= okBtnX && mx <= okBtnX + okBtnWidth && my >= okBtnY && my <= okBtnY + okBtnHeight) {
                         m_running = false;
                         break;
+                    }
+
+                    if (m_timestampClickCallback) {
+                        for (const auto& timestampRect : m_timestampRects) {
+                            const SDL_Rect& rect = timestampRect.rect;
+                            if (mx >= rect.x && mx <= rect.x + rect.w &&
+                                my >= rect.y && my <= rect.y + rect.h) {
+                                m_timestampClickCallback(timestampRect.timestampMs);
+                                m_running = false;
+                                break;
+                            }
+                        }
+                        if (!m_running) {
+                            break;
+                        }
                     }
 
                     // 标题栏拖动

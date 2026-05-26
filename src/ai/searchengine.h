@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <shared_mutex>
 
 namespace VideoPlay {
 
@@ -35,7 +36,7 @@ private:
         int source; // 0=transcript, 1=subtitle, 2=chapter
     };
 
-    mutable std::mutex m_mutex;
+    mutable std::shared_mutex m_mutex;
     std::vector<IndexEntry> m_entries;
     std::unordered_map<std::string, std::vector<size_t>> m_invertedIndex;
     std::string m_videoPath;

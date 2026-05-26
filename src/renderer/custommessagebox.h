@@ -6,15 +6,19 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <cstdint>
 
 namespace VideoPlay {
 
 class CustomMessageBox {
 public:
+    using TimestampClickCallback = std::function<void(int64_t timestampMs)>;
+
     CustomMessageBox(SDL_Window* parentWindow, TTF_Font* font);
     ~CustomMessageBox();
 
-    void show(const std::string& title, const std::string& message, bool isError = false);
+    void show(const std::string& title, const std::string& message, bool isError = false,
+              TimestampClickCallback timestampCallback = nullptr);
 
 private:
     SDL_Window* m_parentWindow;
@@ -24,6 +28,7 @@ private:
 
     std::string m_title;
     std::string m_message;
+    TimestampClickCallback m_timestampClickCallback;
     bool m_isError = false;
     bool m_running = false;
     bool m_dragging = false;
@@ -31,6 +36,12 @@ private:
     int m_dragOffsetY = 0;
     int m_windowWidth = 500;
     int m_windowHeight = 300;
+
+    struct TimestampRect {
+        SDL_Rect rect;
+        int64_t timestampMs = 0;
+    };
+    std::vector<TimestampRect> m_timestampRects;
 
     void render();
     void handleEvents();

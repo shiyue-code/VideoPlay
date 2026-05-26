@@ -81,7 +81,7 @@ std::string defaultBaseUrlForProvider(const std::string& provider) {
 
 std::string defaultModelForProvider(const std::string& provider) {
     if (provider == "gemini") {
-        return "gemini-3.5-flash";
+        return "gemini-2.5-flash";
     }
     return "mimo-v2.5";
 }
@@ -90,7 +90,8 @@ std::string normalizeProviderModel(const std::string& provider, std::string mode
     model = trim(model);
     std::string lowerModel = toLower(model);
     if (provider == "gemini") {
-        if (model.empty() || startsWith(lowerModel, "mimo-")) {
+        if (model.empty() || startsWith(lowerModel, "mimo-") ||
+            lowerModel == "gemini-3.5-flash") {
             return defaultModelForProvider(provider);
         }
         return model;
@@ -1349,6 +1350,122 @@ std::vector<TranscriptSegment> AIAnalyzer::loadSubtitleAsTranscript(const std::s
     }
     
     return segments;
+}
+
+void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult& context, QuestionCallback onComplete, ErrorCallback onError) {
+    std::thread([this, question, context, onComplete, onError]() {
+        AIConfig config = snapshotConfig();
+        if (config.apiKey.empty() || config.baseUrl.empty()) {
+            if (onError) onError("API Key 或 Base URL 未配置");
+            return;
+        }
+
+        std::string prompt = "请根据提供的视频上下文回答用户的问题。\n\n";
+        prompt += "【视频摘要】\n" + context.summary + "\n\n";
+        prompt += "【视频章节】\n";
+        for (const auto& ch : context.chapters) {
+            prompt += "- [" + VideoPlay::formatTime(ch.startTime) + "] " + ch.title + "\n";
+        }
+        prompt += "\n【视频字幕/文稿】\n";
+        size_t maxLen = 30000;
+        size_t currentLen = 0;
+        for (const auto& seg : context.transcript) {
+            std::string line = "[" + VideoPlay::formatTime(seg.startTime) + "] " + seg.text + "\n";
+            if (currentLen + line.length() > maxLen) break;
+            prompt += line;
+            currentLen += line.length();
+        }
+        prompt += "\n【用户提问】\n" + question + "\n\n";
+        prompt += "要求：简明扼要，如果有涉及的时间点，请使用 [MM:SS] 或者 [HH:MM:SS] 格式标出。";
+
+        auto makeHttpError = [](const std::string& prefix, const HttpResponse& response) {
+            std::string message = prefix + " (HTTP " + std::to_string(response.statusCode) + ")";
+            try {
+                auto j = nlohmann::json::parse(response.body);
+                if (j.contains("error") && j["error"].contains("message") &&
+                    j["error"]["message"].is_string()) {
+                    message += ": " + j["error"]["message"].get<std::string>();
+                    return message;
+                }
+            } catch (...) {
+            }
+
+            if (!response.body.empty()) {
+                message += ": " + response.body.substr(0, 200);
+            }
+            return message;
+        };
+
+        HttpClient http;
+        http.setBaseUrl(config.baseUrl);
+        http.setApiKey(config.apiKey);
+        http.setTimeout(60);
+
+        HttpResponse response;
+        if (config.provider == "gemini") {
+            http.setAuthHeader("x-goog-api-key", "");
+
+            nlohmann::json payload = {
+                {"contents", nlohmann::json::array({
+                    {
+                        {"role", "user"},
+                        {"parts", nlohmann::json::array({
+                            {{"text", "你是一个视频助手，只能根据提供的视频上下文回答问题。\n\n" + prompt}}
+                        })}
+                    }
+                })},
+                {"generationConfig", {
+                    {"temperature", 0.7},
+                    {"maxOutputTokens", 2048}
+                }}
+            };
+
+            std::string endpoint = "v1beta/models/" + config.model + ":generateContent";
+            logger().info("[AI] Calling Gemini QA: " + config.baseUrl + "/" + endpoint);
+            response = http.post(endpoint, payload.dump());
+        } else {
+            http.setAuthHeader("Authorization", "Bearer ");
+
+            nlohmann::json payload = {
+                {"model", config.model},
+                {"messages", nlohmann::json::array({
+                    {{"role", "system"}, {"content", "你是一个视频助手，只能根据提供的视频上下文回答问题。"}},
+                    {{"role", "user"}, {"content", prompt}}
+                })},
+                {"temperature", 0.7}
+            };
+
+            response = http.post("v1/chat/completions", payload.dump());
+        }
+
+        if (m_cancelled) return;
+
+        if (!response.success()) {
+            logger().error("[AI] QA API error: status=" + std::to_string(response.statusCode));
+            logger().error("[AI] Response: " + response.body.substr(0, 500));
+            if (onError) onError(makeHttpError("请求失败", response));
+            return;
+        }
+
+        try {
+            auto j = nlohmann::json::parse(response.body);
+            if (config.provider == "gemini") {
+                std::string answer = geminiContentText(j);
+                if (!answer.empty()) {
+                    if (onComplete) onComplete(answer);
+                } else if (onError) {
+                    onError("Gemini 响应格式错误");
+                }
+            } else if (j.contains("choices") && j["choices"].is_array() && !j["choices"].empty()) {
+                std::string answer = j["choices"][0]["message"]["content"].get<std::string>();
+                if (onComplete) onComplete(answer);
+            } else {
+                if (onError) onError("API 响应格式错误");
+            }
+        } catch (const std::exception& e) {
+            if (onError) onError(std::string("解析失败: ") + e.what());
+        }
+    }).detach();
 }
 
 } // namespace VideoPlay

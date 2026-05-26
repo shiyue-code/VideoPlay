@@ -1,4 +1,4 @@
-﻿#include "ai/searchengine.h"
+#include "ai/searchengine.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <sstream>
@@ -20,7 +20,7 @@ SearchEngine::~SearchEngine() = default;
 void SearchEngine::buildIndex(const std::string& videoPath,
                                const std::vector<TranscriptSegment>& transcript,
                                const std::vector<ChapterInfo>& chapters) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_entries.clear();
     m_invertedIndex.clear();
     m_videoPath = videoPath;
@@ -58,7 +58,7 @@ void SearchEngine::buildIndex(const std::string& videoPath,
 }
 
 void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
 
     for (const auto& sub : entries) {
         IndexEntry entry;
@@ -82,14 +82,14 @@ void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries)
 }
 
 void SearchEngine::clearIndex() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_entries.clear();
     m_invertedIndex.clear();
     m_hasIndex = false;
 }
 
 bool SearchEngine::hasIndex() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
     return m_hasIndex;
 }
 
@@ -98,30 +98,40 @@ std::vector<std::string> SearchEngine::tokenize(const std::string& text) const {
     std::string lower = toLower(text);
 
     std::string current;
-    for (size_t i = 0; i < lower.length(); i++) {
+    for (size_t i = 0; i < lower.length(); ) {
         unsigned char c = static_cast<unsigned char>(lower[i]);
-        if (std::isalnum(c) || c < 0x80) {
-            current += static_cast<char>(c);
+        if (c < 0x80) { // ASCII
+            if (std::isalnum(c)) {
+                current += static_cast<char>(c);
+            } else {
+                if (!current.empty()) {
+                    tokens.push_back(current);
+                    current.clear();
+                }
+            }
+            i++;
         } else {
             if (!current.empty()) {
                 tokens.push_back(current);
                 current.clear();
+            }
+            // UTF-8 decoding length
+            size_t seqLen = 1;
+            if ((c & 0xE0) == 0xC0) seqLen = 2;
+            else if ((c & 0xF0) == 0xE0) seqLen = 3;
+            else if ((c & 0xF8) == 0xF0) seqLen = 4;
+
+            if (i + seqLen <= lower.length()) {
+                tokens.push_back(lower.substr(i, seqLen));
+                i += seqLen;
+            } else {
+                i++; // Invalid sequence
             }
         }
     }
     if (!current.empty()) {
         tokens.push_back(current);
     }
-
-    for (size_t i = 0; i < lower.length(); i++) {
-        if ((unsigned char)lower[i] >= 0x80) {
-            if (i + 2 < lower.length()) {
-                std::string bigram = lower.substr(i, 3);
-                tokens.push_back(bigram);
-            }
-        }
-    }
-
     return tokens;
 }
 
@@ -158,7 +168,7 @@ float SearchEngine::calculateRelevance(const std::string& query, const std::stri
 }
 
 std::vector<SearchResult> SearchEngine::search(const std::string& query, int maxResults) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::vector<SearchResult> results;
 
     if (!m_hasIndex || query.empty()) {

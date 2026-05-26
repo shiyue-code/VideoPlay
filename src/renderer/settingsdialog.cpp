@@ -63,14 +63,14 @@ std::string normalizeProvider(std::string provider) {
 
 AIProviderSettings defaultProviderSettings(const std::string& provider) {
     if (provider == "gemini") {
-        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-3.5-flash"};
+        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-2.5-flash"};
     }
     return {"https://api.xiaomimimo.com", std::string(), "mimo-v2.5"};
 }
 
 std::vector<std::string> modelOptionsForProvider(const std::string& provider) {
     if (provider == "gemini") {
-        return {"gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"};
+        return {"gemini-2.5-flash", "gemini-2.5-pro"};
     }
     return {"mimo-v2.5", "mimo-v2-omni"};
 }

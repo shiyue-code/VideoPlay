@@ -17,6 +17,12 @@ Logger& logger() {
 
 void SDLRenderer::handleEvent(const SDL_Event& event) {
     switch (event.type) {
+        case SDL_EVENT_TEXT_INPUT:
+            if (m_isSearchInputFocused && event.text.text) {
+                m_searchQuery += event.text.text;
+            }
+            break;
+
         case SDL_EVENT_QUIT:
             m_initialized = false;
             break;
@@ -39,12 +45,45 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
         case SDL_EVENT_KEY_UP: {
             bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
             
-            //  菜单快捷键处�?
+            //  菜单快捷键处理
             if (pressed) {
                 // Ctrl+O 打开文件
                 if (event.key.key == SDLK_O && (event.key.mod & SDL_KMOD_CTRL)) {
                     if (m_fileOpenCallback) m_fileOpenCallback();
                     break;
+                }
+
+                // 处理搜索输入框快捷键
+                if (m_isSearchInputFocused) {
+                    if (event.key.key == SDLK_BACKSPACE) {
+                        if (!m_searchQuery.empty()) {
+                            // 简单的 UTF-8 字符删除逻辑
+                            while (!m_searchQuery.empty() && (m_searchQuery.back() & 0xC0) == 0x80) {
+                                m_searchQuery.pop_back();
+                            }
+                            if (!m_searchQuery.empty()) m_searchQuery.pop_back();
+                        }
+                        return; // 拦截按键
+                    } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
+                        if (!m_searchQuery.empty() && m_searchCallback) {
+                            m_searchCallback(m_searchQuery);
+                            m_searchQuery.clear(); // 发送后清空
+                        }
+                        return; // 拦截按键
+                    } else if (event.key.key == SDLK_ESCAPE) {
+                        toggleSearchPanel(); // 关闭搜索面板
+                        return;
+                    } else if (event.key.key == SDLK_V && (event.key.mod & SDL_KMOD_CTRL)) {
+                        if (SDL_HasClipboardText()) {
+                            char* text = SDL_GetClipboardText();
+                            if (text) {
+                                m_searchQuery += text;
+                                SDL_free(text);
+                            }
+                        }
+                        return;
+                    }
+                    return; // 焦点在输入框时拦截所有按键，防止空格暂停等
                 }
             }
             
@@ -59,7 +98,11 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_playPauseCallback) m_playPauseCallback();
                         break;
                     case SDLK_ESCAPE:
-                        if (m_fullscreen) toggleFullscreen();
+                        if (m_showSearchPanel) {
+                            toggleSearchPanel();
+                        } else if (m_fullscreen) {
+                            toggleFullscreen();
+                        }
                         closeAllMenus();
                         hideContextMenu();
                         break;
@@ -192,11 +235,16 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                                 && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
             bool overEpisode = m_showEpisodePanel && mx >= 24 && mx <= 284
                                && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
-            if (overPlaylist) {
-                m_playlistScrollOffset -= static_cast<int>(event.wheel.y);
+            bool overSearch = m_showSearchPanel && mx >= m_windowWidth - 364 && mx <= m_windowWidth - 24
+                               && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
+            if (overSearch) {
+                m_searchScrollOffset -= static_cast<int>(event.wheel.y) * 40;
+                if (m_searchScrollOffset < 0) m_searchScrollOffset = 0;
+            } else if (overPlaylist) {
+                m_playlistScrollOffset -= static_cast<int>(event.wheel.y) * 40;
                 if (m_playlistScrollOffset < 0) m_playlistScrollOffset = 0;
             } else if (overEpisode) {
-                m_episodeScrollOffset -= static_cast<int>(event.wheel.y);
+                m_episodeScrollOffset -= static_cast<int>(event.wheel.y) * 40;
                 if (m_episodeScrollOffset < 0) m_episodeScrollOffset = 0;
             } else if (m_volumeCallback) {
                 m_volumeCallback(event.wheel.y > 0.0f ? 5 : -5);
@@ -528,6 +576,14 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         if (!inMenu) {
             closeAllMenus();
         }
+
+        // 点击空白处取消搜索框焦点
+        if (!inMenu &&
+            m_pressedControl != ControlType::SearchInput &&
+            m_pressedControl != ControlType::SearchPanelToggle) {
+            m_isSearchInputFocused = false;
+            SDL_StopTextInput(m_window);
+        }
         return;
     }
     
@@ -589,7 +645,17 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             if (m_speedCallback) m_speedCallback(0);
             break;
         case ControlType::PlaylistButton:
-            m_showPlaylistPanel = !m_showPlaylistPanel;
+            togglePlaylistPanel();
+            break;
+        case ControlType::SearchPanelToggle:
+            toggleSearchPanel();
+            break;
+        case ControlType::SearchCloseButton:
+            toggleSearchPanel();
+            break;
+        case ControlType::SearchInput:
+            m_isSearchInputFocused = true;
+            SDL_StartTextInput(m_window);
             break;
         default:
             break;
@@ -619,6 +685,13 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
                     break;
                 case ControlType::EpisodeNext:
                     if (m_episodeNextCallback) m_episodeNextCallback();
+                    break;
+                case ControlType::SearchTimestamp:
+                    if (m_seekCallback && m_lastDuration > 0) {
+                        double ratio = static_cast<double>(m_pressedControlValue) / static_cast<double>(m_lastDuration);
+                        ratio = std::max(0.0, std::min(1.0, ratio));
+                        m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
+                    }
                     break;
                 default:
                     break;

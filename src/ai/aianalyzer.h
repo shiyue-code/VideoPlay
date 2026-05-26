@@ -30,6 +30,9 @@ public:
                  ProgressCallback onProgress = nullptr,
                  ErrorCallback onError = nullptr);
 
+    using QuestionCallback = std::function<void(const std::string& answer)>;
+    void askQuestion(const std::string& question, const AIAnalysisResult& context, QuestionCallback onComplete, ErrorCallback onError = nullptr);
+
     void cancel();
 
     bool hasCache(const std::string& videoPath) const;
