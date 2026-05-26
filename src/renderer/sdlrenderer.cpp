@@ -20,6 +20,7 @@
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -459,11 +460,13 @@ void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callbac
     SDL_ShowOpenFileDialog(sdlCallback, this, nullptr, sdlFilters, 1, nullptr, false);
 }
 
-void SDLRenderer::showMessageBox(const std::string& title, const std::string& message, bool isError) {
+void SDLRenderer::showMessageBox(const std::string& title, const std::string& message,
+                                 bool isError,
+                                 std::function<void(int64_t timestampMs)> timestampCallback) {
     if (!m_messageBox) {
         m_messageBox = std::make_unique<CustomMessageBox>(m_window, m_font);
     }
-    m_messageBox->show(title, message, isError);
+    m_messageBox->show(title, message, isError, std::move(timestampCallback));
 }
 
 void SDLRenderer::setLoopMode(int mode) {
@@ -675,7 +678,11 @@ void SDLRenderer::setEpisodeNextCallback(EpisodeNextCallback callback) {
 }
 
 void SDLRenderer::setLoopModeCallback(LoopModeCallback callback) {
-    m_loopModeCallback = callback;
+    m_loopModeCallback = std::move(callback);
+}
+
+void SDLRenderer::setSearchCallback(SearchCallback callback) {
+    m_searchCallback = std::move(callback);
 }
 
 void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
@@ -694,6 +701,10 @@ void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
     m_chapters = chapters;
     m_hasChapters = !chapters.empty();
     updateChapterMenuItems();
+}
+
+void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {
+    m_searchHighlights = timestamps;
 }
 
 void SDLRenderer::updateChapterMenuItems() {
@@ -732,6 +743,39 @@ void SDLRenderer::toggleEpisodePanel() {
 
 void SDLRenderer::togglePlaylistPanel() {
     m_showPlaylistPanel = !m_showPlaylistPanel;
+    if (m_showPlaylistPanel) {
+        m_showEpisodePanel = false;
+        m_showSearchPanel = false;
+        m_isSearchInputFocused = false;
+        SDL_StopTextInput(m_window);
+    }
+}
+
+void SDLRenderer::showSearchPanel() {
+    m_showSearchPanel = true;
+    m_showPlaylistPanel = false;
+    m_showEpisodePanel = false;
+    m_showControls = true;
+    m_lastMouseMove = SDL_GetTicks();
+    m_isSearchInputFocused = true;
+    SDL_StartTextInput(m_window);
+}
+
+void SDLRenderer::toggleSearchPanel() {
+    if (m_showSearchPanel) {
+        m_showSearchPanel = false;
+        m_isSearchInputFocused = false;
+        SDL_StopTextInput(m_window);
+    } else {
+        showSearchPanel();
+    }
+}
+
+void SDLRenderer::addChatMessage(bool isUser, const std::string& text) {
+    std::lock_guard<std::mutex> lock(m_chatMutex);
+    m_chatHistory.push_back({isUser, text});
+    // Scroll to bottom
+    m_searchScrollOffset = 999999;
 }
 
 void SDLRenderer::toggleMediaInfoPanel() {

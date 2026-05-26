@@ -1,4 +1,4 @@
-﻿#include "app.h"
+#include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
@@ -193,6 +193,9 @@ bool VideoPlayerApp::initialize() {
         Settings::instance().setLoopMode(static_cast<LoopMode>(mode));
         m_renderer->setLoopMode(mode);
     });
+    m_renderer->setSearchCallback([this](const std::string& query) {
+        handleSearch(query);
+    });
     m_renderer->setSubtitleSyncCallback([this](int deltaMs) {
         if (m_subtitleParser && m_subtitleParser->isLoaded()) {
             m_subtitleParser->adjustOffset(deltaMs);
@@ -253,6 +256,11 @@ bool VideoPlayerApp::initialize() {
             case SDLK_L:
                 if (SDL_GetModState() & SDL_KMOD_CTRL) {
                     m_renderer->togglePlaylistPanel();
+                }
+                break;
+            case SDLK_F:
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                    showSearchPanel();
                 }
                 break;
         }

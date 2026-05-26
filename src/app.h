@@ -63,6 +63,8 @@ private:
 
     // AI 功能
     void startAIAnalysis();
+    void handleSearch(const std::string& query);
+    void handleAIAnalysis();
     void showAISummary();
     void showSearchPanel();
     void clearAICache();

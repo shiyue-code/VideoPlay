@@ -49,7 +49,7 @@ std::string normalizeAIProvider(std::string provider) {
 
 AIProviderConfig defaultAIProviderConfig(const std::string& provider) {
     if (provider == "gemini") {
-        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-3.5-flash"};
+        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-2.5-flash"};
     }
     return {"https://api.xiaomimimo.com", std::string(), "mimo-v2.5"};
 }
@@ -89,7 +89,8 @@ void normalizeAIProviderConfig(const std::string& provider, AIProviderConfig& pr
             lowerUrl.find("xiaomimimo") != std::string::npos) {
             providerConfig.baseUrl = defaults.baseUrl;
         }
-        if (providerConfig.model.empty() || lowerModel.find("mimo") != std::string::npos) {
+        if (providerConfig.model.empty() || lowerModel.find("mimo") != std::string::npos ||
+            lowerModel == "gemini-3.5-flash") {
             providerConfig.model = defaults.model;
         }
         return;

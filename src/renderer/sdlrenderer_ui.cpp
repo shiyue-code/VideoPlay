@@ -5,6 +5,8 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <mutex>
 #include <sstream>
 #include <iomanip>
 #include <utility>
@@ -33,6 +35,27 @@ std::string formatFps(double fps) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2) << fps;
     return oss.str();
+}
+
+size_t utf8CharLength(const std::string& text, size_t pos) {
+    if (pos >= text.size()) {
+        return 0;
+    }
+
+    unsigned char ch = static_cast<unsigned char>(text[pos]);
+    if (ch < 0x80) {
+        return 1;
+    }
+    if ((ch & 0xE0) == 0xC0) {
+        return (pos + 1 < text.size()) ? 2 : 1;
+    }
+    if ((ch & 0xF0) == 0xE0) {
+        return (pos + 2 < text.size()) ? 3 : 1;
+    }
+    if ((ch & 0xF8) == 0xF0) {
+        return (pos + 3 < text.size()) ? 4 : 1;
+    }
+    return 1;
 }
 
 } // namespace
@@ -71,7 +94,8 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     }
 
     // 自动隐藏控制栏（仅在播放状态下，3秒无鼠标操作）
-    if (m_showControls && isPlaying && SDL_GetTicks() - m_lastMouseMove > 3000) {
+    if (m_showControls && isPlaying && !m_showSearchPanel &&
+        SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
     }
 
@@ -94,6 +118,9 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         }
         if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
             renderEpisodePanel();
+        }
+        if (m_showSearchPanel) {
+            renderSearchPanel();
         }
     } else {
         // 控制栏隐藏时关闭已打开的菜单
@@ -159,7 +186,7 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
     int controlY = m_windowHeight - m_controlHeight - marginBottom;
     int controlW = m_windowWidth - marginX * 2;
     int radius = 20;
-    
+
     //  底部投影（增加悬浮感�?
     fillRoundRect(marginX + 2, controlY + 4, controlW, m_controlHeight, radius,
                           0, 0, 0, 80);
@@ -293,6 +320,17 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
             int hitH = markerTotalH + 8 + barHeight;
             m_controlRects.push_back({hitX, hitY, hitW, hitH,
                                       ControlType::ChapterMarker, static_cast<int>(i)});
+        }
+    }
+
+    // 搜索热力图标记
+    if (duration > 0 && !m_searchHighlights.empty()) {
+        for (int64_t timestamp : m_searchHighlights) {
+            if (timestamp < 0 || timestamp > duration) continue;
+            float ratio = static_cast<float>(timestamp) / static_cast<float>(duration);
+            int markerX = margin + static_cast<int>(barWidth * ratio);
+            // 绘制半透明亮黄色细线
+            fillRect(markerX, barY, 2, barHeight, 255, 200, 50, 150);
         }
     }
 
@@ -1280,6 +1318,210 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
     drawText("Diff:", diffColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
     drawText(diffVal, std::max(diffColX + diffLabelW + 8, diffColX + COL_DIFF_WIDTH - diffValW - 4), y + 3,
              r, g, b, fontSize);
+}
+
+void SDLRenderer::renderSearchPanel() {
+    int panelW = 340;
+    int panelH = m_windowHeight - m_menuBarHeight - m_controlHeight - 34;
+    int panelX = m_windowWidth - panelW - 24;
+    int panelY = m_menuBarHeight + 10;
+    int radius = 12;
+
+    // 半透明背景
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 80);
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 30);
+    fillRoundRect(panelX, panelY, panelW, panelH, radius, COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], 240);
+
+    // 标题栏
+    int titleH = 48;
+    drawText("AI 搜索与问答", panelX + 20, panelY + 14, 255, 255, 255, 14);
+    int closeSize = 28;
+    int closeX = panelX + panelW - closeSize - 12;
+    int closeY = panelY + 10;
+    bool closeHovered = (m_mouseX >= closeX && m_mouseX <= closeX + closeSize &&
+                         m_mouseY >= closeY && m_mouseY <= closeY + closeSize);
+    bool closePressed = (m_pressedControl == ControlType::SearchCloseButton);
+    if (closePressed) {
+        fillRoundRect(closeX, closeY, closeSize, closeSize, 6, 80, 85, 95, 220);
+    } else if (closeHovered) {
+        fillRoundRect(closeX, closeY, closeSize, closeSize, 6, 70, 75, 85, 200);
+    }
+    SDL_SetRenderDrawColor(m_renderer, 230, 230, 230, closeHovered ? 255 : 190);
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(closeX + 9), static_cast<float>(closeY + 9),
+                   static_cast<float>(closeX + closeSize - 9), static_cast<float>(closeY + closeSize - 9));
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(closeX + closeSize - 9), static_cast<float>(closeY + 9),
+                   static_cast<float>(closeX + 9), static_cast<float>(closeY + closeSize - 9));
+    m_controlRects.push_back({closeX, closeY, closeSize, closeSize, ControlType::SearchCloseButton, 0});
+
+    // 历史消息列表渲染区 (支持滚动)
+    int inputH = 46;
+    int listY = panelY + titleH;
+    int listH = panelH - titleH - inputH - 20;
+
+    SDL_Rect clipRect = { panelX, listY, panelW, listH };
+    SDL_SetRenderClipRect(m_renderer, &clipRect);
+
+    int contentY = listY - m_searchScrollOffset;
+    {
+        std::lock_guard<std::mutex> lock(m_chatMutex);
+        for (size_t i = 0; i < m_chatHistory.size(); ++i) {
+            const auto& msg = m_chatHistory[i];
+            // 解析和换行
+            std::vector<std::pair<std::string, bool>> tokens;
+            std::string currentText = msg.text;
+            size_t pos = 0;
+            while (pos < currentText.length()) {
+                size_t start = currentText.find('[', pos);
+                if (start != std::string::npos) {
+                    size_t end = currentText.find(']', start);
+                    if (end != std::string::npos) {
+                        if (start > pos) tokens.push_back({currentText.substr(pos, start - pos), false});
+                        tokens.push_back({currentText.substr(start, end - start + 1), true});
+                        pos = end + 1;
+                    } else {
+                        tokens.push_back({currentText.substr(pos), false});
+                        break;
+                    }
+                } else {
+                    tokens.push_back({currentText.substr(pos), false});
+                    break;
+                }
+            }
+
+            int bubbleMaxW = panelW - 60;
+            int maxLineWidth = 0;
+            int currentX = 0;
+            int currentY = 0;
+            int lineHeight = 18;
+
+            struct DrawCmd {
+                std::string text;
+                bool isTimestamp;
+                int x, y;
+                int width;
+            };
+            std::vector<DrawCmd> drawCmds;
+
+            auto appendDrawCmd = [&](const std::string& text, bool isTimestamp) {
+                if (text.empty()) {
+                    return;
+                }
+
+                int w = getTextWidth(text, 12);
+                if (currentX + w > bubbleMaxW && currentX > 0) {
+                    currentX = 0;
+                    currentY += lineHeight;
+                }
+
+                drawCmds.push_back({text, isTimestamp, currentX, currentY, w});
+                currentX += w;
+                maxLineWidth = std::max(maxLineWidth, currentX);
+            };
+
+            for (const auto& token : tokens) {
+                if (token.second) {
+                    appendDrawCmd(token.first, true);
+                    continue;
+                }
+
+                for (size_t pos = 0; pos < token.first.size();) {
+                    char ch = token.first[pos];
+                    if (ch == '\r') {
+                        ++pos;
+                        continue;
+                    }
+                    if (ch == '\n') {
+                        currentX = 0;
+                        currentY += lineHeight;
+                        ++pos;
+                        continue;
+                    }
+
+                    size_t charLen = utf8CharLength(token.first, pos);
+                    appendDrawCmd(token.first.substr(pos, charLen), false);
+                    pos += charLen;
+                }
+            }
+
+            int bubbleW = maxLineWidth + 24;
+            int bubbleH = currentY + lineHeight + 20;
+
+            int bubbleX = msg.isUser ? (panelX + panelW - bubbleW - 20) : (panelX + 20);
+            int bubbleY = contentY;
+
+            if (bubbleY + bubbleH > listY && bubbleY < listY + listH) {
+                if (msg.isUser) {
+                    fillRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8, 40, 120, 255, 220); // 用户蓝色
+                } else {
+                    fillRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8, 50, 55, 60, 220); // AI 深灰
+                }
+
+                for (const auto& cmd : drawCmds) {
+                    int dx = bubbleX + 12 + cmd.x;
+                    int dy = bubbleY + 10 + cmd.y;
+                    if (cmd.isTimestamp) {
+                        drawText(cmd.text, dx, dy, 255, 200, 50, 12); // 黄色时间戳
+                        int mins = 0, secs = 0;
+                        if (sscanf(cmd.text.c_str(), "[%d:%d]", &mins, &secs) == 2) {
+                            int value = (mins * 60 + secs) * 1000;
+                            m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, value});
+                        } else {
+                            int h=0, m=0, s=0;
+                            if (sscanf(cmd.text.c_str(), "[%d:%d:%d]", &h, &m, &s) == 3) {
+                                int value = (h * 3600 + m * 60 + s) * 1000;
+                                m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, value});
+                            } else {
+                                drawText(cmd.text, dx, dy, 255, 255, 255, 12); // 解析失败，白色
+                            }
+                        }
+                    } else {
+                        drawText(cmd.text, dx, dy, 255, 255, 255, 12);
+                    }
+                }
+            }
+            contentY += bubbleH + 10;
+        }
+    }
+
+    // 更新滚动偏移范围
+    int totalContentH = std::max(0, contentY + m_searchScrollOffset - listY);
+    if (m_searchScrollOffset > std::max(0, totalContentH - listH)) {
+        m_searchScrollOffset = std::max(0, totalContentH - listH);
+    }
+
+    SDL_SetRenderClipRect(m_renderer, nullptr);
+
+    // 输入框区域
+    int inputY = panelY + panelH - inputH - 10;
+    int inputX = panelX + 16;
+    int inputW = panelW - 32;
+
+    bool inputHovered = (m_mouseX >= inputX && m_mouseX <= inputX + inputW && m_mouseY >= inputY && m_mouseY <= inputY + inputH);
+    uint8_t borderAlpha = m_isSearchInputFocused ? 200 : (inputHovered ? 120 : 60);
+
+    fillRoundRect(inputX, inputY, inputW, inputH, 8, 20, 22, 28, 255);
+    // 边框
+    fillRoundRect(inputX - 1, inputY - 1, inputW + 2, 1, borderAlpha, borderAlpha, borderAlpha, 255); // Top
+    fillRoundRect(inputX - 1, inputY + inputH, inputW + 2, 1, borderAlpha, borderAlpha, borderAlpha, 255); // Bottom
+    fillRoundRect(inputX - 1, inputY, 1, inputH, borderAlpha, borderAlpha, borderAlpha, 255); // Left
+    fillRoundRect(inputX + inputW, inputY, 1, inputH, borderAlpha, borderAlpha, borderAlpha, 255); // Right
+
+    // 绘制输入文本
+    std::string displayText = m_searchQuery;
+    if (m_isSearchInputFocused && (SDL_GetTicks() % 1000) < 500) {
+        displayText += "|"; // 简单的光标
+    }
+    if (displayText.empty() && !m_isSearchInputFocused) {
+        drawText("输入搜索内容或问题...", inputX + 12, inputY + 14, 150, 150, 150, 12);
+    } else {
+        drawText(displayText, inputX + 12, inputY + 14, 255, 255, 255, 12);
+    }
+
+    m_controlRects.push_back({inputX, inputY, inputW, inputH, ControlType::SearchInput, 0});
+    // 面板背景命中检测
+    m_controlRects.push_back({panelX, panelY, panelW, panelH, ControlType::PanelBackground, 0});
 }
 
 } // namespace VideoPlay
