@@ -18,6 +18,7 @@ struct WindowConfig {
     int width = 1280;
     int height = 720;
     bool maximized = false;
+    bool borderless = true;
 };
 
 struct SubtitleStyle {

@@ -270,7 +270,8 @@ void Settings::setWindowConfig(const WindowConfig& config) {
         {"y", config.y},
         {"width", config.width},
         {"height", config.height},
-        {"maximized", config.maximized}
+        {"maximized", config.maximized},
+        {"borderless", config.borderless}
     };
 }
 
@@ -284,6 +285,7 @@ WindowConfig Settings::windowConfig() const {
         config.width = w.value("width", 1280);
         config.height = w.value("height", 720);
         config.maximized = w.value("maximized", false);
+        config.borderless = w.value("borderless", true);
     }
     return config;
 }

@@ -42,6 +42,10 @@ namespace {
     constexpr UINT WM_NCUAHDRAWFRAME = 0x00AF;
 #endif
 
+    // 多窗口支持：实例映射
+    std::unordered_map<HWND, WindowFrameWin32*> g_hwndToInstance;
+    std::unordered_map<HWND, WindowFrameWin32*> g_shadowToInstance;
+    
     // ShadowWindow HWND -> ContentWindow HWND 映射
     std::unordered_map<HWND, HWND> g_shadowToContent;
 
@@ -380,6 +384,7 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
 
         case WM_NCDESTROY: {
             g_shadowToContent.erase(hwnd);
+            g_shadowToInstance.erase(hwnd);
             g_shadowResizeStates.erase(hwnd);
             break;
         }
@@ -420,6 +425,9 @@ bool WindowFrameWin32::enable(SDL_Window* window)
     refreshWindow();
     createShadowWindow();
 
+    // 注册实例映射（多窗口支持）
+    g_hwndToInstance[m_hwnd] = this;
+
     logger().info("WindowFrameWin32 enabled");
     m_enabled = true;
     return true;
@@ -434,6 +442,9 @@ void WindowFrameWin32::disable()
     RemoveWindowSubclass(m_hwnd, SubclassProc, 0);
     restoreStyle();
     refreshWindow();
+
+    // 移除实例映射（多窗口支持）
+    g_hwndToInstance.erase(m_hwnd);
 
     logger().info("WindowFrameWin32 disabled");
     m_enabled = false;
@@ -654,19 +665,31 @@ void WindowFrameWin32::refreshWindow() {
 
 // Aero Snap 自定义实现
 void WindowFrameWin32::performAeroSnap(int screenX, int screenY) {
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    // 多显示器支持：通过鼠标位置获取当前显示器的工作区
+    POINT pt = { screenX, screenY };
+    HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(MONITORINFO);
+    if (!GetMonitorInfoW(hMon, &mi)) {
+        // 回退到主屏幕
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &mi.rcWork, 0);
+    }
+    const RECT& workArea = mi.rcWork;
     const int threshold = 10;
 
-    if (screenY <= threshold) {
+    if (screenY <= workArea.top + threshold) {
         // 顶部边缘：最大化
         ShowWindow(m_hwnd, SW_MAXIMIZE);
-    } else if (screenX <= threshold) {
+    } else if (screenX <= workArea.left + threshold) {
         // 左边缘：贴靠左半屏
-        SetWindowPos(m_hwnd, nullptr, 0, 0, screenW / 2, screenH, SWP_NOZORDER);
-    } else if (screenX >= screenW - threshold) {
+        int w = workArea.right - workArea.left;
+        int h = workArea.bottom - workArea.top;
+        SetWindowPos(m_hwnd, nullptr, workArea.left, workArea.top, w / 2, h, SWP_NOZORDER);
+    } else if (screenX >= workArea.right - threshold) {
         // 右边缘：贴靠右半屏
-        SetWindowPos(m_hwnd, nullptr, screenW / 2, 0, screenW / 2, screenH, SWP_NOZORDER);
+        int w = workArea.right - workArea.left;
+        int h = workArea.bottom - workArea.top;
+        SetWindowPos(m_hwnd, nullptr, workArea.left + w / 2, workArea.top, w / 2, h, SWP_NOZORDER);
     }
 }
 
@@ -707,6 +730,7 @@ void WindowFrameWin32::createShadowWindow() {
     if (m_shadowHwnd) {
         // ShadowWindow 不绘制内容，仅用于接收边框 resize 事件
         g_shadowToContent[m_shadowHwnd] = m_hwnd;
+        g_shadowToInstance[m_shadowHwnd] = this;
 
         // Z-Order 设置：ShadowWindow 必须在主窗口上方
         ShowWindow(m_shadowHwnd, SW_SHOW);
@@ -738,6 +762,7 @@ void WindowFrameWin32::destroyShadowWindow() {
     if (m_shadowHwnd) {
         if (IsWindow(m_shadowHwnd)) DestroyWindow(m_shadowHwnd);
         g_shadowToContent.erase(m_shadowHwnd);
+        g_shadowToInstance.erase(m_shadowHwnd);
         g_shadowResizeStates.erase(m_shadowHwnd);
         m_shadowHwnd = nullptr;
     }
@@ -762,19 +787,24 @@ void WindowFrameWin32::syncShadowWindow() {
 }
 
 void WindowFrameWin32::updateShadowVisibility() {
-    if (!m_shadowHwnd || !m_hwnd) return;
-    if (!IsWindow(m_shadowHwnd)) { m_shadowHwnd = nullptr; return; }
+    if (!m_hwnd) return;
 
     if (IsZoomed(m_hwnd) || IsIconic(m_hwnd)) {
-        ShowWindow(m_shadowHwnd, SW_HIDE);
+        // 性能优化：最大化/最小化时彻底销毁 ShadowWindow，节省系统资源
+        destroyShadowWindow();
     } else {
-        ShowWindow(m_shadowHwnd, SW_SHOW);
-        syncShadowWindow();
-        // 从隐藏恢复后，重新确保 ShadowWindow 在主窗口上方
-        SetWindowPos(m_shadowHwnd, m_hwnd, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        SetWindowPos(m_hwnd, m_shadowHwnd, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        // 恢复时重新创建 ShadowWindow
+        if (!m_shadowHwnd || !IsWindow(m_shadowHwnd)) {
+            createShadowWindow();
+        } else {
+            ShowWindow(m_shadowHwnd, SW_SHOW);
+            syncShadowWindow();
+            // 确保 ShadowWindow 在主窗口上方
+            SetWindowPos(m_shadowHwnd, m_hwnd, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(m_hwnd, m_shadowHwnd, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
     }
 }
 
@@ -824,9 +854,15 @@ void WindowFrameWin32::updatePreview(int screenX, int screenY) {
     if (!m_previewHwnd) createPreviewWindow();
     if (!m_previewHwnd) return;
 
-    // 获取屏幕工作区（排除任务栏）
-    RECT workArea;
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+    // 多显示器支持：通过鼠标位置获取当前显示器的工作区
+    POINT pt = { screenX, screenY };
+    HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(MONITORINFO);
+    if (!GetMonitorInfoW(hMon, &mi)) {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &mi.rcWork, 0);
+    }
+    const RECT& workArea = mi.rcWork;
 
     const int threshold = 10;
     bool nearTop = screenY <= workArea.top + threshold;
