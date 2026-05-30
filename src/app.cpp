@@ -87,8 +87,11 @@ bool VideoPlayerApp::initialize() {
         return false;
     }
 
-    // 默认启用无边框模式
-    m_renderer->toggleBorderless();
+    // 根据设置恢复无边框模式
+    auto windowConfigInit = Settings::instance().windowConfig();
+    if (windowConfigInit.borderless) {
+        m_renderer->toggleBorderless();
+    }
 
     // 确保窗口获得焦点
     if (m_renderer->getWindow()) {
@@ -291,6 +294,7 @@ void VideoPlayerApp::shutdown() {
     if (m_renderer) {
         auto config = Settings::instance().windowConfig();
         config.maximized = m_renderer->isMaximized();
+        config.borderless = m_renderer->isBorderless();
         Settings::instance().setWindowConfig(config);
     }
 

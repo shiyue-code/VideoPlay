@@ -252,7 +252,11 @@ void SDLRenderer::toggleBorderless() {
     }
 
     if (m_borderless) {
-        m_windowFrame->enable(m_window);
+        if (!m_windowFrame->enable(m_window)) {
+            // 错误恢复：enable 失败时回退到边框模式
+            logger().warning("Failed to enable borderless mode, falling back to bordered");
+            m_borderless = false;
+        }
     } else {
         m_windowFrame->disable();
     }
