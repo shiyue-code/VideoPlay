@@ -63,6 +63,7 @@ struct AIConfig {
     std::string model = "mimo-v2.5";
     std::string cacheDir;
     bool autoAnalyze = false;
+    int analysisDetailLevel = 1; // 0=简略, 1=标准, 2=详细
     std::unordered_map<std::string, AIProviderConfig> providers;
 };
 

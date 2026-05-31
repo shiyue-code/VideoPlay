@@ -31,6 +31,9 @@ public:
     HttpResponse post(const std::string& path, const std::string& jsonBody,
                       const std::map<std::string, std::string>& headers = {});
 
+    HttpResponse postRaw(const std::string& path, const std::string& body,
+                         const std::map<std::string, std::string>& headers = {});
+
     HttpResponse uploadFile(const std::string& path,
                             const std::string& filePath,
                             const std::string& fieldName,

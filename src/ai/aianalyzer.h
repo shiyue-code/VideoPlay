@@ -32,6 +32,11 @@ public:
 
     using QuestionCallback = std::function<void(const std::string& answer)>;
     void askQuestion(const std::string& question, const AIAnalysisResult& context, QuestionCallback onComplete, ErrorCallback onError = nullptr);
+    void askVideoDirect(const std::string& videoPath,
+                        const std::string& question,
+                        QuestionCallback onComplete,
+                        ProgressCallback onProgress = nullptr,
+                        ErrorCallback onError = nullptr);
 
     void cancel();
 
@@ -42,6 +47,14 @@ public:
     void clearAllCache();
 
 private:
+    struct GeminiVideoFile {
+        bool valid = false;
+        std::string name;
+        std::string uri;
+        std::string mimeType = "video/mp4";
+        int64_t expiresAt = 0;
+    };
+
     HttpClient m_http;
     AIConfig m_config;
     std::atomic<bool> m_cancelled{false};
@@ -59,6 +72,34 @@ private:
     AIAnalysisResult analyzeWithGeminiVideoUnderstanding(const std::string& videoPath,
                                                          const AIConfig& config,
                                                          ProgressCallback onProgress);
+    std::string askMimoVideoDirect(const std::string& videoPath,
+                                   const std::string& question,
+                                   const AIConfig& config,
+                                   ProgressCallback onProgress,
+                                   ErrorCallback onError);
+    std::string askGeminiVideoDirect(const std::string& videoPath,
+                                     const std::string& question,
+                                     const AIConfig& config,
+                                     ProgressCallback onProgress,
+                                     ErrorCallback onError);
+    GeminiVideoFile ensureGeminiVideoFile(const std::string& videoPath,
+                                          const AIConfig& config,
+                                          ProgressCallback onProgress,
+                                          ErrorCallback onError);
+    GeminiVideoFile uploadGeminiVideoFile(const std::string& mp4Path,
+                                          const std::string& cachePath,
+                                          const AIConfig& config,
+                                          ProgressCallback onProgress,
+                                          ErrorCallback onError);
+    bool waitForGeminiFileActive(const GeminiVideoFile& file,
+                                 const AIConfig& config,
+                                 ProgressCallback onProgress);
+    GeminiVideoFile loadGeminiFileCache(const std::string& cachePath) const;
+    void saveGeminiFileCache(const std::string& cachePath,
+                             const GeminiVideoFile& file) const;
+    std::string getGeminiFileCachePath(const std::string& sourceHash,
+                                       int clipSeconds,
+                                       int64_t maxOutputBytes) const;
     std::string extractVideoForAI(const std::string& videoPath,
                                   ProgressCallback onProgress,
                                   int64_t maxOutputBytes,
@@ -69,6 +110,15 @@ private:
 
     std::string getCachePath(const std::string& videoPath) const;
     std::string computeFileHash(const std::string& filePath) const;
+    std::string computeSourceHash(const std::string& filePath) const;
+    std::string getTranscodeCacheDir() const;
+    std::string getTranscodeCachePath(const std::string& sourceHash,
+                                      int clipSeconds,
+                                      int64_t maxOutputBytes) const;
+    std::string findReusableTranscodeCache(const std::string& sourceHash,
+                                           int clipSeconds,
+                                           int64_t maxOutputBytes) const;
+    void clearTranscodeCache(const std::string& videoPath);
     void saveCache(const std::string& videoPath, const AIAnalysisResult& result);
 
     std::string getCacheDir() const;

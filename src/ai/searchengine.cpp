@@ -60,6 +60,11 @@ void SearchEngine::buildIndex(const std::string& videoPath,
 void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
 
+    if (entries.empty()) {
+        return;
+    }
+
+    size_t firstNewEntry = m_entries.size();
     for (const auto& sub : entries) {
         IndexEntry entry;
         entry.timestamp = sub.startTime;
@@ -69,15 +74,14 @@ void SearchEngine::addSubtitleEntries(const std::vector<SubtitleEntry>& entries)
         m_entries.push_back(entry);
     }
 
-    for (size_t i = 0; i < m_entries.size(); i++) {
-        if (m_entries[i].source == 1) {
-            auto tokens = tokenize(m_entries[i].text);
-            for (const auto& token : tokens) {
-                m_invertedIndex[token].push_back(i);
-            }
+    for (size_t i = firstNewEntry; i < m_entries.size(); i++) {
+        auto tokens = tokenize(m_entries[i].text);
+        for (const auto& token : tokens) {
+            m_invertedIndex[token].push_back(i);
         }
     }
 
+    m_hasIndex = true;
     logger().info("[Search] Added " + std::to_string(entries.size()) + " subtitle entries");
 }
 

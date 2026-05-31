@@ -11,6 +11,69 @@ Logger& logger() {
     static auto logger = Logger::get("renderer.events");
     return *logger;
 }
+
+constexpr int kTopMenuX = 10;
+constexpr int kTopMenuPaddingX = 16;
+constexpr int kTopMenuGap = 8;
+
+bool isSubmenuParent(int id)
+{
+    return id == 58 || id == 59 || id == 69 || id == 89;
+}
+
+int submenuItemCount(int parentId)
+{
+    switch (parentId) {
+        case 58: return 3;
+        case 59: return 3;
+        case 69: return 4;
+        case 89: return 4;
+        default: return 0;
+    }
+}
+
+int submenuItemId(int parentId, int index)
+{
+    switch (parentId) {
+        case 58: return 90 + index;
+        case 59: return 60 + index;
+        case 69: return 70 + index;
+        case 89: return 93 + index;
+        default: return 0;
+    }
+}
+
+const char* submenuItemLabel(int parentId, int index)
+{
+    static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
+    static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
+    static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
+
+    switch (parentId) {
+        case 59: return loopLabels[index];
+        case 69: return aspectLabels[index];
+        case 89: return audioFilterLabels[index];
+        default: return "";
+    }
+}
+
+std::string submenuParentLabel(const MenuItem& item, int loopMode, AspectMode aspectMode,
+                               AudioFilterPreset audioFilterPreset)
+{
+    if (item.id == 59) {
+        int index = std::clamp(loopMode, 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    if (item.id == 69) {
+        int index = std::clamp(static_cast<int>(aspectMode), 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    if (item.id == 89) {
+        int index = std::clamp(static_cast<int>(audioFilterPreset), 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    return item.label;
+}
 }
 
 
@@ -320,21 +383,22 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     
     // 菜单�?hover 自动切换（当已有菜单打开时）
     if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
-        int menuX = 10;
+        int menuX = kTopMenuX;
         for (int i = 0; i < (int)m_menus.size(); i++) {
             if (m_menus[i].label == "章节" && !m_hasChapters) continue;
             int textW = getTextWidth(m_menus[i].label);
-            int itemWidth = textW + 20;
+            int itemWidth = textW + kTopMenuPaddingX * 2;
             if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
                 if (m_activeMenu != i) {
                     m_activeMenu = i;
+                    m_activeSubmenuParent = 0;
                     m_pendingMenu = i;
                     m_menuAnimStartTime = SDL_GetTicks();
                     m_menuAnimating = true;
                 }
                 break;
             }
-            menuX += itemWidth + 10;
+            menuX += itemWidth + kTopMenuGap;
         }
     }
     
@@ -536,10 +600,10 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
     if (m_activeMenu >= 0 && y >= m_menuBarHeight) {
         bool inMenu = false;
         // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
-        int menuX = 10;
+        int menuX = kTopMenuX;
         for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
             if (m_menus[i].label == "章节" && !m_hasChapters) continue;
-            menuX += getTextWidth(m_menus[i].label) + 20 + 10;
+            menuX += getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2 + kTopMenuGap;
         }
         // 计算实际菜单宽度（与 renderMenu 一致）
         const Menu& activeMenu = m_menus[m_activeMenu];
@@ -547,29 +611,103 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         int shortcutMaxW = 0;
         for (const auto& item : activeMenu.items) {
             if (!item.separator && item.enabled) {
-                int lw = getTextWidth(item.label, 12);
+                std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+                int lw = getTextWidth(displayLabel, 14);
                 if (lw > labelMaxW) labelMaxW = lw;
                 if (!item.shortcut.empty()) {
-                    int sw = getTextWidth(item.shortcut, 11);
+                    int sw = getTextWidth(item.shortcut, 12);
                     if (sw > shortcutMaxW) shortcutMaxW = sw;
                 }
             }
         }
-        int menuWidth = 14 + 22 + labelMaxW + 14;
-        if (shortcutMaxW > 0) menuWidth += 24 + shortcutMaxW;
-        if (menuWidth < 140) menuWidth = 140;
-        int menuHeight = (int)activeMenu.items.size() * 24 + 8;
+        constexpr int itemHeight = 30;
+        constexpr int separatorHeight = 14;
+        constexpr int menuPadY = 5;
+        int menuWidth = 16 + 22 + labelMaxW + 18;
+        if (shortcutMaxW > 0) menuWidth += 30 + shortcutMaxW;
+        if (menuWidth < 192) menuWidth = 192;
+        int menuHeight = menuPadY * 2;
+        for (const auto& item : activeMenu.items) {
+            menuHeight += item.separator ? separatorHeight : itemHeight;
+        }
+
+        int activeSubmenuX = menuX + menuWidth - 4;
+        int activeSubmenuY = m_menuBarHeight;
+        bool clickedMainMenuRow = false;
+        int clickedSubmenuParent = 0;
+        int rowY = m_menuBarHeight + menuPadY;
+        for (const auto& item : activeMenu.items) {
+            int rowHeight = item.separator ? separatorHeight : itemHeight;
+            bool rowHovered = !item.separator &&
+                x >= menuX && x <= menuX + menuWidth && y >= rowY && y <= rowY + itemHeight;
+            if (rowHovered) {
+                clickedMainMenuRow = true;
+                if (isSubmenuParent(item.id)) {
+                    clickedSubmenuParent = item.id;
+                }
+            }
+            if (isSubmenuParent(item.id)) {
+                if (item.id == m_activeSubmenuParent) {
+                    activeSubmenuY = rowY;
+                }
+            }
+            rowY += rowHeight;
+        }
+        if (clickedMainMenuRow) {
+            m_activeSubmenuParent = clickedSubmenuParent;
+            if (m_activeSubmenuParent != 0) {
+                activeSubmenuY = m_menuBarHeight + menuPadY;
+                for (const auto& item : activeMenu.items) {
+                    int rowHeight = item.separator ? separatorHeight : itemHeight;
+                    if (item.id == m_activeSubmenuParent) {
+                        break;
+                    }
+                    activeSubmenuY += rowHeight;
+                }
+            }
+        } else if (x >= menuX && x <= menuX + menuWidth &&
+                   y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
+            m_activeSubmenuParent = 0;
+        }
+
+        constexpr int submenuWidth = 180;
+        int submenuCount = submenuItemCount(m_activeSubmenuParent);
+        int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
+        if (m_activeSubmenuParent != 0 &&
+            x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
+            y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight) {
+            inMenu = true;
+            int localY = y - activeSubmenuY - menuPadY;
+            if (localY >= 0) {
+                int itemIndex = localY / itemHeight;
+                if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
+                    m_menuCallback(submenuItemId(m_activeSubmenuParent, itemIndex));
+                    closeAllMenus();
+                    m_pressedControl = ControlType::None;
+                }
+            }
+        }
+
         if (x >= menuX && x <= menuX + menuWidth && y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
             inMenu = true;
             // 处理菜单项点击
-            int itemIndex = (y - m_menuBarHeight - 4) / 24;
-            if (itemIndex >= 0 && itemIndex < (int)activeMenu.items.size()) {
-                const auto& item = activeMenu.items[itemIndex];
-                if (!item.separator && item.enabled && m_menuCallback) {
-                    m_menuCallback(item.id);
-                    closeAllMenus();
-                    // 防止 handleMouseButtonUp 触发菜单下方的控件点击
-                    m_pressedControl = ControlType::None;
+            int localY = y - m_menuBarHeight - menuPadY;
+            if (localY >= 0) {
+                int cursorY = 0;
+                for (const auto& item : activeMenu.items) {
+                    int rowHeight = item.separator ? separatorHeight : itemHeight;
+                    if (localY >= cursorY && localY < cursorY + rowHeight) {
+                        if (isSubmenuParent(item.id)) {
+                            m_pressedControl = ControlType::None;
+                        } else if (!item.separator && item.enabled && m_menuCallback) {
+                            m_menuCallback(item.id);
+                            closeAllMenus();
+                            // 防止 handleMouseButtonUp 触发菜单下方的控件点击
+                            m_pressedControl = ControlType::None;
+                        }
+                        break;
+                    }
+                    cursorY += rowHeight;
                 }
             }
         }

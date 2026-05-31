@@ -673,6 +673,7 @@ void Settings::setAIConfig(const AIConfig& config) {
             {"model", activeConfig.model},
             {"cacheDir", config.cacheDir},
             {"autoAnalyze", config.autoAnalyze},
+            {"analysisDetailLevel", std::clamp(config.analysisDetailLevel, 0, 2)},
             {"providers", providersJson}
         };
     }
@@ -690,6 +691,7 @@ AIConfig Settings::aiConfig() const {
         config.model = ai.value("model", "mimo-v2.5");
         config.cacheDir = ai.value("cacheDir", std::string());
         config.autoAnalyze = ai.value("autoAnalyze", false);
+        config.analysisDetailLevel = std::clamp(ai.value("analysisDetailLevel", 1), 0, 2);
 
         if (config.provider.empty()) {
             std::string lowerBaseUrl = config.baseUrl;

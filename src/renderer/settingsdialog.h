@@ -22,6 +22,7 @@ struct AIProviderSettings {
 
 struct AISettings {
     std::string provider;
+    int analysisDetailLevel = 1;
     std::unordered_map<std::string, AIProviderSettings> providers;
 };
 
@@ -50,17 +51,20 @@ private:
     int m_dragOffsetY = 0;
 
     int m_windowWidth = 500;
-    int m_windowHeight = 370;
+    int m_windowHeight = 420;
     static constexpr int TITLE_HEIGHT = 32;
     static constexpr int INPUT_HEIGHT = 30;
     static constexpr int PADDING = 15;
 
     std::vector<std::string> m_providerOptions;
     std::vector<std::string> m_modelOptions;
+    std::vector<std::string> m_detailOptions;
     bool m_providerDropdownOpen = false;
     bool m_modelDropdownOpen = false;
+    bool m_detailDropdownOpen = false;
     SDL_FRect m_providerDropdownRect;
     SDL_FRect m_modelDropdownRect;
+    SDL_FRect m_detailDropdownRect;
 
     std::unique_ptr<InputField> m_baseUrlInput;
     std::unique_ptr<InputField> m_apiKeyInput;
@@ -74,6 +78,8 @@ private:
     void saveCurrentProviderFields();
     void loadProviderFields(const std::string& provider);
     void updateModelOptions();
+    std::string detailLabel() const;
+    void setDetailByLabel(const std::string& label);
     bool handleDropdownClick(int mx, int my);
     void drawDropdown(const SDL_FRect& rect,
                       const std::string& value,

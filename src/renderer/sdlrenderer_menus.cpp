@@ -3,8 +3,82 @@
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <algorithm>
 
 namespace VideoPlay {
+
+namespace {
+constexpr int kTopMenuX = 10;
+constexpr int kTopMenuPaddingX = 16;
+constexpr int kTopMenuGap = 8;
+
+uint8_t scaledAlpha(int base, float alpha)
+{
+    int value = static_cast<int>(base * std::clamp(alpha, 0.0f, 1.0f));
+    return static_cast<uint8_t>(std::clamp(value, 0, 255));
+}
+
+bool isSubmenuParent(int id)
+{
+    return id == 58 || id == 59 || id == 69 || id == 89;
+}
+
+int submenuItemCount(int parentId)
+{
+    switch (parentId) {
+        case 58: return 3; // AB loop
+        case 59: return 3; // Loop mode
+        case 69: return 4; // Aspect mode
+        case 89: return 4; // Audio filter
+        default: return 0;
+    }
+}
+
+int submenuItemId(int parentId, int index)
+{
+    switch (parentId) {
+        case 58: return 90 + index;
+        case 59: return 60 + index;
+        case 69: return 70 + index;
+        case 89: return 93 + index;
+        default: return 0;
+    }
+}
+
+const char* submenuItemLabel(int parentId, int index)
+{
+    static constexpr const char* abLoopLabels[] = { "设置 A 点", "设置 B 点", "清除" };
+    static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
+    static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
+    static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
+
+    switch (parentId) {
+        case 58: return abLoopLabels[index];
+        case 59: return loopLabels[index];
+        case 69: return aspectLabels[index];
+        case 89: return audioFilterLabels[index];
+        default: return "";
+    }
+}
+
+std::string submenuParentLabel(const MenuItem& item, int loopMode, AspectMode aspectMode,
+                               AudioFilterPreset audioFilterPreset)
+{
+    if (item.id == 59) {
+        int index = std::clamp(loopMode, 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    if (item.id == 69) {
+        int index = std::clamp(static_cast<int>(aspectMode), 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    if (item.id == 89) {
+        int index = std::clamp(static_cast<int>(audioFilterPreset), 0, submenuItemCount(item.id) - 1);
+        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    }
+    return item.label;
+}
+}
 
 
 void SDLRenderer::initMenus() {
@@ -38,25 +112,15 @@ void SDLRenderer::initMenus() {
         {14, "增加速度", "", false, true},
         {15, "降低速度", "", false, true},
         {0, "", "", true},
-        {90, "AB循环: 设置A点", "[", false, true},
-        {91, "AB循环: 设置B点", "]", false, true},
-        {92, "AB循环: 清除", "\\", false, true},
+        {58, "AB 循环", "", false, true},
         {0, "", "", true},
-        {93, "音频滤镜: 关闭", "", false, true},
-        {94, "音频滤镜: 语音增强", "", false, true},
-        {95, "音频滤镜: 低音增强", "", false, true},
-        {96, "音频滤镜: 夜间模式", "", false, true},
+        {89, "音频滤镜", "", false, true},
         {0, "", "", true},
         {97, "硬件解码", "", false, true},
         {0, "", "", true},
-        {60, "循环: 不循环", "", false, true},
-        {61, "循环: 单曲循环", "", false, true},
-        {62, "循环: 列表循环", "", false, true},
+        {59, "循环", "", false, true},
         {0, "", "", true},
-        {70, "比例: 原始", "", false, true},
-        {71, "比例: 16:9", "", false, true},
-        {72, "比例: 4:3", "", false, true},
-        {73, "比例: 铺满", "", false, true},
+        {69, "画面比例", "", false, true},
         {0, "", "", true},
         {80, "始终置顶", "T", false, true},
         {0, "", "", true},
@@ -141,11 +205,11 @@ bool SDLRenderer::handleMenuClick(int x, int y) {
     // 隐藏右键菜单
     hideContextMenu();
     
-    int menuX = 10;
+    int menuX = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         if (m_menus[i].label == "章节" && !m_hasChapters) continue;
         int textW = getTextWidth(m_menus[i].label);
-        int menuWidth = textW + 20;
+        int menuWidth = textW + kTopMenuPaddingX * 2;
         if (x >= menuX && x <= menuX + menuWidth) {
             if (m_activeMenu == i && !m_menuAnimating) {
                 m_pendingMenu = -1;
@@ -159,7 +223,7 @@ bool SDLRenderer::handleMenuClick(int x, int y) {
             }
             return true;
         }
-        menuX += menuWidth + 10;
+        menuX += menuWidth + kTopMenuGap;
     }
     closeAllMenus();
     return false;
@@ -169,6 +233,7 @@ void SDLRenderer::closeAllMenus(bool animate) {
     if (m_activeMenu < 0 && m_menuAnimAlpha <= 0.0f) return;
     if (!animate) {
         m_activeMenu = -1;
+        m_activeSubmenuParent = 0;
         m_pendingMenu = -1;
         m_menuAnimAlpha = 0.0f;
         m_menuAnimating = false;
@@ -193,58 +258,63 @@ void SDLRenderer::updateMenuAnimation() {
     float t = std::min(1.0f, static_cast<float>(elapsed) / static_cast<float>(MENU_ANIM_DURATION_MS));
 
     if (m_pendingMenu >= 0) {
-        //  打开动画（ease-out�?
-        float ease = 1.0f - (1.0f - t) * (1.0f - t);
+        // 打开动画：更柔和的 ease-out cubic
+        float inv = 1.0f - t;
+        float ease = 1.0f - inv * inv * inv;
         m_menuAnimAlpha = ease;
         if (t >= 1.0f) {
             m_menuAnimating = false;
             m_menuAnimAlpha = 1.0f;
         }
     } else {
-        //  关闭动画（ease-in�?
+        // 关闭动画：稍快的 ease-in quad
         float ease = t * t;
         m_menuAnimAlpha = 1.0f - ease;
         if (t >= 1.0f) {
             m_menuAnimating = false;
             m_menuAnimAlpha = 0.0f;
             m_activeMenu = -1;
+            m_activeSubmenuParent = 0;
         }
     }
 }
 
 void SDLRenderer::renderMenuBar() {
-    //  菜单栏背�?
-    fillRect(0, 0, m_windowWidth, m_menuBarHeight, 
-             COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], COLOR_MENU_BG[3]);
+    // 菜单栏背景：低对比深色层 + 顶部高光 + 底部描边
+    fillRect(0, 0, m_windowWidth, m_menuBarHeight, 34, 35, 39, 245);
+    fillRect(0, 0, m_windowWidth, 1, 255, 255, 255, 18);
+    fillRect(0, m_menuBarHeight - 1, m_windowWidth, 1, 0, 0, 0, 80);
     
-    //  菜单�?
-    int x = 10;
+    // 菜单项
+    int x = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         if (m_menus[i].label == "章节" && !m_hasChapters) continue;
         int textW = getTextWidth(m_menus[i].label);
-        int itemWidth = textW + 20;
+        int itemWidth = textW + kTopMenuPaddingX * 2;
         
         bool isActive = (i == m_activeMenu);
         bool isHovered = m_menuBarHovered && m_mouseY < m_menuBarHeight && 
                          m_mouseX >= x && m_mouseX <= x + itemWidth;
         
         if (isActive) {
-            fillRect(x, 0, itemWidth, m_menuBarHeight,
-                     COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], COLOR_MENU_ACTIVE[3]);
+            fillRoundRect(x, 4, itemWidth, m_menuBarHeight - 8, 5, 52, 82, 105, 220);
+            fillRect(x + 8, m_menuBarHeight - 3, itemWidth - 16, 2,
+                     COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], 235);
         } else if (isHovered) {
-            fillRect(x, 0, itemWidth, m_menuBarHeight,
-                     COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], COLOR_MENU_HOVER[3]);
+            fillRoundRect(x, 4, itemWidth, m_menuBarHeight - 8, 5, 255, 255, 255, 34);
         }
         
         // 渲染文字
         int textY = (m_menuBarHeight - getFontHeight()) / 2;
-        drawText(m_menus[i].label, x + 10, textY, 
-                 COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2]);
+        drawText(m_menus[i].label, x + kTopMenuPaddingX, textY, 
+                 isActive ? 255 : COLOR_TEXT[0],
+                 isActive ? 255 : COLOR_TEXT[1],
+                 isActive ? 255 : COLOR_TEXT[2]);
         
-        x += itemWidth + 10;
+        x += itemWidth + kTopMenuGap;
     }
 
-    //  无边框模式下的系统按�?
+    // 无边框模式下的系统按钮
     if (m_borderless) {
         constexpr int buttonWidth = 46;
         constexpr int iconSize = 10;
@@ -295,7 +365,7 @@ void SDLRenderer::renderMenuBar() {
                 drawRect(ox, oy + 2, s, s, c[0], c[1], c[2], c[3]);
                 drawRect(ox + 3, oy - 1, s, s, c[0], c[1], c[2], c[3]);
             } else {
-                //  最大化：空心方�?
+                // 最大化：空心方框
                 int s = iconSize;
                 int ox = bx + (buttonWidth - s) / 2;
                 int oy = iconY;
@@ -314,7 +384,7 @@ void SDLRenderer::renderMenuBar() {
                 fillRect(bx, 0, buttonWidth, m_menuBarHeight,
                          COLOR_BUTTON_BG_PRESSED[0], COLOR_BUTTON_BG_PRESSED[1], COLOR_BUTTON_BG_PRESSED[2], COLOR_BUTTON_BG_PRESSED[3]);
             } else if (hovered) {
-                //  关闭按钮 hover 用红色背景（现代风格�?
+                // 关闭按钮 hover 用红色背景
                 fillRect(bx, 0, buttonWidth, m_menuBarHeight, 232, 17, 35, 255);
                 c = COLOR_BUTTON_HOVER;
             }
@@ -331,20 +401,23 @@ void SDLRenderer::renderMenuBar() {
 }
 
 void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
-    int itemHeight = 24;
+    const int itemHeight = 30;
+    const int separatorHeight = 14;
     int labelMaxW = 0;
     int shortcutMaxW = 0;
-    const int labelFontSize = 12;
-    const int shortcutFontSize = 11;
-    const int shortcutGap = 24; // 标签与快捷键之间的最小间距
-    const int leftPadding = 14;
-    const int rightPadding = 14;
+    const int labelFontSize = 14;
+    const int shortcutFontSize = 12;
+    const int shortcutGap = 30; // 标签与快捷键之间的最小间距
+    const int leftPadding = 16;
+    const int rightPadding = 18;
     const int checkColumnWidth = 22;
+    const int menuPadY = 5;
 
     // 预先计算所需宽度
     for (const auto& item : menu.items) {
         if (!item.separator && item.enabled) {
-            int lw = getTextWidth(item.label, labelFontSize);
+            std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+            int lw = getTextWidth(displayLabel, labelFontSize);
             if (lw > labelMaxW) labelMaxW = lw;
             if (!item.shortcut.empty()) {
                 int sw = getTextWidth(item.shortcut, shortcutFontSize);
@@ -358,36 +431,99 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
         menuWidth += shortcutGap + shortcutMaxW;
     }
     // 最小宽度保证
-    if (menuWidth < 140) menuWidth = 140;
+    if (menuWidth < 192) menuWidth = 192;
 
-    int menuHeight = (int)menu.items.size() * itemHeight + 8;
-    uint8_t baseAlpha = static_cast<uint8_t>(240 * alpha);
+    int contentHeight = 0;
+    for (const auto& item : menu.items) {
+        contentHeight += item.separator ? separatorHeight : itemHeight;
+    }
+    int menuHeight = contentHeight + menuPadY * 2;
+    int renderY = y - 6 + static_cast<int>(6.0f * std::clamp(alpha, 0.0f, 1.0f));
+    uint8_t baseAlpha = scaledAlpha(244, alpha);
+    const int submenuWidth = 180;
+    int activeSubmenuX = x + menuWidth - 4;
+    int activeSubmenuY = 0;
+    int rowUnderMouseParent = 0;
+    bool mouseInMainMenu = (m_mouseX >= x && m_mouseX <= x + menuWidth &&
+                            m_mouseY >= renderY && m_mouseY <= renderY + menuHeight);
 
-    // 菜单背景
-    fillRoundRect(x, y, menuWidth, menuHeight, 8,
-                  COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
-
-    //  菜单�?
-    int itemY = y + 4;
+    int scanY = renderY + menuPadY;
     for (const auto& item : menu.items) {
         if (item.separator) {
-            //  分隔�?
-            fillRect(x + leftPadding, itemY + itemHeight / 2 - 1,
+            scanY += separatorHeight;
+            continue;
+        }
+        if (m_mouseX >= x && m_mouseX <= x + menuWidth &&
+            m_mouseY >= scanY && m_mouseY <= scanY + itemHeight) {
+            if (isSubmenuParent(item.id)) {
+                rowUnderMouseParent = item.id;
+            }
+            break;
+        }
+        scanY += itemHeight;
+    }
+
+    if (rowUnderMouseParent != 0) {
+        m_activeSubmenuParent = rowUnderMouseParent;
+    } else if (mouseInMainMenu) {
+        m_activeSubmenuParent = 0;
+    }
+
+    // 菜单阴影和背景
+    fillRoundRect(x + 2, renderY + 5, menuWidth, menuHeight, 8, 0, 0, 0, scaledAlpha(95, alpha));
+    fillRoundRect(x + 1, renderY + 2, menuWidth, menuHeight, 8, 0, 0, 0, scaledAlpha(45, alpha));
+    fillRoundRect(x, renderY, menuWidth, menuHeight, 8,
+                  38, 39, 43, baseAlpha);
+    drawRect(x + 1, renderY + 1, menuWidth - 2, menuHeight - 2,
+             255, 255, 255, scaledAlpha(26, alpha));
+
+    // 菜单项
+    int itemY = renderY + menuPadY;
+    for (const auto& item : menu.items) {
+        if (item.separator) {
+            // 分隔线
+            fillRect(x + leftPadding, itemY + separatorHeight / 2,
                      menuWidth - leftPadding - rightPadding, 1,
-                     100, 100, 100, static_cast<uint8_t>(180 * alpha));
+                     255, 255, 255, scaledAlpha(38, alpha));
+            itemY += separatorHeight;
+            continue;
         } else {
-            //  检测悬�?
+            // 检测悬浮
             bool hovered = (m_mouseX >= x && m_mouseX <= x + menuWidth &&
                            m_mouseY >= itemY && m_mouseY <= itemY + itemHeight);
 
-            if (hovered && item.enabled) {
-                fillRoundRect(x + 4, itemY + 2, menuWidth - 8, itemHeight - 4, 5,
-                              COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2],
-                              static_cast<uint8_t>(COLOR_MENU_ACTIVE[3] * alpha));
+            if (isSubmenuParent(item.id)) {
+                if (item.id == m_activeSubmenuParent) {
+                    activeSubmenuY = itemY;
+                } else if (hovered) {
+                    m_activeSubmenuParent = item.id;
+                    activeSubmenuY = itemY;
+                } else if (rowUnderMouseParent == 0 && m_activeSubmenuParent == 0) {
+                    int submenuHeight = submenuItemCount(item.id) * itemHeight + menuPadY * 2;
+                    bool submenuHovered = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
+                                           m_mouseY >= itemY && m_mouseY <= itemY + submenuHeight);
+                    if (submenuHovered) {
+                        m_activeSubmenuParent = item.id;
+                        activeSubmenuY = itemY;
+                    }
+                }
+                if (rowUnderMouseParent != 0) {
+                    hovered = (item.id == rowUnderMouseParent);
+                } else if (m_activeSubmenuParent != 0) {
+                    hovered = (item.id == m_activeSubmenuParent);
+                }
             }
 
-            //  渲染菜单项文�?
+            if (hovered && item.enabled) {
+                fillRoundRect(x + 5, itemY + 1, menuWidth - 10, itemHeight - 2, 5,
+                              48, 96, 132, scaledAlpha(215, alpha));
+                fillRect(x + 8, itemY + 6, 2, itemHeight - 12,
+                         COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], scaledAlpha(230, alpha));
+            }
+
+            // 渲染菜单项文字
             if (item.enabled) {
+                std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
                 int checkX = x + leftPadding;
                 int labelX = checkX + checkColumnWidth;
                 int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
@@ -417,20 +553,71 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 
                 if (checked) {
                     drawText("\xE2\x9C\x93", checkX, labelY,
-                             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                             COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
                 }
-                drawText(item.label, labelX, labelY,
-                        COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
+                drawText(displayLabel, labelX, labelY,
+                        COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
 
                 // 渲染快捷键（右对齐）
                 if (!item.shortcut.empty()) {
                     int sw = getTextWidth(item.shortcut, shortcutFontSize);
                     drawText(item.shortcut, x + menuWidth - rightPadding - sw, shortcutY,
-                            150, 150, 150, shortcutFontSize);
+                            168, 172, 178, shortcutFontSize, scaledAlpha(230, alpha));
                 }
+                if (isSubmenuParent(item.id)) {
+                    drawText(">", x + menuWidth - rightPadding - getTextWidth(">", shortcutFontSize), shortcutY,
+                             168, 172, 178, shortcutFontSize, scaledAlpha(230, alpha));
+                }
+            } else {
+                int labelX = x + leftPadding + checkColumnWidth;
+                int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
+                drawText(item.label, labelX, labelY, 125, 128, 134, labelFontSize, scaledAlpha(180, alpha));
             }
         }
         itemY += itemHeight;
+    }
+
+    if (m_activeSubmenuParent != 0 && activeSubmenuY > 0) {
+        int itemCount = submenuItemCount(m_activeSubmenuParent);
+        int submenuHeight = itemCount * itemHeight + menuPadY * 2;
+        fillRoundRect(activeSubmenuX + 2, activeSubmenuY + 5, submenuWidth, submenuHeight, 8,
+                      0, 0, 0, scaledAlpha(95, alpha));
+        fillRoundRect(activeSubmenuX, activeSubmenuY, submenuWidth, submenuHeight, 8,
+                      38, 39, 43, baseAlpha);
+        drawRect(activeSubmenuX + 1, activeSubmenuY + 1, submenuWidth - 2, submenuHeight - 2,
+                 255, 255, 255, scaledAlpha(26, alpha));
+
+        int submenuItemY = activeSubmenuY + menuPadY;
+        for (int index = 0; index < itemCount; ++index) {
+            int entryId = submenuItemId(m_activeSubmenuParent, index);
+            bool hovered = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
+                           m_mouseY >= submenuItemY && m_mouseY <= submenuItemY + itemHeight);
+            if (hovered) {
+                fillRoundRect(activeSubmenuX + 5, submenuItemY + 1, submenuWidth - 10, itemHeight - 2, 5,
+                              48, 96, 132, scaledAlpha(215, alpha));
+                fillRect(activeSubmenuX + 8, submenuItemY + 6, 2, itemHeight - 12,
+                         COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], scaledAlpha(230, alpha));
+            }
+
+            bool checked = false;
+            if (entryId >= 60 && entryId <= 62) {
+                checked = (entryId - 60) == m_loopMode;
+            } else if (entryId >= 70 && entryId <= 73) {
+                checked = (entryId - 70) == static_cast<int>(m_aspectMode);
+            } else if (entryId >= 93 && entryId <= 96) {
+                checked = (entryId - 93) == static_cast<int>(m_audioFilterPreset);
+            }
+            int checkX = activeSubmenuX + leftPadding;
+            int labelX = checkX + checkColumnWidth;
+            int labelY = submenuItemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
+            if (checked) {
+                drawText("\xE2\x9C\x93", checkX, labelY,
+                         COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
+            }
+            drawText(submenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
+                     COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
+            submenuItemY += itemHeight;
+        }
     }
 }
 

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <optional>
 #include <mutex>
+#include <deque>
 
 namespace VideoPlay {
 
@@ -64,12 +65,15 @@ private:
     // AI 功能
     void startAIAnalysis();
     void handleSearch(const std::string& query);
+    void handleSearchInternal(const std::string& query, bool addUserMessage);
+    void processNextPendingSearch();
+    void checkAISearchTimeout();
     void handleAIAnalysis();
     void showAISummary();
     void showSearchPanel();
     void clearAICache();
     void showAISettings();
-    void performSearch(const std::string& query);
+    std::vector<SearchResult> performSearch(const std::string& query);
 
     // 播放列表
     void addToPlaylist(const std::string& path);
@@ -148,8 +152,12 @@ private:
     AIAnalysisResult m_aiResult;
     std::mutex m_aiStateMutex;
     bool m_aiAnalyzing = false;
+    bool m_aiDirectSearchActive = false;
     float m_aiProgress = 0.0f;
     std::string m_aiStatus;
+    uint64_t m_aiRequestStartTimeMs = 0;
+    std::atomic<uint64_t> m_aiRequestSeq{0};
+    std::deque<std::string> m_pendingSearchQueries;
 };
 
 } // namespace VideoPlay

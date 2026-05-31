@@ -3,6 +3,9 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
+#include <vector>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -17,6 +20,72 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("ai.http");
     return *logger;
+}
+
+std::string trimHeaderValue(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+std::string lowerHeaderName(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string narrowHeaderText(const std::wstring& value) {
+    std::string result;
+    result.reserve(value.size());
+    for (wchar_t ch : value) {
+        result.push_back(ch >= 0 && ch <= 0x7F ? static_cast<char>(ch) : '?');
+    }
+    return result;
+}
+
+std::map<std::string, std::string> readResponseHeaders(HINTERNET hRequest) {
+    std::map<std::string, std::string> headers;
+
+    DWORD size = 0;
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_RAW_HEADERS_CRLF,
+                        WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER,
+                        &size, WINHTTP_NO_HEADER_INDEX);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || size == 0) {
+        return headers;
+    }
+
+    std::vector<wchar_t> buffer(size / sizeof(wchar_t) + 1);
+    if (!WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_RAW_HEADERS_CRLF,
+                             WINHTTP_HEADER_NAME_BY_INDEX, buffer.data(),
+                             &size, WINHTTP_NO_HEADER_INDEX)) {
+        return headers;
+    }
+
+    std::wstring raw(buffer.data());
+    size_t pos = 0;
+    while (pos < raw.size()) {
+        size_t end = raw.find(L"\r\n", pos);
+        if (end == std::wstring::npos) {
+            end = raw.size();
+        }
+
+        std::wstring line = raw.substr(pos, end - pos);
+        size_t colon = line.find(L':');
+        if (colon != std::wstring::npos) {
+            std::string name = narrowHeaderText(line.substr(0, colon));
+            std::string value = narrowHeaderText(line.substr(colon + 1));
+            headers[lowerHeaderName(name)] = trimHeaderValue(value);
+        }
+
+        pos = end + 2;
+    }
+
+    return headers;
 }
 }
 
@@ -156,8 +225,10 @@ static HttpResponse winHttpRequest(const std::string& url, const std::wstring& m
     }
     
     // 设置超时
+    DWORD timeoutMs = timeout > 0 ? static_cast<DWORD>(timeout) * 1000 : 60000;
+    WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
     DWORD connectTimeout = timeout * 1000;
-    DWORD receiveTimeout = timeout * 3000;
+    DWORD receiveTimeout = timeout * 1000;
     DWORD sendTimeout = timeout * 1000;
     WinHttpSetOption(hSession, WINHTTP_OPTION_CONNECT_TIMEOUT, &connectTimeout, sizeof(connectTimeout));
     WinHttpSetOption(hSession, WINHTTP_OPTION_RECEIVE_TIMEOUT, &receiveTimeout, sizeof(receiveTimeout));
@@ -222,6 +293,7 @@ static HttpResponse winHttpRequest(const std::string& url, const std::wstring& m
     WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                     WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusCodeSize, WINHTTP_NO_HEADER_INDEX);
     response.statusCode = statusCode;
+    response.headers = readResponseHeaders(hRequest);
     
     std::string responseBody;
     DWORD bytesAvailable = 0;
@@ -265,6 +337,19 @@ HttpResponse HttpClient::post(const std::string& path, const std::string& jsonBo
     }
 
     return winHttpRequest(url, L"POST", jsonBody, mergedHeaders, m_timeout);
+}
+
+HttpResponse HttpClient::postRaw(const std::string& path, const std::string& body,
+                                 const std::map<std::string, std::string>& headers) {
+    std::string url = buildUrl(path);
+    logger().debug("[HTTP] POST RAW " + url);
+
+    auto mergedHeaders = defaultHeaders();
+    for (const auto& [key, value] : headers) {
+        mergedHeaders[key] = value;
+    }
+
+    return winHttpRequest(url, L"POST", body, mergedHeaders, m_timeout);
 }
 
 HttpResponse HttpClient::uploadFile(const std::string& path,
@@ -330,6 +415,9 @@ HttpResponse HttpClient::uploadFile(const std::string& path,
         response.body = "WinHttpOpen failed";
         return response;
     }
+
+    DWORD timeoutMs = m_timeout > 0 ? static_cast<DWORD>(m_timeout) * 1000 : 60000;
+    WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
     
     HINTERNET hConnect = WinHttpConnect(hSession, parsed.host.c_str(), parsed.port, 0);
     if (!hConnect) {

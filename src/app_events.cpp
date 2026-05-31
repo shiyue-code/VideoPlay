@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <iostream>
 
 namespace VideoPlay {
@@ -338,8 +339,10 @@ void VideoPlayerApp::startAIAnalysis() {
         }
 
         m_aiAnalyzing = true;
+        m_aiDirectSearchActive = false;
         m_aiProgress = 0.0f;
         m_aiStatus = "准备分析视频...";
+        m_aiRequestStartTimeMs = 0;
     }
 
     logger().info("[AI] Starting analysis for: " + m_currentFile);
@@ -350,8 +353,10 @@ void VideoPlayerApp::startAIAnalysis() {
             {
                 std::lock_guard<std::mutex> lock(m_aiStateMutex);
                 m_aiAnalyzing = false;
+                m_aiDirectSearchActive = false;
                 m_aiProgress = 1.0f;
                 m_aiStatus = "分析完成，生成 " + std::to_string(result.chapters.size()) + " 个章节";
+                m_aiRequestStartTimeMs = 0;
             }
 
             if (!result.chapters.empty() && m_player) {
@@ -367,17 +372,24 @@ void VideoPlayerApp::startAIAnalysis() {
 
             logger().info("[AI] Analysis complete: " + 
                 std::to_string(result.chapters.size()) + " chapters");
+            processNextPendingSearch();
         },
         [this](float progress, const std::string& status) {
             std::lock_guard<std::mutex> lock(m_aiStateMutex);
             m_aiProgress = progress;
+            m_aiDirectSearchActive = false;
             m_aiStatus = status.empty() ? "正在分析视频内容..." : status;
         },
         [this](const std::string& error) {
-            std::lock_guard<std::mutex> lock(m_aiStateMutex);
-            m_aiAnalyzing = false;
-            m_aiStatus = "分析失败: " + error;
+            {
+                std::lock_guard<std::mutex> lock(m_aiStateMutex);
+                m_aiAnalyzing = false;
+                m_aiDirectSearchActive = false;
+                m_aiStatus = "分析失败: " + error;
+                m_aiRequestStartTimeMs = 0;
+            }
             logger().error("[AI] Analysis failed: " + error);
+            processNextPendingSearch();
         }
     );
 }
@@ -468,6 +480,7 @@ void VideoPlayerApp::showAISettings() {
     
     AISettings settings;
     settings.provider = currentConfig.provider;
+    settings.analysisDetailLevel = currentConfig.analysisDetailLevel;
     for (const auto& entry : currentConfig.providers) {
         settings.providers[entry.first] = {
             entry.second.baseUrl,
@@ -487,6 +500,7 @@ void VideoPlayerApp::showAISettings() {
     dialog.show(settings, [this](const AISettings& newSettings) {
         AIConfig config = Settings::instance().aiConfig();
         config.provider = lowerCopy(trimCopy(newSettings.provider));
+        config.analysisDetailLevel = std::clamp(newSettings.analysisDetailLevel, 0, 2);
         if (config.provider.empty() || config.provider == "auto") {
             config.provider = "mimo";
         } else if (config.provider == "google") {
@@ -537,15 +551,16 @@ void VideoPlayerApp::showAISettings() {
     });
 }
 
-void VideoPlayerApp::performSearch(const std::string& query) {
+std::vector<SearchResult> VideoPlayerApp::performSearch(const std::string& query) {
+    std::vector<SearchResult> results;
     if (!m_searchEngine || !m_searchEngine->hasIndex() || query.empty()) {
         if (m_renderer) {
             m_renderer->setSearchHighlights({});
         }
-        return;
+        return results;
     }
 
-    auto results = m_searchEngine->search(query, 20);
+    results = m_searchEngine->search(query, 20);
     logger().info("[Search] Query: " + query + " Results: " + std::to_string(results.size()));
 
     if (m_renderer) {
@@ -555,26 +570,142 @@ void VideoPlayerApp::performSearch(const std::string& query) {
         }
         m_renderer->setSearchHighlights(highlights);
     }
+    return results;
 }
 
 void VideoPlayerApp::handleSearch(const std::string& query) {
+    handleSearchInternal(query, true);
+}
+
+void VideoPlayerApp::handleSearchInternal(const std::string& query, bool addUserMessage) {
     if (query.empty() || !m_renderer) return;
 
-    m_renderer->addChatMessage(true, query);
-
-    if (!m_aiResult.valid && m_aiAnalyzer && m_aiAnalyzer->hasCache(m_currentFile)) {
-        m_aiResult = m_aiAnalyzer->loadCache(m_currentFile);
+    if (addUserMessage) {
+        m_renderer->addChatMessage(true, query);
     }
 
-    if (!m_aiResult.valid) {
-        m_renderer->addChatMessage(false, "当前视频没有可用的 AI 分析结果。请先在菜单中执行【AI 分析当前视频】。");
+    if (!m_aiResult.valid && m_aiAnalyzer && m_aiAnalyzer->hasCache(m_currentFile)) {
+        AIAnalysisResult cachedResult = m_aiAnalyzer->loadCache(m_currentFile);
+        if (cachedResult.valid && !cachedResult.transcript.empty()) {
+            m_aiResult = cachedResult;
+        }
+        if (m_aiResult.valid && !m_aiResult.transcript.empty() && m_searchEngine) {
+            m_searchEngine->buildIndex(m_currentFile, m_aiResult.transcript, m_aiResult.chapters);
+        }
+    }
+
+    auto localResults = performSearch(query);
+    if (!localResults.empty()) {
+        std::string message = "找到 " + std::to_string(localResults.size()) + " 处相关内容：\n";
+        size_t count = std::min<size_t>(localResults.size(), 8);
+        for (size_t i = 0; i < count; ++i) {
+            const auto& result = localResults[i];
+            message += "[" + formatTime(result.timestamp) + "] " + result.text + "\n";
+        }
+        m_renderer->addChatMessage(false, message);
+    }
+
+    auto isQuestionLike = [](const std::string& text) {
+        const std::vector<std::string> markers = {
+            "?", "？", "为什么", "怎么", "如何", "是什么", "吗", "呢",
+            "谁", "哪里", "哪儿", "多少", "解释", "总结", "讲了"
+        };
+        for (const auto& marker : markers) {
+            if (text.find(marker) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    bool questionLike = isQuestionLike(query);
+
+    bool hasCompleteAnalysis = m_aiResult.valid && !m_aiResult.transcript.empty();
+    if (!hasCompleteAnalysis) {
+        if (!m_aiAnalyzer || !m_aiAnalyzer->isConfigured()) {
+            m_renderer->addChatMessage(false,
+                "当前视频还没有 AI 分析结果，且 API 尚未配置。请先在 AI 设置中配置服务商和 API Key。");
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_aiStateMutex);
+            if (m_aiAnalyzing) {
+                m_pendingSearchQueries.push_back(query);
+                m_renderer->addChatMessage(false, "AI 正在处理当前视频，已把这条问题加入队列。");
+                return;
+            }
+            m_aiAnalyzing = true;
+            m_aiDirectSearchActive = true;
+            m_aiProgress = 0.0f;
+            m_aiStatus = "正在调用 API 搜索当前视频...";
+            m_aiRequestStartTimeMs = SDL_GetTicks();
+        }
+
+        uint64_t requestId = ++m_aiRequestSeq;
+        std::string requestedFile = m_currentFile;
+        m_renderer->setAIAnalysisState(true, 0.0f, "正在调用 API 搜索当前视频...");
+
+        m_aiAnalyzer->askVideoDirect(requestedFile, query,
+            [this, requestedFile, requestId](const std::string& answer) {
+                if (requestId != m_aiRequestSeq.load()) {
+                    return;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_aiStateMutex);
+                    m_aiAnalyzing = false;
+                    m_aiDirectSearchActive = false;
+                    m_aiProgress = 1.0f;
+                    m_aiStatus = "搜索完成";
+                    m_aiRequestStartTimeMs = 0;
+                }
+
+                if (m_renderer) {
+                    std::string displayAnswer = answer;
+                    if (requestedFile != m_currentFile) {
+                        std::string fileName = std::filesystem::path(requestedFile).filename().string();
+                        displayAnswer = "（以下回答来自提问时的视频：" + fileName + "）\n" + answer;
+                    }
+                    m_renderer->addChatMessage(false, displayAnswer);
+                }
+                processNextPendingSearch();
+            },
+            [this, requestId](float progress, const std::string& status) {
+                if (requestId != m_aiRequestSeq.load()) {
+                    return;
+                }
+                std::lock_guard<std::mutex> lock(m_aiStateMutex);
+                m_aiProgress = progress;
+                m_aiDirectSearchActive = true;
+                m_aiStatus = status.empty() ? "正在调用 API 搜索视频..." : status;
+            },
+            [this, requestId](const std::string& error) {
+                if (requestId != m_aiRequestSeq.load()) {
+                    return;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_aiStateMutex);
+                    m_aiAnalyzing = false;
+                    m_aiDirectSearchActive = false;
+                    m_aiStatus = "搜索失败: " + error;
+                    m_aiRequestStartTimeMs = 0;
+                }
+                if (m_renderer) {
+                    m_renderer->addChatMessage(false, "API 搜索失败: " + error);
+                }
+                processNextPendingSearch();
+            });
+        return;
+    }
+
+    if (!questionLike) {
+        if (localResults.empty()) {
+            m_renderer->addChatMessage(false, "没有找到匹配内容。");
+        }
         return;
     }
 
     if (!m_aiAnalyzer) return;
-
-    // 热力图展示
-    performSearch(query);
 
     m_aiAnalyzer->askQuestion(query, m_aiResult,
         [this](const std::string& answer) {
@@ -587,6 +718,62 @@ void VideoPlayerApp::handleSearch(const std::string& query) {
                 m_renderer->addChatMessage(false, "API 请求失败: " + error);
             }
         });
+}
+
+void VideoPlayerApp::processNextPendingSearch() {
+    std::string nextQuery;
+    {
+        std::lock_guard<std::mutex> lock(m_aiStateMutex);
+        if (m_aiAnalyzing || m_pendingSearchQueries.empty()) {
+            return;
+        }
+        nextQuery = m_pendingSearchQueries.front();
+        m_pendingSearchQueries.pop_front();
+    }
+
+    if (!nextQuery.empty()) {
+        handleSearchInternal(nextQuery, false);
+    }
+}
+
+void VideoPlayerApp::checkAISearchTimeout() {
+    constexpr uint64_t kDirectSearchTimeoutMs = 240000;
+
+    bool timedOut = false;
+    std::string message;
+    {
+        std::lock_guard<std::mutex> lock(m_aiStateMutex);
+        if (!m_aiAnalyzing || !m_aiDirectSearchActive || m_aiRequestStartTimeMs == 0) {
+            return;
+        }
+
+        uint64_t now = SDL_GetTicks();
+        if (now - m_aiRequestStartTimeMs < kDirectSearchTimeoutMs) {
+            return;
+        }
+
+        m_aiAnalyzing = false;
+        m_aiDirectSearchActive = false;
+        m_aiProgress = 1.0f;
+        m_aiStatus = "搜索超时，请稍后重试或检查 API 服务状态";
+        m_aiRequestStartTimeMs = 0;
+        ++m_aiRequestSeq;
+        message = "API 搜索超时：视频已转码，但服务端长时间没有返回答案。请稍后重试，或检查当前模型/API 服务是否支持视频输入。";
+        timedOut = true;
+    }
+
+    if (!timedOut) {
+        return;
+    }
+
+    logger().warning("[AI] Direct video search timed out");
+    if (m_aiAnalyzer) {
+        m_aiAnalyzer->cancel();
+    }
+    if (m_renderer) {
+        m_renderer->addChatMessage(false, message);
+    }
+    processNextPendingSearch();
 }
 
 } // namespace VideoPlay

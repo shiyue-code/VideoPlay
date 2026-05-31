@@ -546,6 +546,7 @@ void VideoPlayerApp::render() {
 
     // 渲染 UI
     if (m_renderer) {
+        checkAISearchTimeout();
         m_renderer->setNetworkState(m_networkState.load());
         bool aiAnalyzing = false;
         float aiProgress = 0.0f;
