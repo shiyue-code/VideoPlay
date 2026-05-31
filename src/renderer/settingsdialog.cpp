@@ -150,7 +150,10 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     m_apiKeyVisible = false;
     m_providerDropdownOpen = false;
     m_modelDropdownOpen = false;
+    m_detailDropdownOpen = false;
     m_providerOptions = {"mimo", "gemini"};
+    m_detailOptions = {"简略", "标准", "详细"};
+    m_settings.analysisDetailLevel = std::clamp(m_settings.analysisDetailLevel, 0, 2);
 
     ensureProviderSettings();
 
@@ -254,6 +257,7 @@ void SettingsDialog::saveCurrentProviderFields() {
             providerSettings.model = m_modelOptions.front();
         }
     }
+    m_settings.analysisDetailLevel = std::clamp(m_settings.analysisDetailLevel, 0, 2);
 }
 
 void SettingsDialog::loadProviderFields(const std::string& provider) {
@@ -281,18 +285,37 @@ void SettingsDialog::updateModelOptions() {
     }
 }
 
+std::string SettingsDialog::detailLabel() const {
+    int level = std::clamp(m_settings.analysisDetailLevel, 0, 2);
+    if (level == 0) return "简略";
+    if (level == 2) return "详细";
+    return "标准";
+}
+
+void SettingsDialog::setDetailByLabel(const std::string& label) {
+    if (label == "简略") {
+        m_settings.analysisDetailLevel = 0;
+    } else if (label == "详细") {
+        m_settings.analysisDetailLevel = 2;
+    } else {
+        m_settings.analysisDetailLevel = 1;
+    }
+}
+
 bool SettingsDialog::handleDropdownClick(int mx, int my) {
     auto selectProvider = [&](const std::string& provider) {
         saveCurrentProviderFields();
         m_settings.provider = provider;
         m_providerDropdownOpen = false;
         m_modelDropdownOpen = false;
+        m_detailDropdownOpen = false;
         loadProviderFields(provider);
     };
 
     if (isPointInRect(mx, my, m_providerDropdownRect)) {
         m_providerDropdownOpen = !m_providerDropdownOpen;
         m_modelDropdownOpen = false;
+        m_detailDropdownOpen = false;
         if (m_baseUrlInput) m_baseUrlInput->setActive(false);
         if (m_apiKeyInput) m_apiKeyInput->setActive(false);
         return true;
@@ -314,6 +337,7 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
         updateModelOptions();
         m_modelDropdownOpen = !m_modelDropdownOpen;
         m_providerDropdownOpen = false;
+        m_detailDropdownOpen = false;
         if (m_baseUrlInput) m_baseUrlInput->setActive(false);
         if (m_apiKeyInput) m_apiKeyInput->setActive(false);
         return true;
@@ -330,6 +354,28 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
             }
         }
         m_modelDropdownOpen = false;
+    }
+
+    if (isPointInRect(mx, my, m_detailDropdownRect)) {
+        m_detailDropdownOpen = !m_detailDropdownOpen;
+        m_providerDropdownOpen = false;
+        m_modelDropdownOpen = false;
+        if (m_baseUrlInput) m_baseUrlInput->setActive(false);
+        if (m_apiKeyInput) m_apiKeyInput->setActive(false);
+        return true;
+    }
+
+    if (m_detailDropdownOpen) {
+        for (size_t i = 0; i < m_detailOptions.size(); ++i) {
+            SDL_FRect optionRect = m_detailDropdownRect;
+            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            if (isPointInRect(mx, my, optionRect)) {
+                setDetailByLabel(m_detailOptions[i]);
+                m_detailDropdownOpen = false;
+                return true;
+            }
+        }
+        m_detailDropdownOpen = false;
     }
 
     return false;
@@ -360,6 +406,10 @@ void SettingsDialog::calculateLayout() {
 
     m_modelDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
                            static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
+    y += INPUT_HEIGHT + PADDING;
+
+    m_detailDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
+                            static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
 
     int btnWidth = 80;
     int btnHeight = 30;
@@ -425,6 +475,8 @@ void SettingsDialog::render() {
     formY += INPUT_HEIGHT + PADDING;
 
     drawText("模型:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    formY += INPUT_HEIGHT + PADDING;
+    drawText("分析详细度:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
 
     drawText("切换服务商会保留各自的地址、Key 和模型", PADDING + 120,
              formY + INPUT_HEIGHT + 4, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
@@ -439,6 +491,8 @@ void SettingsDialog::render() {
                  m_providerOptions, mx, my);
     drawDropdown(m_modelDropdownRect, currentProviderSettings().model, m_modelDropdownOpen,
                  m_modelOptions, mx, my);
+    drawDropdown(m_detailDropdownRect, detailLabel(), m_detailDropdownOpen,
+                 m_detailOptions, mx, my);
 
     SDL_RenderPresent(m_renderer);
 }
@@ -484,6 +538,7 @@ void SettingsDialog::handleEvents() {
                     if (isPointInRect(mx, my, m_apiKeyToggleRect)) {
                         m_providerDropdownOpen = false;
                         m_modelDropdownOpen = false;
+                        m_detailDropdownOpen = false;
                         m_apiKeyVisible = !m_apiKeyVisible;
                         m_apiKeyInput->setPassword(!m_apiKeyVisible);
                         m_apiKeyInput->setActive(true);
@@ -492,6 +547,7 @@ void SettingsDialog::handleEvents() {
 
                     m_providerDropdownOpen = false;
                     m_modelDropdownOpen = false;
+                    m_detailDropdownOpen = false;
 
                     m_baseUrlInput->handleEvent(event);
                     m_apiKeyInput->handleEvent(event);
@@ -536,9 +592,10 @@ void SettingsDialog::handleEvents() {
 
             case SDL_EVENT_KEY_DOWN: {
                 if (event.key.key == SDLK_ESCAPE) {
-                    if (m_providerDropdownOpen || m_modelDropdownOpen) {
+                    if (m_providerDropdownOpen || m_modelDropdownOpen || m_detailDropdownOpen) {
                         m_providerDropdownOpen = false;
                         m_modelDropdownOpen = false;
+                        m_detailDropdownOpen = false;
                     } else {
                         m_running = false;
                     }

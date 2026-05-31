@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <mutex>
@@ -56,6 +57,73 @@ size_t utf8CharLength(const std::string& text, size_t pos) {
         return (pos + 3 < text.size()) ? 4 : 1;
     }
     return 1;
+}
+
+bool isAsciiDigit(char ch) {
+    return std::isdigit(static_cast<unsigned char>(ch)) != 0;
+}
+
+size_t timestampTokenLength(const std::string& text, size_t pos) {
+    size_t i = pos;
+    if (i + 2 <= text.size() && text.compare(i, 2, "**") == 0) {
+        i += 2;
+    }
+
+    if (i < text.size() && text[i] == '[') {
+        ++i;
+    }
+
+    size_t timeStart = i;
+    int colonCount = 0;
+    while (i < text.size()) {
+        if (isAsciiDigit(text[i])) {
+            ++i;
+            continue;
+        }
+        if (text[i] == ':') {
+            ++colonCount;
+            ++i;
+            continue;
+        }
+        break;
+    }
+
+    if (colonCount < 1 || colonCount > 2 || i == timeStart) {
+        return 0;
+    }
+
+    if (i < text.size() && text[i] == ']') {
+        ++i;
+    }
+    if (i + 2 <= text.size() && text.compare(i, 2, "**") == 0) {
+        i += 2;
+    }
+
+    return i - pos;
+}
+
+bool parseTimestampMs(std::string text, int& valueMs) {
+    text.erase(std::remove(text.begin(), text.end(), '*'), text.end());
+    while (!text.empty() && !isAsciiDigit(text.front())) {
+        text.erase(text.begin());
+    }
+    while (!text.empty() && !isAsciiDigit(text.back())) {
+        text.pop_back();
+    }
+
+    int h = 0;
+    int m = 0;
+    int s = 0;
+    char tail = '\0';
+    if (std::sscanf(text.c_str(), "%d:%d:%d%c", &h, &m, &s, &tail) == 3) {
+        valueMs = (h * 3600 + m * 60 + s) * 1000;
+        return true;
+    }
+    if (std::sscanf(text.c_str(), "%d:%d%c", &m, &s, &tail) == 2) {
+        valueMs = (m * 60 + s) * 1000;
+        return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -146,11 +214,14 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     updateMenuAnimation();
     if ((m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) || m_menuAnimating) {
         if (m_menuAnimAlpha > 0.01f) {
-            int menuX = 10;
+            constexpr int kTopMenuX = 10;
+            constexpr int kTopMenuPaddingX = 16;
+            constexpr int kTopMenuGap = 8;
+            int menuX = kTopMenuX;
             for (int i = 0; i < m_activeMenu; i++) {
                 if (m_menus[i].label == "章节" && !m_hasChapters) continue;
                 int textW = getTextWidth(m_menus[i].label);
-                menuX += textW + 20 + 10;
+                menuX += textW + kTopMenuPaddingX * 2 + kTopMenuGap;
             }
             renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
         }
@@ -682,6 +753,9 @@ void SDLRenderer::renderNetworkState() {
 
 void SDLRenderer::renderAIAnalysisOverlay() {
     if (!m_renderer) return;
+    if (m_showSearchPanel) {
+        return;
+    }
 
     uint64_t now = SDL_GetTicks();
     bool showNotice = !m_aiAnalysisNoticeText.empty() &&
@@ -1276,6 +1350,10 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
         int playlistPanelX = m_windowWidth - 24 - 260;
         panelRight = std::min(panelRight, playlistPanelX - 20);
     }
+    if (m_showSearchPanel) {
+        int searchPanelX = m_windowWidth - 24 - 340;
+        panelRight = std::min(panelRight, searchPanelX - 20);
+    }
     if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
         int episodePanelRight = 24 + 260;
         // sync info 在右上角，选集面板在左上角，不冲突，不需要避�?        (void)episodePanelRight;
@@ -1322,9 +1400,9 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
 
 void SDLRenderer::renderSearchPanel() {
     int panelW = 340;
-    int panelH = m_windowHeight - m_menuBarHeight - m_controlHeight - 34;
     int panelX = m_windowWidth - panelW - 24;
     int panelY = m_menuBarHeight + 10;
+    int panelH = m_windowHeight - m_menuBarHeight - m_controlHeight - 34;
     int radius = 12;
 
     // 半透明背景
@@ -1370,25 +1448,7 @@ void SDLRenderer::renderSearchPanel() {
             const auto& msg = m_chatHistory[i];
             // 解析和换行
             std::vector<std::pair<std::string, bool>> tokens;
-            std::string currentText = msg.text;
-            size_t pos = 0;
-            while (pos < currentText.length()) {
-                size_t start = currentText.find('[', pos);
-                if (start != std::string::npos) {
-                    size_t end = currentText.find(']', start);
-                    if (end != std::string::npos) {
-                        if (start > pos) tokens.push_back({currentText.substr(pos, start - pos), false});
-                        tokens.push_back({currentText.substr(start, end - start + 1), true});
-                        pos = end + 1;
-                    } else {
-                        tokens.push_back({currentText.substr(pos), false});
-                        break;
-                    }
-                } else {
-                    tokens.push_back({currentText.substr(pos), false});
-                    break;
-                }
-            }
+            tokens.push_back({msg.text, false});
 
             int bubbleMaxW = panelW - 60;
             int maxLineWidth = 0;
@@ -1439,6 +1499,13 @@ void SDLRenderer::renderSearchPanel() {
                         continue;
                     }
 
+                    size_t timeLen = timestampTokenLength(token.first, pos);
+                    if (timeLen > 0) {
+                        appendDrawCmd(token.first.substr(pos, timeLen), true);
+                        pos += timeLen;
+                        continue;
+                    }
+
                     size_t charLen = utf8CharLength(token.first, pos);
                     appendDrawCmd(token.first.substr(pos, charLen), false);
                     pos += charLen;
@@ -1462,6 +1529,12 @@ void SDLRenderer::renderSearchPanel() {
                     int dx = bubbleX + 12 + cmd.x;
                     int dy = bubbleY + 10 + cmd.y;
                     if (cmd.isTimestamp) {
+                        int parsedValue = 0;
+                        if (parseTimestampMs(cmd.text, parsedValue)) {
+                            drawText(cmd.text, dx, dy, 255, 200, 50, 12);
+                            m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, parsedValue});
+                            continue;
+                        }
                         drawText(cmd.text, dx, dy, 255, 200, 50, 12); // 黄色时间戳
                         int mins = 0, secs = 0;
                         if (sscanf(cmd.text.c_str(), "[%d:%d]", &mins, &secs) == 2) {
@@ -1486,6 +1559,56 @@ void SDLRenderer::renderSearchPanel() {
     }
 
     // 更新滚动偏移范围
+    uint64_t now = SDL_GetTicks();
+    bool showProgressNotice = !m_aiAnalysisNoticeText.empty() &&
+        m_aiAnalysisNoticeStartTime > 0 &&
+        now - m_aiAnalysisNoticeStartTime < AI_ANALYSIS_NOTICE_DURATION_MS;
+    if (m_aiAnalysisActive || showProgressNotice) {
+        bool failed = !m_aiAnalysisActive &&
+            m_aiAnalysisNoticeText.find("失败") != std::string::npos;
+        std::string title = m_aiAnalysisActive ? "AI 搜索中" :
+            (failed ? "AI 搜索失败" : "AI 搜索完成");
+        std::string status = m_aiAnalysisActive ? m_aiAnalysisStatus : m_aiAnalysisNoticeText;
+        float progress = showProgressNotice ? m_aiAnalysisNoticeProgress : m_aiAnalysisProgress;
+        progress = std::clamp(progress, 0.0f, 1.0f);
+
+        int cardX = panelX + 20;
+        int cardY = contentY;
+        int cardW = panelW - 40;
+        int cardH = 86;
+
+        if (cardY + cardH > listY && cardY < listY + listH) {
+            uint8_t accentR = failed ? 230 : 60;
+            uint8_t accentG = failed ? 80 : 150;
+            uint8_t accentB = failed ? 80 : 255;
+            fillRoundRect(cardX, cardY, cardW, cardH, 8, 45, 50, 56, 230);
+            fillRoundRect(cardX, cardY, 4, cardH, 2, accentR, accentG, accentB, 230);
+            drawText(title, cardX + 14, cardY + 12, 255, 255, 255, 13);
+            if (!status.empty()) {
+                drawText(status, cardX + 14, cardY + 34, 205, 212, 222, 12);
+            }
+
+            int barX = cardX + 14;
+            int barY = cardY + cardH - 20;
+            int barW = cardW - 28;
+            int barH = 7;
+            int fillW = static_cast<int>(barW * progress);
+            fillRoundRect(barX, barY, barW, barH, 4, 255, 255, 255, 42);
+            if (m_aiAnalysisActive && fillW <= 0) {
+                fillW = std::max(14, barW / 8);
+            }
+            if (fillW > 0) {
+                fillRoundRect(barX, barY, std::min(barW, fillW), barH, 4, accentR, accentG, accentB, 235);
+            }
+
+            std::ostringstream percent;
+            percent << std::fixed << std::setprecision(0) << (progress * 100.0f) << "%";
+            drawText(percent.str(), cardX + cardW - 48, cardY + 12,
+                     accentR, accentG, accentB, 11);
+        }
+        contentY += cardH + 10;
+    }
+
     int totalContentH = std::max(0, contentY + m_searchScrollOffset - listY);
     if (m_searchScrollOffset > std::max(0, totalContentH - listH)) {
         m_searchScrollOffset = std::max(0, totalContentH - listH);

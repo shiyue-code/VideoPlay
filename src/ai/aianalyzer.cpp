@@ -10,7 +10,17 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
 #include <memory>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -26,6 +36,47 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("ai");
     return *logger;
+}
+
+constexpr const char* kAnalysisCacheVersion = "detail-v2";
+constexpr const char* kVideoTranscodeCacheVersion = "transcode-v1";
+
+int runLowImpactProcess(const std::string& command) {
+#ifdef _WIN32
+    std::vector<char> commandLine(command.begin(), command.end());
+    commandLine.push_back('\0');
+
+    STARTUPINFOA startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+    startupInfo.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION processInfo{};
+    BOOL ok = CreateProcessA(
+        nullptr,
+        commandLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW | IDLE_PRIORITY_CLASS,
+        nullptr,
+        nullptr,
+        &startupInfo,
+        &processInfo);
+
+    if (!ok) {
+        return static_cast<int>(GetLastError());
+    }
+
+    WaitForSingleObject(processInfo.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(processInfo.hProcess, &exitCode);
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+    return static_cast<int>(exitCode);
+#else
+    return system(command.c_str());
+#endif
 }
 
 std::string trim(const std::string& value) {
@@ -127,20 +178,59 @@ AIConfig normalizedConfig(AIConfig config) {
     config.provider = normalizeProvider(config.provider, config.baseUrl, config.model);
     config.baseUrl = normalizeProviderBaseUrl(config.provider, config.baseUrl);
     config.model = normalizeProviderModel(config.provider, config.model);
+    config.analysisDetailLevel = std::clamp(config.analysisDetailLevel, 0, 2);
     return config;
 }
 
-std::string analysisJsonPrompt(int minChapterSeconds) {
+struct AnalysisDetailSpec {
+    int summaryMinWords = 300;
+    int summaryMaxWords = 500;
+    int maxChapters = 12;
+    int minSegments = 12;
+    int maxSegments = 30;
+    std::string label = "标准";
+};
+
+AnalysisDetailSpec analysisDetailSpec(int detailLevel) {
+    detailLevel = std::clamp(detailLevel, 0, 2);
+    if (detailLevel == 0) {
+        return {120, 220, 8, 6, 12, "简略"};
+    }
+    if (detailLevel == 2) {
+        return {600, 900, 18, 30, 60, "详细"};
+    }
+    return {};
+}
+
+int analysisMaxOutputTokens(int detailLevel) {
+    detailLevel = std::clamp(detailLevel, 0, 2);
+    if (detailLevel == 0) return 2048;
+    if (detailLevel == 2) return 8192;
+    return 4096;
+}
+
+std::string analysisJsonPrompt(int minChapterSeconds, int detailLevel) {
+    AnalysisDetailSpec spec = analysisDetailSpec(detailLevel);
     return "请分析这个视频，完成以下任务：\n"
-           "1. 生成简洁的中文摘要（100-200字）\n"
+           "详细程度：" + spec.label + "\n"
+           "1. 生成中文摘要（" + std::to_string(spec.summaryMinWords) + "-" +
+           std::to_string(spec.summaryMaxWords) + "字），覆盖主题、人物/对象、关键动作、结论和可见细节\n"
            "2. 根据内容主题变化自动划分章节（每个章节至少" +
-           std::to_string(minChapterSeconds) + "秒，最多10个章节）\n\n"
+           std::to_string(minChapterSeconds) + "秒，最多" +
+           std::to_string(spec.maxChapters) + "个章节）\n"
+           "3. 生成详细观察记录 transcript：按时间顺序列出 " +
+           std::to_string(spec.minSegments) + "-" + std::to_string(spec.maxSegments) +
+           " 条片段，记录画面、字幕/文字、动作、场景变化、重要说法或结论。"
+           "每条片段要足够具体，便于后续问答检索；不要只写“继续讲解”。\n\n"
            "请只返回 JSON，不要包含 Markdown 代码块或额外说明：\n"
            "{\n"
            "  \"summary\": \"摘要内容\",\n"
            "  \"language\": \"zh\",\n"
            "  \"chapters\": [\n"
            "    {\"title\": \"章节标题\", \"startTime\": 开始时间毫秒}\n"
+           "  ],\n"
+           "  \"transcript\": [\n"
+           "    {\"startTime\": 开始时间毫秒, \"endTime\": 结束时间毫秒, \"text\": \"这一时间段内的具体观察和信息\"}\n"
            "  ]\n"
            "}";
 }
@@ -207,6 +297,38 @@ std::string geminiContentText(const nlohmann::json& responseJson) {
         }
     }
     return text;
+}
+
+std::string conciseHttpError(const std::string& provider, const std::string& prefix,
+                             const HttpResponse& response) {
+    std::string apiMessage;
+    try {
+        auto j = nlohmann::json::parse(response.body);
+        if (j.contains("error") && j["error"].contains("message") &&
+            j["error"]["message"].is_string()) {
+            apiMessage = j["error"]["message"].get<std::string>();
+        }
+    } catch (...) {
+    }
+
+    std::string providerName = provider == "gemini" ? "Gemini" : "AI";
+    if (response.statusCode == 429) {
+        return providerName + " 配额已用尽或触发限流，请稍后重试，或在 AI 设置中切换模型/API Key。";
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+        return providerName + " 鉴权失败，请检查当前选中的服务商、API Key、Base URL 和模型权限是否匹配。";
+    }
+
+    std::string message = prefix + " (HTTP " + std::to_string(response.statusCode) + ")";
+    if (!apiMessage.empty()) {
+        if (apiMessage.size() > 160) {
+            apiMessage = apiMessage.substr(0, 160) + "...";
+        }
+        message += ": " + apiMessage;
+    } else if (!response.body.empty()) {
+        message += ": " + response.body.substr(0, 160);
+    }
+    return message;
 }
 
 int64_t parseTimeStringMs(const std::string& rawValue) {
@@ -348,6 +470,92 @@ std::vector<ChapterInfo> parseChapters(const nlohmann::json& aiResult,
     return chapters;
 }
 
+std::string segmentText(const nlohmann::json& segmentJson) {
+    static const char* keys[] = {
+        "text", "content", "description", "summary", "observation", "caption", "detail"
+    };
+
+    for (const char* key : keys) {
+        if (segmentJson.contains(key) && segmentJson[key].is_string()) {
+            std::string text = trim(segmentJson[key].get<std::string>());
+            if (!text.empty()) {
+                return text;
+            }
+        }
+    }
+
+    return {};
+}
+
+std::vector<TranscriptSegment> parseTranscriptSegments(const nlohmann::json& aiResult,
+                                                       int64_t fallbackEndTimeMs) {
+    std::vector<TranscriptSegment> segments;
+    static const char* arrayKeys[] = {
+        "transcript", "observations", "detailedObservations", "details", "moments"
+    };
+
+    const nlohmann::json* source = nullptr;
+    for (const char* key : arrayKeys) {
+        if (aiResult.contains(key) && aiResult[key].is_array()) {
+            source = &aiResult[key];
+            break;
+        }
+    }
+    if (!source) {
+        return segments;
+    }
+
+    for (const auto& item : *source) {
+        if (!item.is_object()) {
+            continue;
+        }
+
+        int64_t startTime = chapterStartTimeMs(item);
+        if (startTime < 0) {
+            startTime = segments.empty() ? 0 : segments.back().endTime;
+        }
+
+        int64_t endTime = -1;
+        static const char* endKeys[] = {"endTime", "end_time", "end", "stop", "finish"};
+        for (const char* key : endKeys) {
+            if (item.contains(key)) {
+                endTime = parseTimeValueMs(item[key]);
+                if (endTime >= 0) {
+                    break;
+                }
+            }
+        }
+
+        std::string text = segmentText(item);
+        if (text.empty()) {
+            continue;
+        }
+
+        TranscriptSegment segment;
+        segment.startTime = startTime;
+        segment.endTime = endTime > startTime ? endTime : startTime + 10000;
+        segment.text = text;
+        segment.confidence = 0.9f;
+        segments.push_back(segment);
+    }
+
+    std::sort(segments.begin(), segments.end(), [](const TranscriptSegment& lhs,
+                                                   const TranscriptSegment& rhs) {
+        return lhs.startTime < rhs.startTime;
+    });
+
+    for (size_t i = 0; i < segments.size(); ++i) {
+        if (i + 1 < segments.size() && segments[i].endTime > segments[i + 1].startTime) {
+            segments[i].endTime = segments[i + 1].startTime;
+        } else if (i + 1 == segments.size() && fallbackEndTimeMs > segments[i].startTime &&
+                   segments[i].endTime <= segments[i].startTime + 10000) {
+            segments[i].endTime = fallbackEndTimeMs;
+        }
+    }
+
+    return segments;
+}
+
 bool hasUsableAnalysis(const AIAnalysisResult& result) {
     return !result.chapters.empty();
 }
@@ -403,6 +611,28 @@ std::string AIAnalyzer::getCacheDir() const {
     return "./ai_cache";
 }
 
+std::string AIAnalyzer::computeSourceHash(const std::string& filePath) const {
+    try {
+        if (!std::filesystem::exists(filePath)) return "";
+
+        auto fileSize = std::filesystem::file_size(filePath);
+        auto modTime = std::filesystem::last_write_time(filePath).time_since_epoch().count();
+
+        std::stringstream ss;
+        ss << filePath << "_" << fileSize << "_" << modTime
+           << "_" << kVideoTranscodeCacheVersion;
+
+        size_t hash = std::hash<std::string>{}(ss.str());
+
+        std::stringstream result;
+        result << std::hex << hash;
+        return result.str();
+    } catch (const std::exception& e) {
+        logger().error("[AI] computeSourceHash failed: " + std::string(e.what()));
+        return "";
+    }
+}
+
 std::string AIAnalyzer::computeFileHash(const std::string& filePath) const {
     try {
         if (!std::filesystem::exists(filePath)) return "";
@@ -416,7 +646,9 @@ std::string AIAnalyzer::computeFileHash(const std::string& filePath) const {
         std::stringstream ss;
         AIConfig config = snapshotConfig();
         ss << filePath << "_" << fileSize << "_" << modTime
-           << "_" << config.provider << "_" << config.model;
+           << "_" << config.provider << "_" << config.model
+           << "_" << std::clamp(config.analysisDetailLevel, 0, 2)
+           << "_" << kAnalysisCacheVersion;
 
         std::string input = ss.str();
         size_t hash = std::hash<std::string>{}(input);
@@ -435,6 +667,77 @@ std::string AIAnalyzer::getCachePath(const std::string& videoPath) const {
     std::string cacheDir = getCacheDir();
     std::filesystem::create_directories(cacheDir);
     return cacheDir + "/" + hash + ".json";
+}
+
+std::string AIAnalyzer::getTranscodeCacheDir() const {
+    std::filesystem::path cacheDir = std::filesystem::path(getCacheDir()) / "video";
+    std::filesystem::create_directories(cacheDir);
+    return cacheDir.string();
+}
+
+std::string AIAnalyzer::getTranscodeCachePath(const std::string& sourceHash,
+                                              int clipSeconds,
+                                              int64_t maxOutputBytes) const {
+    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    int64_t limitKb = std::max<int64_t>(1, maxOutputBytes / 1024);
+    std::string fileName = sourceHash + "_clip" + std::to_string(clipSeconds) +
+                           "_limit" + std::to_string(limitKb) + "kb_ai.mp4";
+    return (cacheDir / fileName).string();
+}
+
+std::string AIAnalyzer::findReusableTranscodeCache(const std::string& sourceHash,
+                                                   int clipSeconds,
+                                                   int64_t maxOutputBytes) const {
+    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    if (!std::filesystem::exists(cacheDir)) {
+        return "";
+    }
+
+    std::string prefix = sourceHash + "_clip" + std::to_string(clipSeconds) + "_";
+    std::string bestPath;
+    uintmax_t bestSize = 0;
+
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(cacheDir)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            std::filesystem::path path = entry.path();
+            std::string fileName = path.filename().string();
+            if (fileName.rfind(prefix, 0) != 0 || path.extension() != ".mp4") {
+                continue;
+            }
+
+            uintmax_t fileSize = std::filesystem::file_size(path);
+            if (fileSize == 0) {
+                std::filesystem::remove(path);
+                continue;
+            }
+
+            if (fileSize <= static_cast<uintmax_t>(maxOutputBytes) && fileSize > bestSize) {
+                bestSize = fileSize;
+                bestPath = path.string();
+            }
+        }
+    } catch (const std::exception& e) {
+        logger().warning("[AI] Failed to scan transcode cache: " + std::string(e.what()));
+    }
+
+    return bestPath;
+}
+
+std::string AIAnalyzer::getGeminiFileCachePath(const std::string& sourceHash,
+                                               int clipSeconds,
+                                               int64_t maxOutputBytes) const {
+    std::filesystem::path cacheDir = std::filesystem::path(getCacheDir()) / "remote";
+    std::filesystem::create_directories(cacheDir);
+
+    int64_t limitKb = std::max<int64_t>(1, maxOutputBytes / 1024);
+    std::string fileName = "gemini_" + sourceHash + "_clip" +
+                           std::to_string(clipSeconds) + "_limit" +
+                           std::to_string(limitKb) + "kb_file.json";
+    return (cacheDir / fileName).string();
 }
 
 bool AIAnalyzer::hasCache(const std::string& videoPath) const {
@@ -545,6 +848,7 @@ void AIAnalyzer::clearCache(const std::string& videoPath) {
         std::filesystem::remove(path);
         logger().info("[AI] Cleared cache for: " + videoPath);
     }
+    clearTranscodeCache(videoPath);
 }
 
 void AIAnalyzer::clearAllCache() {
@@ -552,6 +856,64 @@ void AIAnalyzer::clearAllCache() {
     if (std::filesystem::exists(cacheDir)) {
         std::filesystem::remove_all(cacheDir);
         logger().info("[AI] Cleared all cache");
+    }
+}
+
+void AIAnalyzer::clearTranscodeCache(const std::string& videoPath) {
+    std::string sourceHash = computeSourceHash(videoPath);
+    if (sourceHash.empty()) {
+        return;
+    }
+
+    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    std::string prefix = sourceHash + "_clip";
+    size_t removedCount = 0;
+
+    try {
+        if (std::filesystem::exists(cacheDir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(cacheDir)) {
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
+
+                std::string fileName = entry.path().filename().string();
+                if (fileName.rfind(prefix, 0) == 0 && entry.path().extension() == ".mp4") {
+                    std::filesystem::remove(entry.path());
+                    ++removedCount;
+                }
+            }
+        }
+
+        std::filesystem::path legacyPath = std::filesystem::path(getCacheDir()) /
+            (computeFileHash(videoPath) + "_ai.mp4");
+        if (std::filesystem::exists(legacyPath)) {
+            std::filesystem::remove(legacyPath);
+            ++removedCount;
+        }
+
+        std::filesystem::path remoteDir = std::filesystem::path(getCacheDir()) / "remote";
+        std::string remotePrefix = "gemini_" + sourceHash + "_clip";
+        if (std::filesystem::exists(remoteDir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(remoteDir)) {
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
+
+                std::string fileName = entry.path().filename().string();
+                if (fileName.rfind(remotePrefix, 0) == 0 &&
+                    entry.path().extension() == ".json") {
+                    std::filesystem::remove(entry.path());
+                    ++removedCount;
+                }
+            }
+        }
+
+        if (removedCount > 0) {
+            logger().info("[AI] Cleared " + std::to_string(removedCount) +
+                          " transcode cache file(s) for: " + videoPath);
+        }
+    } catch (const std::exception& e) {
+        logger().warning("[AI] Failed to clear transcode cache: " + std::string(e.what()));
     }
 }
 
@@ -784,9 +1146,10 @@ std::vector<TranscriptSegment> AIAnalyzer::transcribe(const std::string& audioPa
 }
 
 AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>& transcript,
-                                              const std::string& videoPath,
-                                              ProgressCallback onProgress) {
+                                             const std::string& videoPath,
+                                             ProgressCallback onProgress) {
     AIAnalysisResult result;
+    AnalysisDetailSpec detailSpec = analysisDetailSpec(snapshotConfig().analysisDetailLevel);
     if (onProgress) onProgress(0.7f, "正在生成摘要...");
 
     std::string model;
@@ -812,8 +1175,10 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
     }
 
     std::string prompt = R"(分析以下视频转录文本，完成以下任务：
-1. 生成简洁的中文摘要（100-200字）
-2. 根据内容主题变化自动划分章节（每个章节至少30秒，最多10个章节）
+1. 生成中文摘要（)" + std::to_string(detailSpec.summaryMinWords) + "-" +
+        std::to_string(detailSpec.summaryMaxWords) + R"(字），覆盖主题、关键论点、重要细节和结论
+2. 根据内容主题变化自动划分章节（每个章节至少30秒，最多)" +
+        std::to_string(detailSpec.maxChapters) + R"(个章节）
 
 转录文本：
 )" + transcriptText + R"(
@@ -834,7 +1199,7 @@ AIAnalysisResult AIAnalyzer::analyzeWithGPT(const std::vector<TranscriptSegment>
             {{"role", "user"}, {"content", prompt}}
         }},
         {"temperature", 0.3},
-        {"max_tokens", 2000}
+        {"max_tokens", analysisMaxOutputTokens(snapshotConfig().analysisDetailLevel)}
     };
 
     logger().info("[AI] Calling GPT API: " + baseUrl + "/v1/chat/completions");
@@ -933,9 +1298,12 @@ void AIAnalyzer::analyze(const std::string& videoPath,
     if (hasCache(videoPath)) {
         AIAnalysisResult result = loadCache(videoPath);
         if (result.valid) {
-            if (onProgress) onProgress(1.0f, "使用缓存结果");
-            if (onComplete) onComplete(result);
-            return;
+            if (!result.transcript.empty()) {
+                if (onProgress) onProgress(1.0f, "使用缓存结果");
+                if (onComplete) onComplete(result);
+                return;
+            }
+            logger().info("[AI] Cache lacks detailed transcript, reanalyzing: " + videoPath);
         }
     }
 
@@ -990,11 +1358,6 @@ AIAnalysisResult AIAnalyzer::analyzeWithMimoVideoUnderstanding(const std::string
     if (onProgress) onProgress(0.4f, "正在编码视频...");
     logger().info("[AI] Converting video to base64...");
     std::string base64Data = fileToBase64(mp4Path);
-    
-    // 清理临时文件
-    if (std::filesystem::exists(mp4Path)) {
-        std::filesystem::remove(mp4Path);
-    }
 
     if (base64Data.empty()) {
         logger().error("[AI] Failed to convert video to base64");
@@ -1027,10 +1390,10 @@ AIAnalysisResult AIAnalyzer::analyzeWithMimoVideoUnderstanding(const std::string
                     {"fps", 2},
                     {"media_resolution", "default"}
                 },
-                {{"type", "text"}, {"text", analysisJsonPrompt(10)}},
+                {{"type", "text"}, {"text", analysisJsonPrompt(10, config.analysisDetailLevel)}},
             }}}
         }},
-        {"max_completion_tokens", 4096}
+        {"max_completion_tokens", analysisMaxOutputTokens(config.analysisDetailLevel)}
     };
 
     logger().info("[AI] Calling MiMo video understanding: " + baseUrl + "/v1/chat/completions");
@@ -1058,13 +1421,15 @@ AIAnalysisResult AIAnalyzer::analyzeWithMimoVideoUnderstanding(const std::string
         result.language = aiResult.value("language", std::string());
 
         result.chapters = parseChapters(aiResult, 0);
+        result.transcript = parseTranscriptSegments(aiResult, 0);
 
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
         result.valid = hasUsableAnalysis(result);
 
         if (result.valid) {
             logger().info("[AI] MiMo video analysis complete: " +
-                std::to_string(result.chapters.size()) + " chapters");
+                std::to_string(result.chapters.size()) + " chapters, " +
+                std::to_string(result.transcript.size()) + " detail segments");
         } else {
             logger().warning("[AI] MiMo video analysis returned no usable chapters. Content: " +
                 content.substr(0, 500));
@@ -1092,9 +1457,6 @@ AIAnalysisResult AIAnalyzer::analyzeWithGeminiVideoUnderstanding(const std::stri
 
     if (onProgress) onProgress(0.45f, "正在编码 Gemini 视频...");
     std::string base64Data = fileToBase64(mp4Path);
-    if (std::filesystem::exists(mp4Path)) {
-        std::filesystem::remove(mp4Path);
-    }
 
     if (base64Data.empty()) {
         logger().error("[AI] Failed to convert Gemini video to base64");
@@ -1121,14 +1483,14 @@ AIAnalysisResult AIAnalyzer::analyzeWithGeminiVideoUnderstanding(const std::stri
                         }}
                     },
                     {
-                        {"text", analysisJsonPrompt(10)}
+                        {"text", analysisJsonPrompt(10, config.analysisDetailLevel)}
                     }
                 })}
             }
         })},
         {"generationConfig", {
             {"temperature", 0.2},
-            {"maxOutputTokens", 4096},
+            {"maxOutputTokens", analysisMaxOutputTokens(config.analysisDetailLevel)},
             {"responseMimeType", "application/json"}
         }}
     };
@@ -1157,12 +1519,14 @@ AIAnalysisResult AIAnalyzer::analyzeWithGeminiVideoUnderstanding(const std::stri
         result.summary = aiResult.value("summary", std::string());
         result.language = aiResult.value("language", std::string());
         result.chapters = parseChapters(aiResult, 0);
+        result.transcript = parseTranscriptSegments(aiResult, 0);
         result.analyzedAt = std::chrono::system_clock::now().time_since_epoch().count();
         result.valid = hasUsableAnalysis(result);
 
         if (result.valid) {
             logger().info("[AI] Gemini video analysis complete: " +
-                std::to_string(result.chapters.size()) + " chapters");
+                std::to_string(result.chapters.size()) + " chapters, " +
+                std::to_string(result.transcript.size()) + " detail segments");
         } else {
             logger().warning("[AI] Gemini video analysis returned no usable chapters. Content: " +
                 content.substr(0, 500));
@@ -1176,14 +1540,456 @@ AIAnalysisResult AIAnalyzer::analyzeWithGeminiVideoUnderstanding(const std::stri
     return result;
 }
 
+std::string AIAnalyzer::askMimoVideoDirect(const std::string& videoPath,
+                                           const std::string& question,
+                                           const AIConfig& config,
+                                           ProgressCallback onProgress,
+                                           ErrorCallback onError) {
+    if (onProgress) onProgress(0.1f, "正在为 MiMo 准备视频...");
+    std::string mp4Path = extractVideoForAI(videoPath, onProgress, 20 * 1024 * 1024, 120);
+    if (mp4Path.empty()) {
+        if (onError) onError("视频转码失败，无法调用 API 搜索");
+        return {};
+    }
+
+    if (onProgress) onProgress(0.45f, "正在编码视频...");
+    std::string base64Data = fileToBase64(mp4Path);
+    if (base64Data.empty()) {
+        if (onError) onError("视频编码失败，无法调用 API 搜索");
+        return {};
+    }
+    logger().info("[AI] MiMo direct video base64 size: " +
+                  std::to_string(base64Data.length()) + " chars");
+
+    HttpClient http;
+    http.setBaseUrl(config.baseUrl);
+    http.setApiKey(config.apiKey);
+    http.setAuthHeader("Authorization", "Bearer ");
+    http.setTimeout(120);
+
+    std::string prompt =
+        "请直接根据这个视频回答用户的搜索或问题。\n"
+        "如果用户是在搜索内容，请列出最相关的片段和时间点；如果用户是在提问，请直接作答。\n"
+        "请尽量给出 [MM:SS] 或 [HH:MM:SS] 时间点。不要要求用户先进行视频分析。\n\n"
+        "用户输入：\n" + question;
+
+    nlohmann::json requestBody = {
+        {"model", config.model},
+        {"messages", {
+            {{"role", "system"}, {"content", "你是视频搜索与问答助手，只根据用户提供的视频回答。"}},
+            {{"role", "user"}, {"content", {
+                {
+                    {"type", "video_url"},
+                    {"video_url", {{"url", "data:video/mp4;base64," + base64Data}}},
+                    {"fps", 2},
+                    {"media_resolution", "default"}
+                },
+                {{"type", "text"}, {"text", prompt}},
+            }}}
+        }},
+        {"max_completion_tokens", 2048}
+    };
+
+    if (onProgress) onProgress(0.75f, "正在上传视频并等待 MiMo 回答...");
+    logger().info("[AI] Calling MiMo direct video QA: " +
+                  config.baseUrl + "/v1/chat/completions, model=" + config.model);
+    auto response = http.post("v1/chat/completions", requestBody.dump());
+    logger().info("[AI] MiMo direct video QA response status: " +
+                  std::to_string(response.statusCode));
+    if (!response.success()) {
+        logger().error("[AI] MiMo direct video QA error: status=" +
+                       std::to_string(response.statusCode));
+        logger().error("[AI] Response: " + response.body.substr(0, 500));
+        if (onError) onError(conciseHttpError(config.provider, "请求失败", response));
+        return {};
+    }
+
+    try {
+        auto j = nlohmann::json::parse(response.body);
+        return openAIContentText(j);
+    } catch (const std::exception& e) {
+        if (onError) onError(std::string("解析失败: ") + e.what());
+        return {};
+    }
+}
+
+AIAnalyzer::GeminiVideoFile AIAnalyzer::loadGeminiFileCache(const std::string& cachePath) const {
+    GeminiVideoFile file;
+    try {
+        if (!std::filesystem::exists(cachePath)) {
+            return file;
+        }
+
+        std::ifstream input(cachePath);
+        nlohmann::json j;
+        input >> j;
+
+        file.name = j.value("name", std::string());
+        file.uri = j.value("uri", std::string());
+        file.mimeType = j.value("mimeType", std::string("video/mp4"));
+        file.expiresAt = j.value("expiresAt", int64_t(0));
+
+        int64_t now = static_cast<int64_t>(std::time(nullptr));
+        file.valid = !file.name.empty() && !file.uri.empty() && file.expiresAt > now + 300;
+    } catch (const std::exception& e) {
+        logger().warning("[AI] Failed to load Gemini file cache: " + std::string(e.what()));
+    }
+    return file;
+}
+
+void AIAnalyzer::saveGeminiFileCache(const std::string& cachePath,
+                                     const GeminiVideoFile& file) const {
+    if (!file.valid || file.name.empty() || file.uri.empty()) {
+        return;
+    }
+
+    try {
+        std::filesystem::create_directories(std::filesystem::path(cachePath).parent_path());
+        nlohmann::json j = {
+            {"name", file.name},
+            {"uri", file.uri},
+            {"mimeType", file.mimeType},
+            {"expiresAt", file.expiresAt}
+        };
+
+        std::ofstream output(cachePath);
+        output << j.dump(2);
+    } catch (const std::exception& e) {
+        logger().warning("[AI] Failed to save Gemini file cache: " + std::string(e.what()));
+    }
+}
+
+bool AIAnalyzer::waitForGeminiFileActive(const GeminiVideoFile& file,
+                                         const AIConfig& config,
+                                         ProgressCallback onProgress) {
+    if (!file.valid || file.name.empty()) {
+        return false;
+    }
+
+    HttpClient http;
+    http.setBaseUrl(config.baseUrl);
+    http.setApiKey(config.apiKey);
+    http.setAuthHeader("x-goog-api-key", "");
+    http.setTimeout(30);
+
+    std::string endpoint = "v1beta/" + file.name;
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        if (m_cancelled) {
+            return false;
+        }
+
+        auto response = http.get(endpoint);
+        if (!response.success()) {
+            logger().warning("[AI] Gemini file status check failed: status=" +
+                             std::to_string(response.statusCode));
+            return false;
+        }
+
+        try {
+            auto j = nlohmann::json::parse(response.body);
+            std::string state = j.value("state", std::string());
+            if (state.empty() || state == "ACTIVE") {
+                return true;
+            }
+            if (state == "FAILED") {
+                logger().warning("[AI] Gemini file processing failed: " + file.name);
+                return false;
+            }
+            if (onProgress) {
+                onProgress(0.62f, "等待 Gemini 处理视频...");
+            }
+        } catch (const std::exception& e) {
+            logger().warning("[AI] Failed to parse Gemini file status: " + std::string(e.what()));
+            return false;
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    logger().warning("[AI] Gemini file did not become ACTIVE in time: " + file.name);
+    return false;
+}
+
+AIAnalyzer::GeminiVideoFile AIAnalyzer::uploadGeminiVideoFile(const std::string& mp4Path,
+                                                              const std::string& cachePath,
+                                                              const AIConfig& config,
+                                                              ProgressCallback onProgress,
+                                                              ErrorCallback onError) {
+    GeminiVideoFile file;
+
+    std::ifstream input(mp4Path, std::ios::binary);
+    if (!input.is_open()) {
+        if (onError) onError("无法读取转码视频，不能上传到 Gemini");
+        return file;
+    }
+    std::string videoBytes((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+    if (videoBytes.empty()) {
+        if (onError) onError("转码视频为空，不能上传到 Gemini");
+        return file;
+    }
+
+    HttpClient http;
+    http.setBaseUrl(config.baseUrl);
+    http.setApiKey(config.apiKey);
+    http.setAuthHeader("x-goog-api-key", "");
+    http.setTimeout(120);
+
+    if (onProgress) onProgress(0.48f, "正在上传视频到 Gemini...");
+    nlohmann::json startBody = {
+        {"file", {
+            {"display_name", std::filesystem::path(mp4Path).filename().string()}
+        }}
+    };
+
+    std::map<std::string, std::string> startHeaders = {
+        {"Content-Type", "application/json"},
+        {"X-Goog-Upload-Protocol", "resumable"},
+        {"X-Goog-Upload-Command", "start"},
+        {"X-Goog-Upload-Header-Content-Length", std::to_string(videoBytes.size())},
+        {"X-Goog-Upload-Header-Content-Type", "video/mp4"}
+    };
+
+    auto startResponse = http.postRaw("upload/v1beta/files", startBody.dump(), startHeaders);
+    if (!startResponse.success()) {
+        logger().error("[AI] Gemini file upload start failed: status=" +
+                       std::to_string(startResponse.statusCode));
+        logger().error("[AI] Response: " + startResponse.body.substr(0, 500));
+        if (onError) onError(conciseHttpError(config.provider, "Gemini 文件上传初始化失败", startResponse));
+        return file;
+    }
+
+    auto uploadIt = startResponse.headers.find("x-goog-upload-url");
+    if (uploadIt == startResponse.headers.end() || uploadIt->second.empty()) {
+        if (onError) onError("Gemini 没有返回文件上传地址");
+        return file;
+    }
+
+    if (onProgress) onProgress(0.55f, "正在完成 Gemini 视频上传...");
+    std::map<std::string, std::string> uploadHeaders = {
+        {"Content-Type", "video/mp4"},
+        {"Content-Length", std::to_string(videoBytes.size())},
+        {"X-Goog-Upload-Offset", "0"},
+        {"X-Goog-Upload-Command", "upload, finalize"}
+    };
+
+    auto uploadResponse = http.postRaw(uploadIt->second, videoBytes, uploadHeaders);
+    if (!uploadResponse.success()) {
+        logger().error("[AI] Gemini file upload failed: status=" +
+                       std::to_string(uploadResponse.statusCode));
+        logger().error("[AI] Response: " + uploadResponse.body.substr(0, 500));
+        if (onError) onError(conciseHttpError(config.provider, "Gemini 文件上传失败", uploadResponse));
+        return file;
+    }
+
+    try {
+        auto j = nlohmann::json::parse(uploadResponse.body);
+        const auto& fileJson = j.contains("file") && j["file"].is_object() ? j["file"] : j;
+        file.name = fileJson.value("name", std::string());
+        file.uri = fileJson.value("uri", std::string());
+        file.mimeType = fileJson.value("mimeType", std::string("video/mp4"));
+        file.expiresAt = static_cast<int64_t>(std::time(nullptr)) + 46 * 60 * 60;
+        file.valid = !file.name.empty() && !file.uri.empty();
+    } catch (const std::exception& e) {
+        if (onError) onError(std::string("解析 Gemini 文件上传结果失败: ") + e.what());
+        return GeminiVideoFile();
+    }
+
+    if (!file.valid) {
+        if (onError) onError("Gemini 文件上传结果缺少 file_uri");
+        return GeminiVideoFile();
+    }
+
+    if (!waitForGeminiFileActive(file, config, onProgress)) {
+        if (onError) onError("Gemini 视频文件未能完成处理");
+        return GeminiVideoFile();
+    }
+
+    saveGeminiFileCache(cachePath, file);
+    logger().info("[AI] Gemini video file uploaded and cached: " + file.name);
+    return file;
+}
+
+AIAnalyzer::GeminiVideoFile AIAnalyzer::ensureGeminiVideoFile(const std::string& videoPath,
+                                                              const AIConfig& config,
+                                                              ProgressCallback onProgress,
+                                                              ErrorCallback onError) {
+    constexpr int64_t kGeminiDirectVideoLimit = 18 * 1024 * 1024;
+    constexpr int kGeminiDirectVideoSeconds = 120;
+
+    std::string sourceHash = computeSourceHash(videoPath);
+    if (sourceHash.empty()) {
+        if (onError) onError("无法识别当前视频，不能创建 Gemini 复用文件");
+        return {};
+    }
+
+    double duration = 0.0;
+    AVFormatContext* inputCtx = nullptr;
+    if (avformat_open_input(&inputCtx, videoPath.c_str(), nullptr, nullptr) == 0) {
+        if (avformat_find_stream_info(inputCtx, nullptr) >= 0 &&
+            inputCtx->duration != AV_NOPTS_VALUE && inputCtx->duration > 0) {
+            duration = inputCtx->duration / static_cast<double>(AV_TIME_BASE);
+        }
+        avformat_close_input(&inputCtx);
+    }
+
+    double effectiveDuration = duration > 0.0
+        ? std::min(duration, static_cast<double>(kGeminiDirectVideoSeconds))
+        : static_cast<double>(kGeminiDirectVideoSeconds);
+    int clipSeconds = std::max(1, static_cast<int>(std::ceil(effectiveDuration)));
+    std::string cachePath = getGeminiFileCachePath(sourceHash, clipSeconds, kGeminiDirectVideoLimit);
+
+    GeminiVideoFile cachedFile = loadGeminiFileCache(cachePath);
+    if (cachedFile.valid) {
+        if (onProgress) onProgress(0.35f, "复用 Gemini 视频文件...");
+        if (waitForGeminiFileActive(cachedFile, config, onProgress)) {
+            logger().info("[AI] Reusing Gemini video file: " + cachedFile.name);
+            return cachedFile;
+        }
+        std::filesystem::remove(cachePath);
+        logger().warning("[AI] Gemini cached file is no longer usable, uploading again");
+    }
+
+    if (onProgress) onProgress(0.1f, "正在为 Gemini 准备视频...");
+    std::string mp4Path = extractVideoForAI(videoPath, onProgress,
+                                            kGeminiDirectVideoLimit,
+                                            kGeminiDirectVideoSeconds);
+    if (mp4Path.empty()) {
+        if (onError) onError("视频转码失败，无法调用 Gemini 搜索");
+        return {};
+    }
+
+    return uploadGeminiVideoFile(mp4Path, cachePath, config, onProgress, onError);
+}
+
+std::string AIAnalyzer::askGeminiVideoDirect(const std::string& videoPath,
+                                             const std::string& question,
+                                             const AIConfig& config,
+                                             ProgressCallback onProgress,
+                                             ErrorCallback onError) {
+    GeminiVideoFile videoFile = ensureGeminiVideoFile(videoPath, config, onProgress, onError);
+    if (!videoFile.valid) {
+        return {};
+    }
+
+    HttpClient http;
+    http.setBaseUrl(config.baseUrl);
+    http.setApiKey(config.apiKey);
+    http.setAuthHeader("x-goog-api-key", "");
+    http.setTimeout(120);
+
+    std::string prompt =
+        "请直接根据这个视频回答用户的搜索或问题。\n"
+        "如果用户是在搜索内容，请列出最相关的片段和时间点；如果用户是在提问，请直接作答。\n"
+        "请尽量给出 [MM:SS] 或 [HH:MM:SS] 时间点。不要要求用户先进行视频分析。\n\n"
+        "用户输入：\n" + question;
+
+    nlohmann::json requestBody = {
+        {"contents", nlohmann::json::array({
+            {
+                {"role", "user"},
+                {"parts", nlohmann::json::array({
+                    {
+                        {"file_data", {
+                            {"mime_type", videoFile.mimeType},
+                            {"file_uri", videoFile.uri}
+                        }}
+                    },
+                    {
+                        {"text", prompt}
+                    }
+                })}
+            }
+        })},
+        {"generationConfig", {
+            {"temperature", 0.2},
+            {"maxOutputTokens", 2048}
+        }}
+    };
+
+    if (onProgress) onProgress(0.75f, "正在请求 Gemini 回答...");
+    std::string endpoint = "v1beta/models/" + config.model + ":generateContent";
+    logger().info("[AI] Calling Gemini direct video QA: " +
+                  config.baseUrl + "/" + endpoint + ", file=" + videoFile.name);
+    auto response = http.post(endpoint, requestBody.dump());
+    logger().info("[AI] Gemini direct video QA response status: " +
+                  std::to_string(response.statusCode));
+    if (!response.success()) {
+        logger().error("[AI] Gemini direct video QA error: status=" +
+                       std::to_string(response.statusCode));
+        logger().error("[AI] Response: " + response.body.substr(0, 500));
+        if (onError) onError(conciseHttpError(config.provider, "请求失败", response));
+        return {};
+    }
+
+    try {
+        auto j = nlohmann::json::parse(response.body);
+        return geminiContentText(j);
+    } catch (const std::exception& e) {
+        if (onError) onError(std::string("解析失败: ") + e.what());
+        return {};
+    }
+}
+
+void AIAnalyzer::askVideoDirect(const std::string& videoPath,
+                                const std::string& question,
+                                QuestionCallback onComplete,
+                                ProgressCallback onProgress,
+                                ErrorCallback onError) {
+    m_cancelled = false;
+    AIConfig config = snapshotConfig();
+    if (config.apiKey.empty() || config.baseUrl.empty()) {
+        if (onError) onError("API Key 或 Base URL 未配置");
+        return;
+    }
+
+    std::thread([this, videoPath, question, config, onComplete, onProgress, onError]() {
+        try {
+            bool errorReported = false;
+            auto reportError = [&](const std::string& error) {
+                errorReported = true;
+                if (onError) {
+                    onError(error);
+                }
+            };
+
+            std::string answer;
+            if (config.provider == "gemini") {
+                answer = askGeminiVideoDirect(videoPath, question, config, onProgress, reportError);
+            } else if (config.provider == "mimo") {
+                answer = askMimoVideoDirect(videoPath, question, config, onProgress, reportError);
+            } else {
+                reportError("暂不支持的 AI 服务商: " + config.provider);
+                return;
+            }
+
+            if (m_cancelled) {
+                return;
+            }
+            if (answer.empty()) {
+                if (!errorReported) {
+                    reportError("API 没有返回可用答案");
+                }
+                return;
+            }
+            if (onProgress) onProgress(1.0f, "搜索完成");
+            if (onComplete) onComplete(answer);
+        } catch (const std::exception& e) {
+            if (onError) onError(std::string("API 搜索异常: ") + e.what());
+        }
+    }).detach();
+}
+
 std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
                                           ProgressCallback onProgress,
                                           int64_t maxOutputBytes,
                                           int maxDurationSeconds) {
     // 统一转为 H.264/AVC1 MP4，按 provider 的限制压缩到指定大小以内。
-    
-    std::string outputPath = getCacheDir() + "/" + computeFileHash(videoPath) + "_ai.mp4";
-    std::filesystem::create_directories(std::filesystem::path(outputPath).parent_path());
+    std::string sourceHash = computeSourceHash(videoPath);
+    if (sourceHash.empty()) {
+        logger().error("[AI] Cannot compute source hash: " + videoPath);
+        return "";
+    }
 
     // 获取视频时长
     AVFormatContext* inputCtx = nullptr;
@@ -1195,12 +2001,28 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         avformat_close_input(&inputCtx);
         return "";
     }
-    double duration = inputCtx->duration / (double)AV_TIME_BASE;
+    double duration = 0.0;
+    if (inputCtx->duration != AV_NOPTS_VALUE && inputCtx->duration > 0) {
+        duration = inputCtx->duration / (double)AV_TIME_BASE;
+    }
     avformat_close_input(&inputCtx);
     
     logger().info("[AI] Video duration: " + std::to_string(duration) + "s");
     
     bool needTrim = (duration > maxDurationSeconds);
+    double effectiveDuration = duration > 0.0
+        ? std::min(duration, static_cast<double>(maxDurationSeconds))
+        : static_cast<double>(maxDurationSeconds);
+    int clipSeconds = std::max(1, static_cast<int>(std::ceil(effectiveDuration)));
+    std::string outputPath = getTranscodeCachePath(sourceHash, clipSeconds, maxOutputBytes);
+    std::filesystem::create_directories(std::filesystem::path(outputPath).parent_path());
+
+    std::string reusablePath = findReusableTranscodeCache(sourceHash, clipSeconds, maxOutputBytes);
+    if (!reusablePath.empty()) {
+        if (onProgress) onProgress(0.35f, "复用已转码视频...");
+        logger().info("[AI] Reusing transcode cache: " + reusablePath);
+        return reusablePath;
+    }
     
     // 多级压缩策略：尝试不同质量级别
     struct QualityPreset {
@@ -1228,13 +2050,15 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         }
         
         // 构建 FFmpeg 命令
-        std::string cmd = "ffmpeg -y -i \"" + videoPath + "\"";
+        std::string cmd = "ffmpeg -hide_banner -loglevel error -nostdin";
+        cmd += " -threads 1 -filter_threads 1 -filter_complex_threads 1";
+        cmd += " -y -i \"" + videoPath + "\"";
         if (needTrim) {
             cmd += " -t " + std::to_string(maxDurationSeconds);
         }
         
         // 视频：H.264，限制分辨率和码率
-        cmd += " -c:v libx264 -preset fast";
+        cmd += " -c:v libx264 -preset veryfast -threads 1";
         cmd += " -crf " + std::to_string(preset.crf);
         cmd += " -vf \"scale='min(" + std::to_string(preset.maxWidth) + ",iw)':'min(" + std::to_string(preset.maxHeight) + ",ih)':force_original_aspect_ratio=decrease\"";
         cmd += " -maxrate 500k -bufsize 1000k";
@@ -1247,7 +2071,7 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         logger().info("[AI] FFmpeg command: " + cmd);
         if (onProgress) onProgress(0.2f + i * 0.1f, "正在转码视频 (" + std::string(preset.name) + ")...");
         
-        int ret = system(cmd.c_str());
+        int ret = runLowImpactProcess(cmd);
         if (ret != 0) {
             logger().error("[AI] FFmpeg failed with code: " + std::to_string(ret));
             continue;
@@ -1353,6 +2177,7 @@ std::vector<TranscriptSegment> AIAnalyzer::loadSubtitleAsTranscript(const std::s
 }
 
 void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult& context, QuestionCallback onComplete, ErrorCallback onError) {
+    m_cancelled = false;
     std::thread([this, question, context, onComplete, onError]() {
         AIConfig config = snapshotConfig();
         if (config.apiKey.empty() || config.baseUrl.empty()) {
@@ -1366,8 +2191,8 @@ void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult
         for (const auto& ch : context.chapters) {
             prompt += "- [" + VideoPlay::formatTime(ch.startTime) + "] " + ch.title + "\n";
         }
-        prompt += "\n【视频字幕/文稿】\n";
-        size_t maxLen = 30000;
+        prompt += "\n【视频详细记录/字幕/文稿】\n";
+        size_t maxLen = 60000;
         size_t currentLen = 0;
         for (const auto& seg : context.transcript) {
             std::string line = "[" + VideoPlay::formatTime(seg.startTime) + "] " + seg.text + "\n";
@@ -1375,26 +2200,13 @@ void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult
             prompt += line;
             currentLen += line.length();
         }
+        if (context.transcript.empty()) {
+            prompt += "（没有详细记录，仅可依据摘要和章节回答。）\n";
+        }
         prompt += "\n【用户提问】\n" + question + "\n\n";
-        prompt += "要求：简明扼要，如果有涉及的时间点，请使用 [MM:SS] 或者 [HH:MM:SS] 格式标出。";
-
-        auto makeHttpError = [](const std::string& prefix, const HttpResponse& response) {
-            std::string message = prefix + " (HTTP " + std::to_string(response.statusCode) + ")";
-            try {
-                auto j = nlohmann::json::parse(response.body);
-                if (j.contains("error") && j["error"].contains("message") &&
-                    j["error"]["message"].is_string()) {
-                    message += ": " + j["error"]["message"].get<std::string>();
-                    return message;
-                }
-            } catch (...) {
-            }
-
-            if (!response.body.empty()) {
-                message += ": " + response.body.substr(0, 200);
-            }
-            return message;
-        };
+        prompt += "要求：优先引用详细记录中的具体事实作答；不要只复述摘要。"
+                  "能定位到时间点时使用 [MM:SS] 或 [HH:MM:SS] 标出。"
+                  "如果上下文不足，请明确说明缺少哪些信息，并给出已有依据。";
 
         HttpClient http;
         http.setBaseUrl(config.baseUrl);
@@ -1443,7 +2255,7 @@ void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult
         if (!response.success()) {
             logger().error("[AI] QA API error: status=" + std::to_string(response.statusCode));
             logger().error("[AI] Response: " + response.body.substr(0, 500));
-            if (onError) onError(makeHttpError("请求失败", response));
+            if (onError) onError(conciseHttpError(config.provider, "请求失败", response));
             return;
         }
 

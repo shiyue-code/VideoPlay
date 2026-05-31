@@ -436,6 +436,7 @@ private:
     int m_lastBarX = 0;
     int m_lastBarW = 0;
     int m_activeMenu = -1;
+    int m_activeSubmenuParent = 0;
     bool m_menuBarHovered = false;
 
     // 菜单动画
