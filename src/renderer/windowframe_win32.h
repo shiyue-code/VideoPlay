@@ -63,7 +63,7 @@ private:
     void restoreStyle();
     void refreshWindow();
 
-    void createShadowWindow();
+    bool createShadowWindow();
     void destroyShadowWindow();
 
     void performAeroSnap(int screenX, int screenY);

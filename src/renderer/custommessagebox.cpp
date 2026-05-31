@@ -13,16 +13,10 @@
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 
-// DWM 圆角偏好（Win11+）
-#ifndef DWA_WINDOW_CORNER_PREFERENCE
-#define DWMWA_WINDOW_CORNER_PREFERENCE 33
-enum DWM_WINDOW_CORNER_PREFERENCE {
-    DWMWCP_DEFAULT = 0,
-    DWMWCP_DONOTROUND = 1,
-    DWMWCP_ROUND = 2,
-    DWMWCP_ROUNDSMALL = 3
-};
-#endif
+// DWM 圆角偏好（Win11+）。新 SDK 已在 dwmapi.h 中定义同名枚举，这里使用
+// 本地常量避免在新旧 Windows SDK 之间重复定义类型。
+constexpr DWORD kDwmwaWindowCornerPreference = 33;
+constexpr int kDwmWindowCornerRound = 2;
 #endif
 
 namespace VideoPlay {
@@ -135,8 +129,8 @@ void CustomMessageBox::show(const std::string& title, const std::string& message
     HWND hwnd = (HWND)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
     if (hwnd) {
         // 设置圆角（Win11+）
-        DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
-        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+        int corner = kDwmWindowCornerRound;
+        DwmSetWindowAttribute(hwnd, kDwmwaWindowCornerPreference, &corner, sizeof(corner));
     }
 #endif
 
