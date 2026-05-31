@@ -40,7 +40,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: cmake --build build --config $env:BUILD_TYPE --target VideoPlay
+        run: cmake --build build --config $env:BUILD_TYPE
 
       - name: Test
         shell: pwsh
