@@ -12,16 +12,11 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 
-// DWM 圆角偏好（Win11+）
-#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
-#define DWMWA_WINDOW_CORNER_PREFERENCE 33
-enum DWM_WINDOW_CORNER_PREFERENCE {
-    DWMWCP_DEFAULT = 0,
-    DWMWCP_DONOTROUND = 1,
-    DWMWCP_ROUND = 2,
-    DWMWCP_ROUNDSMALL = 3
-};
-#endif
+// DWM 圆角偏好（Win11+）。新 SDK 已在 dwmapi.h 中定义同名枚举，这里使用
+// 本地常量避免在新旧 Windows SDK 之间重复定义类型。
+constexpr DWORD kDwmwaWindowCornerPreference = 33;
+constexpr int kDwmWindowCornerDefault = 0;
+constexpr int kDwmWindowCornerRound = 2;
 
 namespace VideoPlay {
 
@@ -42,10 +37,6 @@ namespace {
     constexpr UINT WM_NCUAHDRAWFRAME = 0x00AF;
 #endif
 
-    // 多窗口支持：实例映射
-    std::unordered_map<HWND, WindowFrameWin32*> g_hwndToInstance;
-    std::unordered_map<HWND, WindowFrameWin32*> g_shadowToInstance;
-    
     // ShadowWindow HWND -> ContentWindow HWND 映射
     std::unordered_map<HWND, HWND> g_shadowToContent;
 
@@ -58,7 +49,12 @@ namespace {
         int mode = 0;
     };
     std::unordered_map<HWND, ShadowResizeState> g_shadowResizeStates;
-    bool g_shadowResizingActive = false;  // ShadowWindow 正在主动 resize，避免 WM_SIZE/WM_MOVE 重复同步
+
+    bool isShadowResizeActive(HWND shadowHwnd)
+    {
+        auto it = g_shadowResizeStates.find(shadowHwnd);
+        return it != g_shadowResizeStates.end() && it->second.active;
+    }
 
     // 将 ShadowWindow 的客户端坐标转换为对应 ContentWindow 的边框 hit-test 值
     int shadowHitTest(HWND shadowHwnd, int x, int y)
@@ -92,7 +88,7 @@ namespace {
     {
         // 让 DWM 先处理消息（支持 Snap Layouts 等）
         LRESULT dwmResult = 0;
-        if (SUCCEEDED(DwmDefWindowProc(hwnd, msg, wParam, lParam, &dwmResult)) && dwmResult) {
+        if (DwmDefWindowProc(hwnd, msg, wParam, lParam, &dwmResult)) {
             return dwmResult;
         }
 
@@ -283,7 +279,6 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
                     state.startY = GET_Y_LPARAM(lParam);
                     state.startRect = rc;
                     state.mode = ht;
-                    g_shadowResizingActive = true;
                     SetCapture(hwnd);
                 }
                 return 0;
@@ -361,7 +356,6 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
             auto it = g_shadowResizeStates.find(hwnd);
             if (it != g_shadowResizeStates.end() && it->second.active) {
                 it->second.active = false;
-                g_shadowResizingActive = false;
                 ReleaseCapture();
                 return 0;
             }
@@ -384,7 +378,6 @@ LRESULT CALLBACK WindowFrameWin32::shadowWndProc(HWND hwnd, UINT msg, WPARAM wPa
 
         case WM_NCDESTROY: {
             g_shadowToContent.erase(hwnd);
-            g_shadowToInstance.erase(hwnd);
             g_shadowResizeStates.erase(hwnd);
             break;
         }
@@ -423,10 +416,16 @@ bool WindowFrameWin32::enable(SDL_Window* window)
     DwmSetWindowAttribute(m_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
 
     refreshWindow();
-    createShadowWindow();
-
-    // 注册实例映射（多窗口支持）
-    g_hwndToInstance[m_hwnd] = this;
+    if (!createShadowWindow()) {
+        logger().error("WindowFrameWin32: failed to create ShadowWindow, reverting to bordered mode");
+        RemoveWindowSubclass(m_hwnd, SubclassProc, 0);
+        restoreStyle();
+        refreshWindow();
+        m_hwnd = nullptr;
+        m_window = nullptr;
+        m_originalStyle = 0;
+        return false;
+    }
 
     logger().info("WindowFrameWin32 enabled");
     m_enabled = true;
@@ -442,9 +441,6 @@ void WindowFrameWin32::disable()
     RemoveWindowSubclass(m_hwnd, SubclassProc, 0);
     restoreStyle();
     refreshWindow();
-
-    // 移除实例映射（多窗口支持）
-    g_hwndToInstance.erase(m_hwnd);
 
     logger().info("WindowFrameWin32 disabled");
     m_enabled = false;
@@ -495,10 +491,24 @@ bool WindowFrameWin32::processEvent(const SDL_Event& event) {
                     int w = rc.right - rc.left;
                     int h = rc.bottom - rc.top;
                     HDWP hDwp = BeginDeferWindowPos(2);
-                    DeferWindowPos(hDwp, m_hwnd, nullptr, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
-                    DeferWindowPos(hDwp, m_shadowHwnd, nullptr, newX - kShadowBorder, newY - kShadowBorder,
-                        w + kShadowBorder * 2, h + kShadowBorder * 2, SWP_NOACTIVATE | SWP_NOZORDER);
-                    EndDeferWindowPos(hDwp);
+                    if (hDwp) {
+                        hDwp = DeferWindowPos(hDwp, m_hwnd, nullptr, newX, newY, 0, 0,
+                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+                    }
+                    if (hDwp) {
+                        hDwp = DeferWindowPos(hDwp, m_shadowHwnd, nullptr,
+                            newX - kShadowBorder, newY - kShadowBorder,
+                            w + kShadowBorder * 2, h + kShadowBorder * 2,
+                            SWP_NOACTIVATE | SWP_NOZORDER);
+                    }
+                    if (!hDwp || !EndDeferWindowPos(hDwp)) {
+                        SetWindowPos(m_hwnd, nullptr, newX, newY, 0, 0,
+                            SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+                        SetWindowPos(m_shadowHwnd, nullptr,
+                            newX - kShadowBorder, newY - kShadowBorder,
+                            w + kShadowBorder * 2, h + kShadowBorder * 2,
+                            SWP_NOZORDER | SWP_NOACTIVATE);
+                    }
                 } else {
                     SetWindowPos(m_hwnd, nullptr, newX, newY, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
                 }
@@ -622,8 +632,8 @@ void WindowFrameWin32::applyStyle() {
                           &transitionsDisabled, sizeof(transitionsDisabled));
 
     // 设置窗口圆角 (Win11 DWM)
-    DWM_WINDOW_CORNER_PREFERENCE cornerPref = DWMWCP_ROUND;
-    DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
+    int cornerPref = kDwmWindowCornerRound;
+    DwmSetWindowAttribute(m_hwnd, kDwmwaWindowCornerPreference, &cornerPref, sizeof(cornerPref));
 
     SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
     RedrawWindow(m_hwnd, nullptr, nullptr,
@@ -648,8 +658,8 @@ void WindowFrameWin32::restoreStyle() {
                           &transitionsDisabled, sizeof(transitionsDisabled));
 
     // 恢复窗口圆角为默认
-    DWM_WINDOW_CORNER_PREFERENCE cornerPrefRestore = DWMWCP_DEFAULT;
-    DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPrefRestore, sizeof(cornerPrefRestore));
+    int cornerPrefRestore = kDwmWindowCornerDefault;
+    DwmSetWindowAttribute(m_hwnd, kDwmwaWindowCornerPreference, &cornerPrefRestore, sizeof(cornerPrefRestore));
 
     SendMessage(m_hwnd, WM_SETREDRAW, TRUE, 0);
     RedrawWindow(m_hwnd, nullptr, nullptr,
@@ -695,8 +705,9 @@ void WindowFrameWin32::performAeroSnap(int screenX, int screenY) {
 
 // ShadowWindow 管理
 
-void WindowFrameWin32::createShadowWindow() {
-    if (m_shadowHwnd || !m_hwnd) return;
+bool WindowFrameWin32::createShadowWindow() {
+    if (m_shadowHwnd) return true;
+    if (!m_hwnd) return false;
 
     HINSTANCE hInstance = GetModuleHandle(nullptr);
 
@@ -708,7 +719,10 @@ void WindowFrameWin32::createShadowWindow() {
         wc.hInstance = hInstance;
         wc.hbrBackground = (HBRUSH)GetStockObject(HOLLOW_BRUSH);
         wc.lpszClassName = L"VideoPlayShadowWindow";
-        RegisterClassExW(&wc);
+        if (!RegisterClassExW(&wc)) {
+            logger().error("WindowFrameWin32: failed to register ShadowWindow class");
+            return false;
+        }
         classRegistered = true;
     }
 
@@ -727,42 +741,44 @@ void WindowFrameWin32::createShadowWindow() {
         nullptr, nullptr, hInstance, nullptr
     );
 
-    if (m_shadowHwnd) {
-        // ShadowWindow 不绘制内容，仅用于接收边框 resize 事件
-        g_shadowToContent[m_shadowHwnd] = m_hwnd;
-        g_shadowToInstance[m_shadowHwnd] = this;
-
-        // Z-Order 设置：ShadowWindow 必须在主窗口上方
-        ShowWindow(m_shadowHwnd, SW_SHOW);
-        SetWindowPos(m_shadowHwnd, m_hwnd, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        SetWindowPos(m_hwnd, m_shadowHwnd, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
-        // 设置窗口区域为仅保留 8px 边框，中间完全挖空
-        // 这样 DWM 命中测试只会在边框区域进行，避免 WS_EX_LAYERED + alpha=1
-        // 在非激活状态下被 DWM 跳过命中测试的问题
-        int totalW = rc.right - rc.left + kShadowBorder * 2;
-        int totalH = rc.bottom - rc.top + kShadowBorder * 2;
-        HRGN hRgn = CreateRectRgn(0, 0, totalW, totalH);
-        HRGN hInner = CreateRectRgn(kShadowBorder, kShadowBorder,
-            totalW - kShadowBorder, totalH - kShadowBorder);
-        CombineRgn(hRgn, hRgn, hInner, RGN_DIFF);
-        SetWindowRgn(m_shadowHwnd, hRgn, FALSE);
-        DeleteObject(hInner);
-
-        logger().info("ShadowWindow created: hwnd=" +
-            std::to_string(reinterpret_cast<uintptr_t>(m_shadowHwnd)) +
-            " pos=" + std::to_string(rc.left - kShadowBorder) + "," + std::to_string(rc.top - kShadowBorder) +
-            " size=" + std::to_string(rc.right - rc.left + kShadowBorder * 2) + "x" + std::to_string(rc.bottom - rc.top + kShadowBorder * 2));
+    if (!m_shadowHwnd) {
+        logger().error("WindowFrameWin32: CreateWindowExW failed for ShadowWindow");
+        return false;
     }
+
+    // ShadowWindow 不绘制内容，仅用于接收边框 resize 事件
+    g_shadowToContent[m_shadowHwnd] = m_hwnd;
+
+    // Z-Order 设置：ShadowWindow 必须在主窗口上方
+    ShowWindow(m_shadowHwnd, SW_SHOW);
+    SetWindowPos(m_shadowHwnd, m_hwnd, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(m_hwnd, m_shadowHwnd, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    // 设置窗口区域为仅保留 8px 边框，中间完全挖空
+    // 这样 DWM 命中测试只会在边框区域进行，避免 WS_EX_LAYERED + alpha=1
+    // 在非激活状态下被 DWM 跳过命中测试的问题
+    int totalW = rc.right - rc.left + kShadowBorder * 2;
+    int totalH = rc.bottom - rc.top + kShadowBorder * 2;
+    HRGN hRgn = CreateRectRgn(0, 0, totalW, totalH);
+    HRGN hInner = CreateRectRgn(kShadowBorder, kShadowBorder,
+        totalW - kShadowBorder, totalH - kShadowBorder);
+    CombineRgn(hRgn, hRgn, hInner, RGN_DIFF);
+    SetWindowRgn(m_shadowHwnd, hRgn, FALSE);
+    DeleteObject(hInner);
+
+    logger().info("ShadowWindow created: hwnd=" +
+        std::to_string(reinterpret_cast<uintptr_t>(m_shadowHwnd)) +
+        " pos=" + std::to_string(rc.left - kShadowBorder) + "," + std::to_string(rc.top - kShadowBorder) +
+        " size=" + std::to_string(rc.right - rc.left + kShadowBorder * 2) + "x" + std::to_string(rc.bottom - rc.top + kShadowBorder * 2));
+    return true;
 }
 
 void WindowFrameWin32::destroyShadowWindow() {
     if (m_shadowHwnd) {
         if (IsWindow(m_shadowHwnd)) DestroyWindow(m_shadowHwnd);
         g_shadowToContent.erase(m_shadowHwnd);
-        g_shadowToInstance.erase(m_shadowHwnd);
         g_shadowResizeStates.erase(m_shadowHwnd);
         m_shadowHwnd = nullptr;
     }
@@ -772,7 +788,7 @@ void WindowFrameWin32::syncShadowWindow() {
     if (m_syncing || !m_hwnd || !m_shadowHwnd) return;
     if (!IsWindow(m_shadowHwnd)) { m_shadowHwnd = nullptr; return; }
     if (IsZoomed(m_hwnd) || IsIconic(m_hwnd)) return;
-    if (g_shadowResizingActive) return; // ShadowWindow 正在主动 resize，避免重复同步
+    if (isShadowResizeActive(m_shadowHwnd)) return; // 当前 ShadowWindow 正在主动 resize，避免重复同步
 
     m_syncing = true;
     RECT rc;
@@ -795,7 +811,9 @@ void WindowFrameWin32::updateShadowVisibility() {
     } else {
         // 恢复时重新创建 ShadowWindow
         if (!m_shadowHwnd || !IsWindow(m_shadowHwnd)) {
-            createShadowWindow();
+            if (!createShadowWindow()) {
+                logger().warning("WindowFrameWin32: failed to recreate ShadowWindow after restore");
+            }
         } else {
             ShowWindow(m_shadowHwnd, SW_SHOW);
             syncShadowWindow();
