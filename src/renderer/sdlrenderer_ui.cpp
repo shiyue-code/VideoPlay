@@ -1514,6 +1514,9 @@ void SDLRenderer::renderSearchPanel() {
 
             int bubbleW = maxLineWidth + 24;
             int bubbleH = currentY + lineHeight + 20;
+            if (!msg.isUser) {
+                bubbleW = std::max(bubbleW, 56);
+            }
 
             int bubbleX = msg.isUser ? (panelX + panelW - bubbleW - 20) : (panelX + 20);
             int bubbleY = contentY;
@@ -1523,6 +1526,41 @@ void SDLRenderer::renderSearchPanel() {
                     fillRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8, 40, 120, 255, 220); // 用户蓝色
                 } else {
                     fillRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8, 50, 55, 60, 220); // AI 深灰
+                }
+
+                if (!msg.isUser) {
+                    int copySize = 22;
+                    int copyX = std::min(panelX + panelW - copySize - 12, bubbleX + bubbleW + 5);
+                    int copyY = bubbleY + 4;
+                    bool copyHovered = (m_hoveredControl == ControlType::SearchMessageCopy &&
+                                        m_hoveredControlValue == static_cast<int>(i));
+                    bool copyPressed = (m_pressedControl == ControlType::SearchMessageCopy &&
+                                        m_pressedControlValue == static_cast<int>(i));
+                    fillRoundRect(copyX, copyY, copySize, copySize, 5,
+                                  copyPressed ? 74 : (copyHovered ? 64 : 48),
+                                  copyPressed ? 82 : (copyHovered ? 72 : 56),
+                                  copyPressed ? 96 : (copyHovered ? 88 : 70),
+                                  copyHovered || copyPressed ? 230 : 170);
+
+                    SDL_SetRenderDrawColor(m_renderer, 222, 226, 235,
+                                           copyHovered || copyPressed ? 245 : 190);
+                    SDL_FRect backRect = {
+                        static_cast<float>(copyX + 7),
+                        static_cast<float>(copyY + 5),
+                        8.0f,
+                        10.0f
+                    };
+                    SDL_FRect frontRect = {
+                        static_cast<float>(copyX + 5),
+                        static_cast<float>(copyY + 8),
+                        8.0f,
+                        10.0f
+                    };
+                    SDL_RenderRect(m_renderer, &backRect);
+                    SDL_RenderRect(m_renderer, &frontRect);
+                    m_controlRects.push_back({copyX, copyY, copySize, copySize,
+                                              ControlType::SearchMessageCopy,
+                                              static_cast<int>(i)});
                 }
 
                 for (const auto& cmd : drawCmds) {
@@ -1633,8 +1671,17 @@ void SDLRenderer::renderSearchPanel() {
 
     // 绘制输入文本
     std::string displayText = m_searchQuery;
-    if (m_isSearchInputFocused && (SDL_GetTicks() % 1000) < 500) {
+    if (m_isSearchInputFocused && !hasSearchSelection() && (SDL_GetTicks() % 1000) < 500) {
         displayText += "|"; // 简单的光标
+    }
+    if (m_isSearchInputFocused && hasSearchSelection()) {
+        auto [selectionStart, selectionEnd] = searchSelectionRange();
+        std::string prefix = m_searchQuery.substr(0, selectionStart);
+        std::string selected = m_searchQuery.substr(selectionStart, selectionEnd - selectionStart);
+        int highlightX = inputX + 12 + getTextWidth(prefix, 12);
+        int highlightW = std::max(2, getTextWidth(selected, 12));
+        fillRoundRect(highlightX - 2, inputY + 10, highlightW + 4, 22, 4,
+                      70, 130, 230, 170);
     }
     if (displayText.empty() && !m_isSearchInputFocused) {
         drawText("输入搜索内容或问题...", inputX + 12, inputY + 14, 150, 150, 150, 12);

@@ -87,6 +87,7 @@ enum class ControlType {
     SearchCloseButton,
     SearchInput,
     SearchTimestamp,
+    SearchMessageCopy,
     PanelBackground
 };
 
@@ -306,6 +307,19 @@ private:
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
     void renderSearchPanel();
+    bool hasSearchSelection() const;
+    std::pair<size_t, size_t> searchSelectionRange() const;
+    void clearSearchSelection();
+    void selectAllSearchQuery();
+    void deleteSearchSelection();
+    void insertSearchText(const std::string& text);
+    void deleteSearchCharBefore();
+    void deleteSearchCharAfter();
+    void copySearchSelection();
+    void cutSearchSelection();
+    void pasteSearchClipboard();
+    void copyChatMessage(size_t index);
+    void copyLastAIChatMessage();
 
     // 创建/更新纹理
     void ensureTexture(int width, int height);
@@ -377,6 +391,8 @@ private:
     int m_searchScrollOffset = 0;
     std::string m_searchQuery;
     bool m_isSearchInputFocused = false;
+    size_t m_searchSelectionStart = 0;
+    size_t m_searchSelectionEnd = 0;
     uint64_t m_lastSearchInputTime = 0;
     std::vector<ChatMessage> m_chatHistory;
     std::mutex m_chatMutex;
