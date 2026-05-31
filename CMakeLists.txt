@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(VideoPlay VERSION 2.0.0 LANGUAGES C CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,13 +16,27 @@ if(MSVC)
     set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "/DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF")
 endif()
 
+# 优先使用项目内置 FFmpeg，仍允许通过 -DFFmpeg_ROOT=... 覆盖
+set(VIDEOPLAY_BUNDLED_FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/3rdparty/FFmpeg")
+if(NOT DEFINED FFmpeg_ROOT AND EXISTS "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}/include/libavcodec/avcodec.h")
+    set(FFmpeg_ROOT "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}" CACHE PATH "FFmpeg root directory")
+endif()
+
 # 查找 FFmpeg
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale libswresample)
+    pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale libswresample libavfilter)
 endif()
 
 if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
+    unset(FFMPEG_INCLUDE_DIR CACHE)
+    unset(FFMPEG_AVCODEC_LIB CACHE)
+    unset(FFMPEG_AVFORMAT_LIB CACHE)
+    unset(FFMPEG_AVUTIL_LIB CACHE)
+    unset(FFMPEG_SWSCALE_LIB CACHE)
+    unset(FFMPEG_SWRESAMPLE_LIB CACHE)
+    unset(FFMPEG_AVFILTER_LIB CACHE)
+
     find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
         PATHS ${FFmpeg_ROOT}/include
         NO_DEFAULT_PATH)
@@ -39,8 +55,11 @@ if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
     find_library(FFMPEG_SWRESAMPLE_LIB swresample
         PATHS ${FFmpeg_ROOT}/lib
         NO_DEFAULT_PATH)
+    find_library(FFMPEG_AVFILTER_LIB avfilter
+        PATHS ${FFmpeg_ROOT}/lib
+        NO_DEFAULT_PATH)
 
-    if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIB)
+    if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIB AND FFMPEG_AVFILTER_LIB)
         set(FFMPEG_FOUND TRUE)
         set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIR})
         set(FFMPEG_LIBRARIES
@@ -48,7 +67,8 @@ if(NOT FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
             ${FFMPEG_AVFORMAT_LIB}
             ${FFMPEG_AVUTIL_LIB}
             ${FFMPEG_SWSCALE_LIB}
-            ${FFMPEG_SWRESAMPLE_LIB})
+            ${FFMPEG_SWRESAMPLE_LIB}
+            ${FFMPEG_AVFILTER_LIB})
     endif()
 endif()
 
@@ -90,10 +110,21 @@ endif()
 # 查找 OpenGL (可选，用于高级渲染)
 find_package(OpenGL QUIET)
 
+# 查找 spdlog (可选，用于高性能日志；未安装时使用内置日志实现)
+find_package(spdlog CONFIG QUIET)
+if(NOT spdlog_FOUND)
+    find_package(spdlog QUIET)
+endif()
+
+# HTTP 客户端使用 Windows WinHTTP API (无需额外依赖)
+
 # 源文件
 set(SOURCES
     src/main.cpp
     src/app.cpp
+    src/app_playback.cpp
+    src/app_playlist.cpp
+    src/app_events.cpp
     src/core/ffmpegplayer.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
@@ -101,7 +132,17 @@ set(SOURCES
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
     src/renderer/sdlrenderer.cpp
+    src/renderer/sdlrenderer_events.cpp
+    src/renderer/sdlrenderer_menus.cpp
+    src/renderer/sdlrenderer_ui.cpp
+    src/renderer/sdlrenderer_draw.cpp
     src/renderer/windowframe.cpp
+    src/renderer/custommessagebox.cpp
+    src/renderer/inputfield.cpp
+    src/renderer/settingsdialog.cpp
+    src/ai/httpclient.cpp
+    src/ai/aianalyzer.cpp
+    src/ai/searchengine.cpp
 )
 
 if(WIN32)
@@ -120,7 +161,14 @@ set(HEADERS
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/renderer/sdlrenderer.h
+    src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h
+    src/renderer/custommessagebox.h
+    src/renderer/inputfield.h
+    src/renderer/settingsdialog.h
+    src/ai/httpclient.h
+    src/ai/aianalyzer.h
+    src/ai/searchengine.h
 )
 
 # 创建可执行文件
@@ -148,10 +196,23 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${FFMPEG_LIBRARIES}
 )
 
+if(spdlog_FOUND)
+    if(TARGET spdlog::spdlog)
+        target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog)
+    elseif(TARGET spdlog::spdlog_header_only)
+        target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog_header_only)
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE VIDEOPLAY_HAS_SPDLOG=1)
+endif()
+
 if(TARGET SDL3::SDL3)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
 elseif(SDL3_FOUND)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL3_LIBRARIES})
+endif()
+
+if(OPENGL_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
 endif()
 
 if(SDL3_TTF_FOUND)
@@ -194,18 +255,20 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
 
-# Windows: 复制 FFmpeg DLLs
+# Windows: 复制 FFmpeg 运行时
 if(WIN32 AND FFMPEG_FOUND AND DEFINED FFmpeg_ROOT)
     set(FFMPEG_BIN_DIR "${FFmpeg_ROOT}/bin")
     if(EXISTS ${FFMPEG_BIN_DIR})
-        file(GLOB FFMPEG_DLLS "${FFMPEG_BIN_DIR}/*.dll")
-        foreach(FFMPEG_DLL ${FFMPEG_DLLS})
-            get_filename_component(DLL_NAME ${FFMPEG_DLL} NAME)
+        file(GLOB FFMPEG_RUNTIME_FILES
+            "${FFMPEG_BIN_DIR}/*.dll"
+            "${FFMPEG_BIN_DIR}/*.exe")
+        foreach(FFMPEG_RUNTIME_FILE ${FFMPEG_RUNTIME_FILES})
+            get_filename_component(RUNTIME_NAME ${FFMPEG_RUNTIME_FILE} NAME)
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${FFMPEG_DLL}
+                    ${FFMPEG_RUNTIME_FILE}
                     $<TARGET_FILE_DIR:${PROJECT_NAME}>
-                COMMENT "Copying ${DLL_NAME}"
+                COMMENT "Copying ${RUNTIME_NAME}"
             )
         endforeach()
     endif()
@@ -247,8 +310,13 @@ if(WIN32 AND SDL3_TTF_FOUND)
     )
 endif()
 
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
 message(STATUS "VideoPlay configuration complete")
 message(STATUS "  FFmpeg: ${FFMPEG_FOUND}")
 message(STATUS "  SDL3: ${SDL3_FOUND}")
 message(STATUS "  SDL3_ttf: ${SDL3_TTF_FOUND}")
 message(STATUS "  OpenGL: ${OPENGL_FOUND}")
+message(STATUS "  spdlog: ${spdlog_FOUND}")

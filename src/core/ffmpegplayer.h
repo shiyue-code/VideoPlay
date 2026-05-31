@@ -18,6 +18,11 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/time.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/mem.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 }
@@ -34,6 +39,7 @@ using SpeedCallback = std::function<void(double)>;
 using VolumeCallback = std::function<void(int)>;
 using MuteCallback = std::function<void(bool)>;
 using VideoFrameCallback = std::function<void(VideoFrame)>;
+using NetworkStateCallback = std::function<void(NetworkState)>;
 
 class FFmpegPlayer {
 public:
@@ -63,6 +69,10 @@ public:
     int volume() const;
     void setMuted(bool muted);
     bool isMuted() const;
+    void setHardwareDecodingEnabled(bool enabled);
+    bool hardwareDecodingEnabled() const;
+    void setAudioFilterConfig(const AudioFilterConfig& config);
+    AudioFilterConfig audioFilterConfig() const;
 
     void setStateCallback(StateCallback callback);
     void setPositionCallback(PositionCallback callback);
@@ -72,11 +82,16 @@ public:
     void setVolumeCallback(VolumeCallback callback);
     void setMuteCallback(MuteCallback callback);
     void setVideoFrameCallback(VideoFrameCallback callback);
+    void setNetworkStateCallback(NetworkStateCallback callback);
 
     bool isPreloading() const;
     bool checkPreloadComplete();
 
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
+
+    std::vector<ChapterInfo> chapters() const;
+    void setChapters(const std::vector<ChapterInfo>& chapters);
+    MediaInfo mediaInfo() const;
 
 private:
     struct StreamContext {
@@ -99,6 +114,9 @@ private:
     struct AudioContext : StreamContext {
         SwrContext* swrContext = nullptr;
         AudioFormat format;
+        int lastSrcRate = 0;
+        int lastSrcChannels = 0;
+        AVSampleFormat lastSrcFormat = AV_SAMPLE_FMT_NONE;
     };
 
     void initialize();
@@ -108,12 +126,34 @@ private:
     bool initializeAudioContext();
     VideoFrame convertVideoFrame(AVFrame* frame);
     std::vector<float> resampleAudioFrame(AVFrame* frame);
+    std::vector<float> processAudioFrame(AVFrame* frame);
     void handleSeek(int64_t positionMs);
     void synchronizeVideo(double pts);
+    bool setupHardwareDecoder(const AVCodec* codec);
+    void releaseHardwareDecoder();
+    static AVPixelFormat selectHardwareFormat(AVCodecContext* ctx, const AVPixelFormat* pixFmts);
+    bool ensureAudioFilterGraph(AVFrame* frame);
+    void cleanupAudioFilterGraph();
+    std::string buildAudioFilterDescription() const;
+    void setNetworkState(NetworkState state);
 
     AVFormatContext* m_formatContext = nullptr;
     VideoContext m_videoCtx;
     AudioContext m_audioCtx;
+    AudioFilterConfig m_audioFilterConfig;
+    bool m_audioFilterRuntimeDisabled = false;
+    AVFilterGraph* m_audioFilterGraph = nullptr;
+    AVFilterContext* m_audioFilterSrc = nullptr;
+    AVFilterContext* m_audioFilterSink = nullptr;
+    int m_audioFilterSampleRate = 0;
+    int m_audioFilterChannels = 0;
+    AVSampleFormat m_audioFilterSampleFormat = AV_SAMPLE_FMT_NONE;
+    std::string m_audioFilterDescription;
+    mutable std::mutex m_audioFilterMutex;
+    MediaInfo m_mediaInfo;
+    AVBufferRef* m_hwDeviceCtx = nullptr;
+    AVPixelFormat m_hwPixelFormat = AV_PIX_FMT_NONE;
+    AVHWDeviceType m_hwDeviceType = AV_HWDEVICE_TYPE_NONE;
     
     std::unique_ptr<AudioPlayer> m_audioPlayer;
     std::thread m_decodeThread;
@@ -124,11 +164,15 @@ private:
     
     std::string m_filePath;
     int64_t m_duration = 0;
+    std::vector<ChapterInfo> m_chapters;
     std::atomic<int64_t> m_position{0};
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};
     std::atomic<bool> m_muted{false};
+    std::atomic<bool> m_hardwareDecodingEnabled{true};
     std::atomic<PlaybackState> m_state{PlaybackState::Stopped};
+    std::atomic<NetworkState> m_networkState{NetworkState::Idle};
+    SourceType m_sourceType = SourceType::LocalFile;
     
     std::atomic<bool> m_abortRequest{false};
     std::atomic<bool> m_seekRequested{false};
@@ -157,6 +201,7 @@ private:
     VolumeCallback m_volumeCallback;
     MuteCallback m_muteCallback;
     VideoFrameCallback m_videoFrameCallback;
+    NetworkStateCallback m_networkStateCallback;
 };
 
 } // namespace VideoPlay

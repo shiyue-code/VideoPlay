@@ -4,35 +4,33 @@
 *.a     -text
 *.so    -text
 *.dylib -text
-
 # 合并策略
 docs/* merge=union
 *.md merge=union
 *.txt merge=union
 *.ini merge=union
 *.json merge=union
-
 # 二进制文件
 *.exe    merge=union -text
 *.dll    merge=union -text
 *.pdb    merge=union -text
 *.db     merge=union -text
-
 # 图片文件
 *.png    merge=union -text
 *.jpg    merge=union -text
 *.ico    merge=union -text
 *.icns   merge=union -text
-
 # 归档文件
 *.zip    merge=union -text
 *.tar.gz merge=union -text
 *.7z     merge=union -text
-
 # 设置末尾换行
 * text=auto eol=lf
-
 # 特殊文件(不过滤)
 .gitattributes -text
 LICENSE -text
 README.md -text
+3rdparty/FFmpeg/bin/*.exe filter=lfs diff=lfs merge=lfs -text
+3rdparty/FFmpeg/lib/*.lib filter=lfs diff=lfs merge=lfs -text
+3rdparty/FFmpeg/bin/*.dll filter=lfs diff=lfs merge=lfs -text
+3rdparty/FFmpeg/lib/*.dll.a filter=lfs diff=lfs merge=lfs -text

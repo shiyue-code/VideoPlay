@@ -74,20 +74,34 @@ ctest -C Release --output-on-failure
 ```
 src/
 ├── main.cpp                     # 入口点
-├── app.h/cpp                    # VideoPlayerApp 主应用类 (主循环、播放控制)
+├── app.h                        # VideoPlayerApp 主应用类声明
+├── app.cpp                      # 核心: 初始化、主循环、渲染调度、文件打开
+├── app_playback.cpp             # 播放控制: play/pause/seek/volume/speed/AB loop
+├── app_playlist.cpp             # 播放列表与剧集: 添加/切换/自动识别/连播
+├── app_events.cpp               # 事件与菜单: 回调处理、菜单分发、字幕加载
 ├── core/                        # 核心播放引擎
 │   ├── ffmpegplayer.h/cpp       # FFmpeg 解码和播放实现
 │   ├── audioplayer.h/cpp        # SDL3 音频播放封装
 │   ├── settings.h/cpp           # 单例 JSON 配置管理
+│   ├── episodedetector.h/cpp    # 剧集自动识别
 │   └── common.h                 # 枚举定义、VideoFrame 结构、时间格式化
 ├── renderer/                    # SDL3 渲染层
-│   ├── sdlrenderer.h/cpp        # 统一视频+字幕+UI 渲染器 (完全基于 SDL3)
+│   ├── sdlrenderer.h            # 统一渲染器接口
+│   ├── sdlrenderer.cpp          # 核心: 构造/初始化/视频纹理/菜单栏/ getter
+│   ├── sdlrenderer_events.cpp   # 事件处理: 鼠标/键盘/命中检测/章节点击
+│   ├── sdlrenderer_menus.cpp    # 菜单逻辑: initMenus/动画/点击/最近文件
+│   ├── sdlrenderer_ui.cpp       # UI 渲染: 控制栏/进度条/书签/播放列表面板
+│   ├── sdlrenderer_draw.cpp     # 绘图原语: fillRect/drawText/drawIcon/渐变
+│   ├── sdlrenderer_internal.h   # 拆分文件共享常量 (颜色、速度选项)
+│   ├── windowframe.h/cpp        # 无边框窗口框架
+│   ├── windowframe_win32.cpp    # Win32 实现
+│   └── windowframe_linux.cpp    # Linux 实现
 ├── subtitles/                   # 字幕模块
 │   ├── subtitleparser.h/cpp     # SRT/ASS/VTT 字幕解析
-│   └── subtitleparser.h
 └── utils/                       # 工具类
     ├── logger.h/cpp             # 单例文件/控制台日志系统
-    └── stb_image.h              # STB 图片加载 (头文件库)
+    ├── stb_image.h              # STB 图片加载
+    └── stb_image_write.h        # PNG 截图输出
 
 3rdparty/
 ├── SDL3/                        # SDL3 子模块
@@ -141,6 +155,35 @@ main.cpp
 - 支持底部控制栏、菜单栏、播放列表面板、进度条、音量条
 - 所有控件通过鼠标事件坐标命中检测
 - 进度条拖动只在释放时触发 seek
+
+### 5. 章节支持 (Chapter)
+- FFmpeg 从 `AVFormatContext::chapters` 解析章节信息 (`ChapterInfo`)
+- 章节菜单动态注入菜单栏（仅当文件含章节时显示）
+- 进度条上方绘制 8×17px 书签标记 (bookmark)，hover 高亮 + tooltip
+- 书签独立命中检测 (`ControlType::ChapterMarker`)，点击跳转章节
+- SeekCallback 编码: `1000.0 + ratio*1000.0` 表示绝对位置
+
+## File Splitting Guidelines
+
+`sdlrenderer.cpp` (~3300 行) 和 `app.cpp` (~1270 行) 已按职责拆分为多个文件：
+
+| 原文件 | 拆分后文件 | 职责 |
+|--------|-----------|------|
+| `app.cpp` | `app.cpp` | 初始化、主循环、`render()`、`openFile()`、`shutdown()` |
+| | `app_playback.cpp` | `play/pause/seek/volume/speed/loopAB` |
+| | `app_playlist.cpp` | 播放列表、剧集检测、`autoAdvanceAfterStop()` |
+| | `app_events.cpp` | 回调处理、`handleMenu()`、字幕加载、帮助/关于 |
+| `sdlrenderer.cpp` | `sdlrenderer.cpp` | 构造/析构、初始化、视频纹理渲染、菜单栏渲染 |
+| | `sdlrenderer_events.cpp` | 所有 SDL 事件处理、鼠标命中检测 |
+| | `sdlrenderer_menus.cpp` | 菜单初始化、动画、点击处理、最近文件更新 |
+| | `sdlrenderer_ui.cpp` | 控制栏、进度条、书签、列表面板、tooltip、同步信息 |
+| | `sdlrenderer_draw.cpp` | 底层绘图: fillRect/drawText/drawIcon/渐变/圆角矩形 |
+
+**注意事项:**
+- 所有拆分文件共享 `sdlrenderer_internal.h` 中的常量和辅助定义
+- 每个 `.cpp` 文件都包含自己的 `#include`，不依赖其他拆分文件的包含顺序
+- Windows 上任何可能间接包含 `<windows.h>` 的 `.cpp` 文件，若使用 `std::min/max`，必须在包含前定义 `#define NOMINMAX`
+- `CMakeLists.txt` 显式列出所有 `.cpp` 文件，添加新文件时必须手动更新
 
 ## Code Style Guidelines
 

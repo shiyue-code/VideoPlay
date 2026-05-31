@@ -14,6 +14,7 @@
 | **SDL3_ttf** | 字体渲染 |
 | **OpenGL** | 硬件加速渲染 (可选) |
 | **nlohmann/json** | 配置持久化 |
+| **WinHTTP** | AI API 通信 (Windows) |
 
 ## 功能特性
 
@@ -33,12 +34,21 @@
 - 📺 剧集自动识别与选集面板
 - 📌 播放进度记忆与恢复
 - ⏭️ 自动连播下一集/下一个文件
+- 🔖 章节支持：MKV/MP4 章节自动解析，进度条书签标记
+- 🔁 AB 循环播放（`[` 设置 A 点、`]` 设置 B 点、`\` 清除）
+
+### AI 智能分析
+- 🤖 MiMo 视频理解分析（自动生成摘要和章节）
+- 🔍 全文搜索（支持转录文本和章节内容）
+- 💾 分析结果缓存（避免重复调用 API）
+- ⚙️ 可配置 API 地址和模型（支持 MiMo v2-pro / v2.5-pro）
 
 ### UI 与交互
 - 🖱️ 无边框窗口，支持自定义标题栏和拖拽调整大小
 - 📷 截图功能（`F12` 保存到桌面）
 - 📂 最近文件菜单（最多 10 个，LRU）
-- 📋 菜单栏（文件/播放/剧集/帮助）
+- 📋 菜单栏（文件/播放/章节/AI/剧集/帮助）
+- 🖱️ 右键上下文菜单（播放控制、AB 循环、AI 分析）
 - ⛶ 全屏模式
 - 📌 窗口置顶
 - 💾 最大化状态记忆
@@ -66,6 +76,9 @@
 | `Ctrl+O` | 打开文件 |
 | `Ctrl+L` | 切换播放列表面板 |
 | `Ctrl+E` | 切换选集面板 |
+| `[` | AB 循环：设置 A 点 |
+| `]` | AB 循环：设置 B 点 |
+| `\` | AB 循环：清除 |
 
 ## 构建要求
 
@@ -73,7 +86,8 @@
 
 - Visual Studio 2019 或更高版本
 - CMake 3.16+
-- FFmpeg Windows 构建版
+- FFmpeg Windows 构建版（已内置于 `3rdparty/FFmpeg/`）
+- Git LFS（用于拉取内置 FFmpeg 的 DLL/EXE/LIB）
 - Git (用于拉取 SDL3 submodule)
 
 ### macOS
@@ -99,9 +113,10 @@ git submodule update --init --recursive
 
 ```bash
 # Windows (PowerShell)
+git lfs install
+git lfs pull
 git submodule update --init --recursive
-cmake -B build -G "Visual Studio 16 2019" -A x64 `
-    -DFFmpeg_ROOT="D:/ffmpeg/ffmpeg-master-latest-win64-gpl-shared"
+cmake -B build -G "Visual Studio 16 2019" -A x64
 
 # macOS/Linux
 git submodule update --init --recursive
@@ -120,33 +135,64 @@ cmake --build build --config Release
 ./build/bin/Release/VideoPlay.exe [视频文件路径]
 ```
 
+## 自动构建与发版
+
+项目使用 GitHub Actions 自动构建 Windows x64 包：
+
+- push / pull request 会构建并上传 `VideoPlay-Windows-x64.zip` artifact
+- 推送 `v*` 标签会自动创建 GitHub Release 并上传同名 zip
+
+发布新版本：
+
+```bash
+git tag v2.0.1
+git push origin v2.0.1
+```
+
 ## 项目结构
 
 ```
 VideoPlay/
 ├── src/
-│   ├── main.cpp              # 程序入口
-│   ├── app.h/cpp             # 主应用类 (播放控制、菜单处理)
+│   ├── main.cpp                   # 程序入口
+│   ├── app.h                      # 主应用类声明
+│   ├── app.cpp                    # 核心: 初始化、主循环、渲染调度
+│   ├── app_playback.cpp           # 播放控制: play/pause/seek/volume/speed
+│   ├── app_playlist.cpp           # 播放列表、剧集识别、自动连播
+│   ├── app_events.cpp             # 事件与菜单回调处理
 │   ├── core/
-│   │   ├── ffmpegplayer.h/cpp   # FFmpeg 解码和播放核心
-│   │   ├── audioplayer.h/cpp    # SDL3 音频输出封装
-│   │   ├── settings.h/cpp       # JSON 配置管理 (单例)
-│   │   ├── episodedetector.cpp  # 剧集自动识别
-│   │   └── common.h             # 公共定义、枚举、时间格式化
+│   │   ├── ffmpegplayer.h/cpp     # FFmpeg 解码和播放核心
+│   │   ├── audioplayer.h/cpp      # SDL3 音频输出封装
+│   │   ├── settings.h/cpp         # JSON 配置管理 (单例)
+│   │   ├── episodedetector.h/cpp  # 剧集自动识别
+│   │   └── common.h               # 公共定义、枚举、时间格式化
 │   ├── renderer/
-│   │   ├── sdlrenderer.h/cpp    # SDL3 统一渲染器 (视频+字幕+UI)
-│   │   └── windowframe.h/cpp    # 无边框窗口框架 (Win32)
+│   │   ├── sdlrenderer.h          # 统一渲染器接口
+│   │   ├── sdlrenderer.cpp        # 核心: 构造/初始化/视频纹理
+│   │   ├── sdlrenderer_events.cpp # 事件处理: 鼠标/键盘/命中检测
+│   │   ├── sdlrenderer_menus.cpp  # 菜单逻辑与动画
+│   │   ├── sdlrenderer_ui.cpp     # UI 渲染: 控制栏/进度条/书签
+│   │   ├── sdlrenderer_draw.cpp   # 底层绘图原语
+│   │   ├── sdlrenderer_internal.h # 共享常量
+│   │   ├── windowframe.h/cpp      # 无边框窗口框架
+│   │   ├── windowframe_win32.cpp  # Win32 实现
+│   │   └── windowframe_linux.cpp  # Linux 实现
 │   ├── subtitles/
-│   │   └── subtitleparser.h/cpp # SRT/ASS/VTT 字幕解析
+│   │   └── subtitleparser.h/cpp   # SRT/ASS/VTT 字幕解析
+│   ├── ai/
+│   │   ├── aianalyzer.h/cpp       # AI 视频分析（MiMo 集成）
+│   │   ├── httpclient.h/cpp       # HTTP 客户端（WinHTTP）
+│   │   └── searchengine.h/cpp     # 全文搜索引擎
 │   └── utils/
-│       ├── logger.h/cpp         # 单例日志系统
-│       └── stb_image_write.h    # PNG 截图输出
+│       ├── logger.h/cpp           # 单例日志系统
+│       ├── stb_image.h            # 图片加载
+│       └── stb_image_write.h      # PNG 截图输出
 ├── 3rdparty/
-│   ├── SDL3/                 # SDL3 (submodule)
-│   ├── SDL3_ttf/             # SDL3_ttf (submodule)
-│   └── nlohmann/             # JSON 库 (头文件)
+│   ├── SDL3/                      # SDL3 (submodule)
+│   ├── SDL3_ttf/                  # SDL3_ttf (submodule)
+│   └── nlohmann/                  # JSON 库 (头文件)
 ├── cmake/
-│   ├── FindFFmpeg.cmake      # FFmpeg 查找模块
+│   ├── FindFFmpeg.cmake           # FFmpeg 查找模块
 │   └── VideoPlayConfig.cmake.in
 ├── tests/
 │   └── test_playbackcontroller.cpp
@@ -163,14 +209,24 @@ VideoPlay/
 │  │  SDLRenderer │  │ FFmpegPlayer │  │   Playlist   │  │
 │  │  (UI/Render) │  │ (Decode)     │  │   Manager    │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────────┘  │
-└─────────┼─────────────────┼────────────────────────────┘
-          │                 │
-          ▼                 ▼
-┌─────────────────┐  ┌─────────────────┐
-│     SDL3        │  │     FFmpeg      │
-│  Window/Render  │  │  Decode/Resample│
-└─────────────────┘  └─────────────────┘
+│         │                 │                             │
+│  ┌──────┴───────┐  ┌──────┴───────┐                    │
+│  │  AIAnalyzer  │  │ SearchEngine │                    │
+│  │  (MiMo API)  │  │  (全文搜索)  │                    │
+│  └──────────────┘  └──────────────┘                    │
+└─────────────────────────────────────────────────────────┘
 ```
+
+## AI 配置
+
+1. 菜单栏 → AI → AI 设置
+2. 输入 API 地址和 API Key
+3. 选择模型（默认 `mimo-v2-pro`）
+4. 打开视频后，点击 AI → AI 分析当前视频
+
+支持的模型：
+- `mimo-v2-pro` - MiMo v2 Pro 视频理解
+- `mimo-v2.5-pro` - MiMo v2.5 Pro（最新）
 
 ## 注意事项
 
@@ -179,6 +235,8 @@ VideoPlay/
 3. **文件拖放**: 支持直接拖放视频文件到窗口播放
 4. **配置存储**: 设置保存在 `%APPDATA%/VideoPlay/VideoPlay.json` (Windows)
 5. **日志文件**: 日志保存在 `%APPDATA%/VideoPlay/logs/videoplay.log`
+6. **AI 缓存**: AI 分析结果缓存在 `%APPDATA%/VideoPlay/ai_cache/`
+7. **Debug 模式**: 使用 Release 构建可获得最佳性能
 
 ## License
 

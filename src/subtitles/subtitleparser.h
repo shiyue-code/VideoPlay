@@ -24,6 +24,11 @@ public:
     void clear();
     bool isLoaded() const;
 
+    // 字幕时间同步偏移（毫秒，正数=延后，负数=提前）
+    void setOffset(int64_t ms);
+    int64_t offset() const;
+    void adjustOffset(int64_t deltaMs);
+
 private:
     bool parseSRT(const std::string& content);
     bool parseASS(const std::string& content);
@@ -34,7 +39,8 @@ private:
 
     std::vector<SubtitleEntry> m_entries;
     std::string m_filePath;
-    bool m_loaded;
+    bool m_loaded = false;
+    int64_t m_offset = 0;
 };
 
 } // namespace VideoPlay

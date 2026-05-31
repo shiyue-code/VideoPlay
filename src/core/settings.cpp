@@ -1,6 +1,7 @@
-#include "core/settings.h"
+﻿#include "core/settings.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -8,6 +9,105 @@
 #include <nlohmann/json.hpp>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("settings");
+    return *logger;
+}
+
+std::string trimSetting(const std::string& value) {
+    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    return start < end ? std::string(start, end) : std::string();
+}
+
+std::string lowerSetting(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string normalizeAIProvider(std::string provider) {
+    provider = lowerSetting(trimSetting(provider));
+    if (provider.empty() || provider == "auto") {
+        return "mimo";
+    }
+    if (provider == "google") {
+        return "gemini";
+    }
+    if (provider == "xiaomi" || provider == "xiaomimimo") {
+        return "mimo";
+    }
+    return provider;
+}
+
+AIProviderConfig defaultAIProviderConfig(const std::string& provider) {
+    if (provider == "gemini") {
+        return {"https://generativelanguage.googleapis.com", std::string(), "gemini-2.5-flash"};
+    }
+    return {"https://api.xiaomimimo.com", std::string(), "mimo-v2.5"};
+}
+
+void sanitizeAIBaseUrl(std::string& url) {
+    url = trimSetting(url);
+
+    size_t firstHttps = url.find("https://");
+    if (firstHttps != std::string::npos) {
+        size_t secondHttps = url.find("https://", firstHttps + 1);
+        if (secondHttps != std::string::npos) {
+            url = url.substr(0, secondHttps);
+        }
+    }
+
+    while (!url.empty() && url.back() == '/') {
+        url.pop_back();
+    }
+
+    if (url.size() >= 7 && url.substr(url.size() - 7) == "/v1beta") {
+        url = url.substr(0, url.size() - 7);
+    } else if (url.size() >= 3 && url.substr(url.size() - 3) == "/v1") {
+        url = url.substr(0, url.size() - 3);
+    }
+}
+
+void normalizeAIProviderConfig(const std::string& provider, AIProviderConfig& providerConfig) {
+    sanitizeAIBaseUrl(providerConfig.baseUrl);
+    providerConfig.model = trimSetting(providerConfig.model);
+
+    AIProviderConfig defaults = defaultAIProviderConfig(provider);
+    std::string lowerUrl = lowerSetting(providerConfig.baseUrl);
+    std::string lowerModel = lowerSetting(providerConfig.model);
+
+    if (provider == "gemini") {
+        if (providerConfig.baseUrl.empty() ||
+            lowerUrl.find("xiaomimimo") != std::string::npos) {
+            providerConfig.baseUrl = defaults.baseUrl;
+        }
+        if (providerConfig.model.empty() || lowerModel.find("mimo") != std::string::npos ||
+            lowerModel == "gemini-3.5-flash") {
+            providerConfig.model = defaults.model;
+        }
+        return;
+    }
+
+    if (provider == "mimo") {
+        if (providerConfig.baseUrl.empty() ||
+            lowerUrl.find("generativelanguage.googleapis.com") != std::string::npos) {
+            providerConfig.baseUrl = defaults.baseUrl;
+        }
+        if (providerConfig.model.empty() || lowerModel.find("gemini") != std::string::npos) {
+            providerConfig.model = defaults.model;
+        }
+    }
+}
+}
+
 
 Settings& Settings::instance() {
     static Settings instance;
@@ -63,7 +163,16 @@ void Settings::load() {
                 {"speed", 1.0},
                 {"loopMode", 2},
                 {"aspectMode", 0},
-                {"alwaysOnTop", false}
+                {"alwaysOnTop", false},
+                {"hardwareDecodingEnabled", true},
+                {"audioFilter", {
+                    {"enabled", false},
+                    {"preset", 0},
+                    {"preampDb", 0.0},
+                    {"limiterEnabled", false},
+                    {"dynamicNormalizerEnabled", false},
+                    {"eqBands", nlohmann::json::array()}
+                }}
             }},
             {"recentFiles", nlohmann::json::array()},
             {"subtitle", {
@@ -73,6 +182,16 @@ void Settings::load() {
                 {"hasOutline", true},
                 {"outlineColor", "#000000"},
                 {"outlineWidth", 2}
+            }},
+            {"log", {
+                {"enabled", true},
+                {"consoleOutput", true},
+                {"level", "info"},
+                {"modules", nlohmann::json::object()},
+                {"filePath", std::string()},
+                {"maxFileSize", 5 * 1024 * 1024},
+                {"maxFiles", 3},
+                {"flushOnWarning", true}
             }},
             {"rememberPosition", true},
             {"positions", nlohmann::json::object()},
@@ -87,9 +206,38 @@ void Settings::load() {
             file >> m_config;
         }
     } catch (const std::exception& e) {
-        Logger::instance().error("Failed to load settings: " + std::string(e.what()));
+        logger().error("Failed to load settings: " + std::string(e.what()));
         // 使用默认配置
         m_config = nlohmann::json::object();
+    }
+
+    if (!m_config.contains("log")) {
+        m_config["log"] = {
+            {"enabled", true},
+            {"consoleOutput", true},
+            {"level", "info"},
+            {"modules", nlohmann::json::object()},
+            {"filePath", std::string()},
+            {"maxFileSize", 5 * 1024 * 1024},
+            {"maxFiles", 3},
+            {"flushOnWarning", true}
+        };
+    }
+    if (!m_config.contains("playback")) {
+        m_config["playback"] = nlohmann::json::object();
+    }
+    if (!m_config["playback"].contains("audioFilter")) {
+        m_config["playback"]["audioFilter"] = {
+            {"enabled", false},
+            {"preset", 0},
+            {"preampDb", 0.0},
+            {"limiterEnabled", false},
+            {"dynamicNormalizerEnabled", false},
+            {"eqBands", nlohmann::json::array()}
+        };
+    }
+    if (!m_config["playback"].contains("hardwareDecodingEnabled")) {
+        m_config["playback"]["hardwareDecodingEnabled"] = true;
     }
 }
 
@@ -102,7 +250,7 @@ void Settings::save() {
             file << m_config.dump(4);
         }
     } catch (const std::exception& e) {
-        Logger::instance().error("Failed to save settings: " + std::string(e.what()));
+        logger().error("Failed to save settings: " + std::string(e.what()));
     }
 }
 
@@ -122,7 +270,8 @@ void Settings::setWindowConfig(const WindowConfig& config) {
         {"y", config.y},
         {"width", config.width},
         {"height", config.height},
-        {"maximized", config.maximized}
+        {"maximized", config.maximized},
+        {"borderless", config.borderless}
     };
 }
 
@@ -136,6 +285,7 @@ WindowConfig Settings::windowConfig() const {
         config.width = w.value("width", 1280);
         config.height = w.value("height", 720);
         config.maximized = w.value("maximized", false);
+        config.borderless = w.value("borderless", true);
     }
     return config;
 }
@@ -219,6 +369,76 @@ bool Settings::alwaysOnTop() const {
         return m_config["playback"].value("alwaysOnTop", false);
     }
     return false;
+}
+
+void Settings::setHardwareDecodingEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["hardwareDecodingEnabled"] = enabled;
+}
+
+bool Settings::hardwareDecodingEnabled() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("hardwareDecodingEnabled", true);
+    }
+    return true;
+}
+
+void Settings::setAudioFilterConfig(const AudioFilterConfig& config) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    nlohmann::json eqBands = nlohmann::json::array();
+    for (const auto& band : config.eqBands) {
+        eqBands.push_back({
+            {"frequency", band.frequency},
+            {"width", band.width},
+            {"gainDb", band.gainDb}
+        });
+    }
+
+    m_config["playback"]["audioFilter"] = {
+        {"enabled", config.enabled},
+        {"preset", static_cast<int>(config.preset)},
+        {"preampDb", config.preampDb},
+        {"limiterEnabled", config.limiterEnabled},
+        {"dynamicNormalizerEnabled", config.dynamicNormalizerEnabled},
+        {"eqBands", eqBands}
+    };
+}
+
+AudioFilterConfig Settings::audioFilterConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    AudioFilterConfig config;
+    if (!m_config.contains("playback") ||
+        !m_config["playback"].contains("audioFilter")) {
+        return config;
+    }
+
+    const auto& audio = m_config["playback"]["audioFilter"];
+    config.enabled = audio.value("enabled", false);
+    int preset = audio.value("preset", 0);
+    if (preset < 0 || preset > 3) {
+        preset = 0;
+    }
+    config.preset = static_cast<AudioFilterPreset>(preset);
+    config.preampDb = audio.value("preampDb", 0.0);
+    config.limiterEnabled = audio.value("limiterEnabled", false);
+    config.dynamicNormalizerEnabled = audio.value("dynamicNormalizerEnabled", false);
+
+    if (audio.contains("eqBands") && audio["eqBands"].is_array()) {
+        for (const auto& item : audio["eqBands"]) {
+            EQBand band;
+            band.frequency = item.value("frequency", 1000.0);
+            band.width = item.value("width", 1.0);
+            band.gainDb = item.value("gainDb", 0.0);
+            if (band.frequency > 0.0 && band.width > 0.0) {
+                config.eqBands.push_back(band);
+            }
+        }
+    }
+
+    return config;
 }
 
 // 最近文件
@@ -399,6 +619,175 @@ void Settings::clearLastSession() {
         {"playlistIndex", 0},
         {"hasValidSession", false}
     };
+}
+
+// AI 配置
+void Settings::setAIConfig(const AIConfig& config) {
+    std::string provider = normalizeAIProvider(config.provider);
+
+    std::unordered_map<std::string, AIProviderConfig> providers;
+    for (const auto& entry : config.providers) {
+        std::string providerId = normalizeAIProvider(entry.first);
+        AIProviderConfig providerConfig = entry.second;
+        normalizeAIProviderConfig(providerId, providerConfig);
+        providers[providerId] = providerConfig;
+    }
+
+    AIProviderConfig activeConfig = {
+        config.baseUrl,
+        config.apiKey,
+        config.model
+    };
+
+    if (activeConfig.baseUrl.empty() && activeConfig.apiKey.empty() && activeConfig.model.empty()) {
+        auto activeIt = providers.find(provider);
+        activeConfig = (activeIt != providers.end()) ?
+            activeIt->second :
+            defaultAIProviderConfig(provider);
+    }
+    normalizeAIProviderConfig(provider, activeConfig);
+    providers[provider] = activeConfig;
+
+    if (providers.find("mimo") == providers.end()) {
+        providers["mimo"] = defaultAIProviderConfig("mimo");
+    }
+    if (providers.find("gemini") == providers.end()) {
+        providers["gemini"] = defaultAIProviderConfig("gemini");
+    }
+
+    nlohmann::json providersJson = nlohmann::json::object();
+    for (const auto& entry : providers) {
+        providersJson[entry.first] = {
+            {"baseUrl", entry.second.baseUrl},
+            {"apiKey", entry.second.apiKey},
+            {"model", entry.second.model}
+        };
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config["ai"] = {
+            {"provider", provider},
+            {"baseUrl", activeConfig.baseUrl},
+            {"apiKey", activeConfig.apiKey},
+            {"model", activeConfig.model},
+            {"cacheDir", config.cacheDir},
+            {"autoAnalyze", config.autoAnalyze},
+            {"analysisDetailLevel", std::clamp(config.analysisDetailLevel, 0, 2)},
+            {"providers", providersJson}
+        };
+    }
+    save();
+}
+
+AIConfig Settings::aiConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    AIConfig config;
+    if (m_config.contains("ai")) {
+        const auto& ai = m_config["ai"];
+        config.provider = ai.value("provider", std::string());
+        config.baseUrl = ai.value("baseUrl", "https://api.xiaomimimo.com");
+        config.apiKey = ai.value("apiKey", std::string());
+        config.model = ai.value("model", "mimo-v2.5");
+        config.cacheDir = ai.value("cacheDir", std::string());
+        config.autoAnalyze = ai.value("autoAnalyze", false);
+        config.analysisDetailLevel = std::clamp(ai.value("analysisDetailLevel", 1), 0, 2);
+
+        if (config.provider.empty()) {
+            std::string lowerBaseUrl = config.baseUrl;
+            std::string lowerModel = config.model;
+            std::transform(lowerBaseUrl.begin(), lowerBaseUrl.end(), lowerBaseUrl.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            config.provider =
+                (lowerBaseUrl.find("generativelanguage.googleapis.com") != std::string::npos ||
+                 lowerModel.find("gemini") != std::string::npos) ? "gemini" : "mimo";
+        }
+
+        config.provider = normalizeAIProvider(config.provider);
+
+        if (ai.contains("providers") && ai["providers"].is_object()) {
+            for (const auto& entry : ai["providers"].items()) {
+                if (!entry.value().is_object()) {
+                    continue;
+                }
+                std::string providerId = normalizeAIProvider(entry.key());
+                AIProviderConfig providerConfig;
+                providerConfig.baseUrl = entry.value().value("baseUrl", std::string());
+                providerConfig.apiKey = entry.value().value("apiKey", std::string());
+                providerConfig.model = entry.value().value("model", std::string());
+                normalizeAIProviderConfig(providerId, providerConfig);
+                config.providers[providerId] = providerConfig;
+            }
+        }
+    }
+
+    AIProviderConfig legacyActive = {
+        config.baseUrl,
+        config.apiKey,
+        config.model
+    };
+    normalizeAIProviderConfig(config.provider, legacyActive);
+    if (config.providers.find(config.provider) == config.providers.end()) {
+        config.providers[config.provider] = legacyActive;
+    }
+    if (config.providers.find("mimo") == config.providers.end()) {
+        config.providers["mimo"] = defaultAIProviderConfig("mimo");
+    }
+    if (config.providers.find("gemini") == config.providers.end()) {
+        config.providers["gemini"] = defaultAIProviderConfig("gemini");
+    }
+
+    auto activeIt = config.providers.find(config.provider);
+    if (activeIt != config.providers.end()) {
+        config.baseUrl = activeIt->second.baseUrl;
+        config.apiKey = activeIt->second.apiKey;
+        config.model = activeIt->second.model;
+    }
+    return config;
+}
+
+// 日志配置
+void Settings::setLogConfig(const LogConfig& config) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config["log"] = {
+            {"enabled", config.enabled},
+            {"consoleOutput", config.consoleOutput},
+            {"level", config.level},
+            {"modules", config.moduleLevels},
+            {"filePath", config.filePath},
+            {"maxFileSize", config.maxFileSize},
+            {"maxFiles", config.maxFiles},
+            {"flushOnWarning", config.flushOnWarning}
+        };
+    }
+    save();
+}
+
+LogConfig Settings::logConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    LogConfig config;
+    if (m_config.contains("log")) {
+        const auto& log = m_config["log"];
+        config.enabled = log.value("enabled", true);
+        config.consoleOutput = log.value("consoleOutput", true);
+        config.level = log.value("level", "info");
+        config.moduleLevels.clear();
+        if (log.contains("modules") && log["modules"].is_object()) {
+            for (const auto& [module, level] : log["modules"].items()) {
+                if (level.is_string()) {
+                    config.moduleLevels[module] = level.get<std::string>();
+                }
+            }
+        }
+        config.filePath = log.value("filePath", std::string());
+        config.maxFileSize = log.value("maxFileSize", static_cast<size_t>(5 * 1024 * 1024));
+        config.maxFiles = log.value("maxFiles", static_cast<size_t>(3));
+        config.flushOnWarning = log.value("flushOnWarning", true);
+    }
+    return config;
 }
 
 } // namespace VideoPlay

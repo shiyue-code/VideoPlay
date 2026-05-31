@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <unordered_map>
 
 // SDL forward declarations
 struct SDL_Window;
@@ -19,6 +20,8 @@ typedef struct TTF_Font TTF_Font;
 typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
+
+class CustomMessageBox;
 
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
@@ -40,6 +43,22 @@ using EpisodeItemCallback = std::function<void(size_t)>;
 using EpisodePrevCallback = std::function<void()>;
 using EpisodeNextCallback = std::function<void()>;
 using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
+using SearchCallback = std::function<void(const std::string&)>;
+using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
+using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
+using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
+
+enum class OSDType {
+    Message,
+    Play,
+    Pause,
+    Volume,
+    Mute,
+    SeekBackward,
+    SeekForward,
+    Speed,
+    Info
+};
 
 // 控件类型
 enum class ControlType {
@@ -49,6 +68,7 @@ enum class ControlType {
     PrevButton,
     NextButton,
     ProgressBar,
+    ChapterMarker,
     VolumeButton,
     VolumeBar,
     SpeedButton,
@@ -62,7 +82,13 @@ enum class ControlType {
     MenuItem,
     SysMinButton,
     SysMaxButton,
-    SysCloseButton
+    SysCloseButton,
+    SearchPanelToggle,
+    SearchCloseButton,
+    SearchInput,
+    SearchTimestamp,
+    SearchMessageCopy,
+    PanelBackground
 };
 
 // 无边框窗口 resize 模式
@@ -92,6 +118,11 @@ struct Menu {
     std::string label;
     std::vector<MenuItem> items;
     bool open = false;
+};
+
+struct ChatMessage {
+    bool isUser;
+    std::string text;
 };
 
 class SDLRenderer {
@@ -145,6 +176,16 @@ public:
     void setEpisodePrevCallback(EpisodePrevCallback callback);
     void setEpisodeNextCallback(EpisodeNextCallback callback);
     void setLoopModeCallback(LoopModeCallback callback);
+    void setSearchCallback(SearchCallback callback);
+    void setSubtitleSyncCallback(SubtitleSyncCallback callback);
+    void setABLoopCallback(ABLoopCallback callback);
+    void setChapterSeekCallback(ChapterSeekCallback callback);
+
+    // 章节数据
+    void setChapters(const std::vector<ChapterInfo>& chapters);
+
+    // 搜索热力图数据
+    void setSearchHighlights(const std::vector<int64_t>& timestamps);
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -154,6 +195,17 @@ public:
     void setPrevNextTooltip(const std::string& prevTooltip, const std::string& nextTooltip);
     void toggleEpisodePanel();
     void togglePlaylistPanel();
+    void showSearchPanel();
+    void toggleSearchPanel();
+    void addChatMessage(bool isUser, const std::string& text);
+    void toggleMediaInfoPanel();
+    void setMediaInfo(const MediaInfo& info);
+    void showOSD(const std::string& text);
+    void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
+    void setHardwareDecodingEnabled(bool enabled);
+    void setAudioFilterPreset(AudioFilterPreset preset);
+    void setNetworkState(NetworkState state);
+    void setAIAnalysisState(bool active, float progress, const std::string& status);
 
     // 渲染 UI 控件
     void renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -172,8 +224,14 @@ public:
     int windowWidth() const { return m_windowWidth; }
     int windowHeight() const { return m_windowHeight; }
 
+    // 获取窗口和字体对象
+    SDL_Window* getWindow() const { return m_window; }
+    TTF_Font* getFont() const { return m_font; }
+
     // 显示消息框
-    void showMessageBox(const std::string& title, const std::string& message, bool isError = false);
+    void showMessageBox(const std::string& title, const std::string& message,
+                        bool isError = false,
+                        std::function<void(int64_t timestampMs)> timestampCallback = nullptr);
 
     // 更新文件菜单中的最近文件列表
     void updateRecentFilesMenu();
@@ -212,11 +270,22 @@ private:
 
     // 菜单处理
     void initMenus();
+    void updateChapterMenuItems();
     void renderMenuBar();
     void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
     bool handleMenuClick(int x, int y);
     void closeAllMenus(bool animate = true);
     bool isMenuOpen() const;
+
+    // 右键上下文菜单
+    void showContextMenu(int x, int y);
+    void hideContextMenu();
+    void renderContextMenu();
+    bool handleContextMenuClick(int x, int y);
+    Menu m_contextMenu;
+    bool m_showContextMenu = false;
+    int m_contextMenuX = 0;
+    int m_contextMenuY = 0;
 
     // 渲染各个部分
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
@@ -230,9 +299,27 @@ private:
     void renderSubtitle(const std::string& subtitle);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
+    void renderOSD();
+    void renderMediaInfoPanel();
+    void renderNetworkState();
+    void renderAIAnalysisOverlay();
     void renderLoadingAnimation();
     void renderPlaylistPanel(const std::vector<std::string>& playlist, size_t currentIndex);
     void renderEpisodePanel();
+    void renderSearchPanel();
+    bool hasSearchSelection() const;
+    std::pair<size_t, size_t> searchSelectionRange() const;
+    void clearSearchSelection();
+    void selectAllSearchQuery();
+    void deleteSearchSelection();
+    void insertSearchText(const std::string& text);
+    void deleteSearchCharBefore();
+    void deleteSearchCharAfter();
+    void copySearchSelection();
+    void cutSearchSelection();
+    void pasteSearchClipboard();
+    void copyChatMessage(size_t index);
+    void copyLastAIChatMessage();
 
     // 创建/更新纹理
     void ensureTexture(int width, int height);
@@ -273,6 +360,9 @@ private:
     TTF_Font* m_fontLarge = nullptr;
     std::string m_fontPath;
 
+    // 自定义消息框
+    std::unique_ptr<CustomMessageBox> m_messageBox;
+
     // 图标纹理
     std::unordered_map<std::string, SDL_Texture*> m_iconTextures;
     
@@ -294,10 +384,31 @@ private:
     bool m_showControls = true;
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
+    bool m_showSearchPanel = false;
+    bool m_showMediaInfoPanel = false;
     int m_playlistScrollOffset = 0;
     int m_episodeScrollOffset = 0;
+    int m_searchScrollOffset = 0;
+    std::string m_searchQuery;
+    bool m_isSearchInputFocused = false;
+    size_t m_searchSelectionStart = 0;
+    size_t m_searchSelectionEnd = 0;
+    uint64_t m_lastSearchInputTime = 0;
+    std::vector<ChatMessage> m_chatHistory;
+    std::mutex m_chatMutex;
     bool m_isPlaying = false;
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
+    bool m_hardwareDecodingEnabled = true;
+    AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
+    NetworkState m_networkState = NetworkState::Idle;
+    bool m_aiAnalysisActive = false;
+    float m_aiAnalysisProgress = 0.0f;
+    std::string m_aiAnalysisStatus;
+    std::string m_aiAnalysisNoticeText;
+    float m_aiAnalysisNoticeProgress = -1.0f;
+    uint64_t m_aiAnalysisStartTime = 0;
+    uint64_t m_aiAnalysisNoticeStartTime = 0;
+    static constexpr uint64_t AI_ANALYSIS_NOTICE_DURATION_MS = 2600;
     AspectMode m_aspectMode = AspectMode::Original;
     bool m_alwaysOnTop = false;
     std::vector<float> m_episodeProgress;
@@ -334,7 +445,14 @@ private:
     
     // 菜单
     std::vector<Menu> m_menus;
+    std::vector<ChapterInfo> m_chapters;
+    bool m_hasChapters = false;
+    std::vector<int64_t> m_searchHighlights;
+    int64_t m_lastDuration = 0;
+    int m_lastBarX = 0;
+    int m_lastBarW = 0;
     int m_activeMenu = -1;
+    int m_activeSubmenuParent = 0;
     bool m_menuBarHovered = false;
 
     // 菜单动画
@@ -355,6 +473,7 @@ private:
     int m_mouseY = 0;
     bool m_mouseDown = false;
     ControlType m_hoveredControl = ControlType::None;
+    int m_hoveredControlValue = 0;
     ControlType m_pressedControl = ControlType::None;
     int m_pressedControlValue = 0;
     uint64_t m_lastMouseMove = 0;
@@ -388,6 +507,12 @@ private:
     std::string m_tooltipNext;
     uint64_t m_tooltipTime = 0;
     uint64_t m_tooltipShowTime = 0;
+    std::string m_osdText;
+    OSDType m_osdType = OSDType::Message;
+    float m_osdProgress = -1.0f;
+    uint64_t m_osdStartTime = 0;
+    static constexpr uint64_t OSD_DURATION_MS = 1400;
+    MediaInfo m_mediaInfo;
 
     // 回调
     FileDropCallback m_fileDropCallback;
@@ -409,6 +534,10 @@ private:
     EpisodePrevCallback m_episodePrevCallback;
     EpisodeNextCallback m_episodeNextCallback;
     LoopModeCallback m_loopModeCallback;
+    SearchCallback m_searchCallback;
+    SubtitleSyncCallback m_subtitleSyncCallback;
+    ABLoopCallback m_abLoopCallback;
+    ChapterSeekCallback m_chapterSeekCallback;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

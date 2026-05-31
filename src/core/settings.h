@@ -18,6 +18,7 @@ struct WindowConfig {
     int width = 1280;
     int height = 720;
     bool maximized = false;
+    bool borderless = true;
 };
 
 struct SubtitleStyle {
@@ -49,6 +50,34 @@ struct SessionInfo {
     bool hasValidSession = false;
 };
 
+struct AIProviderConfig {
+    std::string baseUrl;
+    std::string apiKey;
+    std::string model;
+};
+
+struct AIConfig {
+    std::string provider = "mimo";
+    std::string baseUrl = "https://api.xiaomimimo.com";
+    std::string apiKey;
+    std::string model = "mimo-v2.5";
+    std::string cacheDir;
+    bool autoAnalyze = false;
+    int analysisDetailLevel = 1; // 0=简略, 1=标准, 2=详细
+    std::unordered_map<std::string, AIProviderConfig> providers;
+};
+
+struct LogConfig {
+    bool enabled = true;
+    bool consoleOutput = true;
+    std::string level = "info";       // trace/debug/info/warning/error/critical/off
+    std::unordered_map<std::string, std::string> moduleLevels;
+    std::string filePath;             // 为空时使用默认日志路径
+    size_t maxFileSize = 5 * 1024 * 1024;
+    size_t maxFiles = 3;
+    bool flushOnWarning = true;
+};
+
 class Settings {
 public:
     static Settings& instance();
@@ -70,6 +99,10 @@ public:
     AspectMode aspectMode() const;
     void setAlwaysOnTop(bool enabled);
     bool alwaysOnTop() const;
+    void setHardwareDecodingEnabled(bool enabled);
+    bool hardwareDecodingEnabled() const;
+    void setAudioFilterConfig(const AudioFilterConfig& config);
+    AudioFilterConfig audioFilterConfig() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);
@@ -97,6 +130,14 @@ public:
     void setLastSession(const SessionInfo& session);
     SessionInfo lastSession() const;
     void clearLastSession();
+
+    // AI 配置
+    void setAIConfig(const AIConfig& config);
+    AIConfig aiConfig() const;
+
+    // 日志配置
+    void setLogConfig(const LogConfig& config);
+    LogConfig logConfig() const;
 
     // 保存和加载
     void save();

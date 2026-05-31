@@ -4,12 +4,17 @@
 #include "core/episodedetector.h"
 #include "core/ffmpegplayer.h"
 #include "renderer/sdlrenderer.h"
+#include "ai/aianalyzer.h"
+#include "ai/searchengine.h"
+#include "renderer/settingsdialog.h"
 
 #include <string>
 #include <vector>
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <mutex>
+#include <deque>
 
 namespace VideoPlay {
 
@@ -48,11 +53,27 @@ private:
     void setSpeed(double speed);
     void cycleSpeed();
     void toggleAlwaysOnTop();
+    void setLoopPointA();
+    void setLoopPointB();
+    void clearLoop();
 
     // 菜单处理
     void handleMenu(int menuId);
     void showHelp();
     void showAbout();
+
+    // AI 功能
+    void startAIAnalysis();
+    void handleSearch(const std::string& query);
+    void handleSearchInternal(const std::string& query, bool addUserMessage);
+    void processNextPendingSearch();
+    void checkAISearchTimeout();
+    void handleAIAnalysis();
+    void showAISummary();
+    void showSearchPanel();
+    void clearAICache();
+    void showAISettings();
+    std::vector<SearchResult> performSearch(const std::string& query);
 
     // 播放列表
     void addToPlaylist(const std::string& path);
@@ -99,6 +120,7 @@ private:
     int m_volume = 100;
     bool m_isMuted = false;
     double m_speed = 1.0;
+    std::atomic<NetworkState> m_networkState{NetworkState::Idle};
 
     // 剧集
     std::optional<SeriesGroup> m_currentSeries;
@@ -118,6 +140,24 @@ private:
     // 视频帧缓冲
     VideoFrame m_displayFrame;
     VideoFrame m_pendingFrame;
+
+    // AB 循环
+    int64_t m_loopA = -1;
+    int64_t m_loopB = -1;
+    bool m_loopSeeking = false;
+
+    // AI 功能
+    std::unique_ptr<AIAnalyzer> m_aiAnalyzer;
+    std::unique_ptr<SearchEngine> m_searchEngine;
+    AIAnalysisResult m_aiResult;
+    std::mutex m_aiStateMutex;
+    bool m_aiAnalyzing = false;
+    bool m_aiDirectSearchActive = false;
+    float m_aiProgress = 0.0f;
+    std::string m_aiStatus;
+    uint64_t m_aiRequestStartTimeMs = 0;
+    std::atomic<uint64_t> m_aiRequestSeq{0};
+    std::deque<std::string> m_pendingSearchQueries;
 };
 
 } // namespace VideoPlay

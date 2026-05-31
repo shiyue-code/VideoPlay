@@ -1,4 +1,4 @@
-#include "subtitles/subtitleparser.h"
+﻿#include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
 #include <fstream>
 #include <sstream>
@@ -8,8 +8,16 @@
 
 namespace VideoPlay {
 
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("subtitle");
+    return *logger;
+}
+}
+
+
 SubtitleParser::SubtitleParser()
-    : m_loaded(false) {
+    : m_loaded(false), m_offset(0) {
 }
 
 SubtitleParser::~SubtitleParser() {
@@ -18,7 +26,7 @@ SubtitleParser::~SubtitleParser() {
 bool SubtitleParser::loadFile(const std::string& filePath) {
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open()) {
-        Logger::instance().warning("Cannot open subtitle file: " + filePath);
+        logger().warning("Cannot open subtitle file: " + filePath);
         return false;
     }
     
@@ -63,13 +71,13 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
     }
 
     if (!success) {
-        Logger::instance().warning("All subtitle parsers failed for: " + filePath);
+        logger().warning("All subtitle parsers failed for: " + filePath);
     }
     
     if (success) {
         m_filePath = filePath;
         m_loaded = true;
-        Logger::instance().info("Loaded subtitle: " + filePath + 
+        logger().info("Loaded subtitle: " + filePath + 
                                " (" + std::to_string(m_entries.size()) + " entries)");
     }
     
@@ -77,11 +85,24 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
 }
 
 std::string SubtitleParser::subtitleAt(int64_t ms) const {
-    for (const auto& entry : m_entries) {
-        if (ms >= entry.startTime && ms <= entry.endTime) {
-            return entry.text;
+    if (m_entries.empty()) return "";
+    
+    int64_t adjustedMs = ms - m_offset;
+    
+    // Binary search: find the first entry whose startTime > adjustedMs
+    auto it = std::lower_bound(m_entries.begin(), m_entries.end(), adjustedMs,
+        [](const SubtitleEntry& entry, int64_t time) {
+            return entry.startTime <= time;
+        });
+    
+    // Check the entry before (if exists) - it's the most likely candidate
+    if (it != m_entries.begin()) {
+        --it;
+        if (adjustedMs >= it->startTime && adjustedMs <= it->endTime) {
+            return it->text;
         }
     }
+    
     return "";
 }
 
@@ -99,9 +120,21 @@ bool SubtitleParser::isLoaded() const {
     return m_loaded;
 }
 
+void SubtitleParser::setOffset(int64_t ms) {
+    m_offset = ms;
+}
+
+int64_t SubtitleParser::offset() const {
+    return m_offset;
+}
+
+void SubtitleParser::adjustOffset(int64_t deltaMs) {
+    m_offset += deltaMs;
+}
+
 std::string SubtitleParser::trim(const std::string& str) {
-    auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
-    auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
+    auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
+    auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char c) { return std::isspace(c); }).base();
     return (start < end) ? std::string(start, end) : "";
 }
 
@@ -182,7 +215,7 @@ bool SubtitleParser::parseSRT(const std::string& content) {
         line = trim(line);
         
         // 跳过空行和序号
-        if (line.empty() || std::all_of(line.begin(), line.end(), ::isdigit)) {
+        if (line.empty() || std::all_of(line.begin(), line.end(), [](unsigned char c) { return std::isdigit(c); })) {
             continue;
         }
         
@@ -200,7 +233,7 @@ bool SubtitleParser::parseSRT(const std::string& content) {
                 if (line.empty()) break;
                 
                 // 检查是否是下一个字幕的序号
-                if (std::all_of(line.begin(), line.end(), ::isdigit)) {
+                if (std::all_of(line.begin(), line.end(), [](unsigned char c) { return std::isdigit(c); })) {
                     // 将行放回？不，直接处理下一个
                     break;
                 }
@@ -230,7 +263,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
     int formatStartIdx = -1, formatEndIdx = -1, formatTextIdx = -1;
     int formatFieldCount = 0;
 
-    Logger::instance().debug("[ASS] Starting parse, content size=" + std::to_string(content.size()));
+    logger().debug("[ASS] Starting parse, content size=" + std::to_string(content.size()));
 
     while (std::getline(stream, line)) {
         line = trim(line);
@@ -238,7 +271,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
         // 查找 Events 部分
         if (line == "[Events]") {
             inEvents = true;
-            Logger::instance().debug("[ASS] Found [Events]");
+            logger().debug("[ASS] Found [Events]");
             continue;
         }
 
@@ -266,7 +299,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
                 idx++;
                 formatFieldCount++;
             }
-            Logger::instance().debug("[ASS] Format parsed: Start=" + std::to_string(formatStartIdx) +
+            logger().debug("[ASS] Format parsed: Start=" + std::to_string(formatStartIdx) +
                                      " End=" + std::to_string(formatEndIdx) +
                                      " Text=" + std::to_string(formatTextIdx) +
                                      " Count=" + std::to_string(formatFieldCount));
@@ -342,7 +375,7 @@ bool SubtitleParser::parseASS(const std::string& content) {
         }
     }
 
-    Logger::instance().debug("[ASS] Parse complete, entries=" + std::to_string(m_entries.size()));
+    logger().debug("[ASS] Parse complete, entries=" + std::to_string(m_entries.size()));
     return !m_entries.empty();
 }
 

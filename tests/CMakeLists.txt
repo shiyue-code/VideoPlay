@@ -1,23 +1,48 @@
-# 测试目录的CMakeLists.txt
+set(VIDEOPLAY_GOOGLETEST_DIR "${CMAKE_SOURCE_DIR}/3rdparty/googletest")
 
-# 确保测试可以访问主项目的包含目录
-include_directories(${CMAKE_SOURCE_DIR}/include)
+if(NOT EXISTS "${VIDEOPLAY_GOOGLETEST_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "GoogleTest submodule is missing. Run: git submodule update --init --recursive")
+endif()
 
-# 测试核心功能 - 只包含实际存在的测试文件
-add_executable(test_core
-    test_playbackcontroller.cpp
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF)
+
+if(MSVC)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+endif()
+
+add_subdirectory(
+    "${VIDEOPLAY_GOOGLETEST_DIR}"
+    "${CMAKE_BINARY_DIR}/3rdparty/googletest"
+    EXCLUDE_FROM_ALL
 )
 
-target_include_directories(test_core
-    PRIVATE ${CMAKE_SOURCE_DIR}
-    PUBLIC ${CMAKE_SOURCE_DIR}/include
+include(GoogleTest)
+
+set(VIDEOPLAY_TEST_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/3rdparty
 )
 
-target_link_libraries(test_core
-    PRIVATE video_core
-    PRIVATE video_plugins
-    PRIVATE Qt6::Core Qt6::Test
-)
+set(VIDEOPLAY_GTEST_MAIN_TARGET GTest::gtest_main)
+if(NOT TARGET ${VIDEOPLAY_GTEST_MAIN_TARGET})
+    set(VIDEOPLAY_GTEST_MAIN_TARGET gtest_main)
+endif()
 
-# 添加测试
-add_test(NAME PlaybackControllerTest COMMAND test_core)
+add_executable(test_subtitleparser
+    test_subtitleparser_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/subtitles/subtitleparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_subtitleparser PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_subtitleparser PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_subtitleparser)
+
+add_executable(test_playbackcontroller
+    test_playbackcontroller_gtest.cpp
+)
+target_include_directories(test_playbackcontroller PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_playbackcontroller PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_playbackcontroller)

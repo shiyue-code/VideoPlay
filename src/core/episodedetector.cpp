@@ -1,4 +1,4 @@
-#include "core/episodedetector.h"
+﻿#include "core/episodedetector.h"
 #include "utils/logger.h"
 
 #include <filesystem>
@@ -7,6 +7,14 @@
 #include <cctype>
 
 namespace VideoPlay {
+
+namespace {
+Logger& logger() {
+    static auto logger = Logger::get("episode");
+    return *logger;
+}
+}
+
 
 namespace {
     const std::vector<std::string> kMediaExtensions = {
@@ -269,7 +277,7 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
     }
     catch (const std::exception& e)
     {
-        Logger::instance().warning("Failed to scan directory for episodes: " + std::string(e.what()));
+        logger().warning("Failed to scan directory for episodes: " + std::string(e.what()));
     }
 
     if (group.episodes.size() < 2)
@@ -312,7 +320,7 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
         }
     }
 
-    Logger::instance().info("Detected series: \"" + group.seriesName + "\" with " +
+    logger().info("Detected series: \"" + group.seriesName + "\" with " +
                             std::to_string(group.episodes.size()) + " episodes");
 
     return group;
