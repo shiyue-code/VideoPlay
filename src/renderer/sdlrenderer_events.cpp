@@ -3,6 +3,7 @@
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <utility>
 
 namespace VideoPlay {
 
@@ -77,12 +78,150 @@ std::string submenuParentLabel(const MenuItem& item, int loopMode, AspectMode as
 }
 
 
+bool SDLRenderer::hasSearchSelection() const
+{
+    return m_searchSelectionStart != m_searchSelectionEnd;
+}
+
+std::pair<size_t, size_t> SDLRenderer::searchSelectionRange() const
+{
+    size_t start = std::min(m_searchSelectionStart, m_searchSelectionEnd);
+    size_t end = std::max(m_searchSelectionStart, m_searchSelectionEnd);
+    start = std::min(start, m_searchQuery.size());
+    end = std::min(end, m_searchQuery.size());
+    return {start, end};
+}
+
+void SDLRenderer::clearSearchSelection()
+{
+    m_searchSelectionStart = m_searchQuery.size();
+    m_searchSelectionEnd = m_searchQuery.size();
+}
+
+void SDLRenderer::selectAllSearchQuery()
+{
+    m_searchSelectionStart = 0;
+    m_searchSelectionEnd = m_searchQuery.size();
+}
+
+void SDLRenderer::deleteSearchSelection()
+{
+    if (!hasSearchSelection()) {
+        return;
+    }
+
+    auto [start, end] = searchSelectionRange();
+    m_searchQuery.erase(start, end - start);
+    m_searchSelectionStart = start;
+    m_searchSelectionEnd = start;
+}
+
+void SDLRenderer::insertSearchText(const std::string& text)
+{
+    if (text.empty()) {
+        return;
+    }
+
+    deleteSearchSelection();
+    size_t insertPos = std::min(m_searchSelectionEnd, m_searchQuery.size());
+    m_searchQuery.insert(insertPos, text);
+    m_searchSelectionStart = insertPos + text.size();
+    m_searchSelectionEnd = m_searchSelectionStart;
+}
+
+void SDLRenderer::deleteSearchCharBefore()
+{
+    if (hasSearchSelection()) {
+        deleteSearchSelection();
+        return;
+    }
+    if (m_searchQuery.empty()) {
+        return;
+    }
+
+    size_t erasePos = m_searchQuery.size();
+    while (erasePos > 0 && (m_searchQuery[erasePos - 1] & 0xC0) == 0x80) {
+        --erasePos;
+    }
+    if (erasePos > 0) {
+        --erasePos;
+    }
+    m_searchQuery.erase(erasePos);
+    m_searchSelectionStart = erasePos;
+    m_searchSelectionEnd = erasePos;
+}
+
+void SDLRenderer::deleteSearchCharAfter()
+{
+    if (hasSearchSelection()) {
+        deleteSearchSelection();
+    }
+}
+
+void SDLRenderer::copySearchSelection()
+{
+    if (!hasSearchSelection()) {
+        return;
+    }
+
+    auto [start, end] = searchSelectionRange();
+    SDL_SetClipboardText(m_searchQuery.substr(start, end - start).c_str());
+    showOSD(OSDType::Info, "已复制");
+}
+
+void SDLRenderer::cutSearchSelection()
+{
+    if (!hasSearchSelection()) {
+        return;
+    }
+
+    copySearchSelection();
+    deleteSearchSelection();
+}
+
+void SDLRenderer::pasteSearchClipboard()
+{
+    if (!SDL_HasClipboardText()) {
+        return;
+    }
+
+    char* text = SDL_GetClipboardText();
+    if (text) {
+        insertSearchText(text);
+        SDL_free(text);
+    }
+}
+
+void SDLRenderer::copyChatMessage(size_t index)
+{
+    std::lock_guard<std::mutex> lock(m_chatMutex);
+    if (index >= m_chatHistory.size()) {
+        return;
+    }
+
+    SDL_SetClipboardText(m_chatHistory[index].text.c_str());
+    showOSD(OSDType::Info, "已复制回答");
+}
+
+void SDLRenderer::copyLastAIChatMessage()
+{
+    std::lock_guard<std::mutex> lock(m_chatMutex);
+    for (auto it = m_chatHistory.rbegin(); it != m_chatHistory.rend(); ++it) {
+        if (!it->isUser) {
+            SDL_SetClipboardText(it->text.c_str());
+            showOSD(OSDType::Info, "已复制回答");
+            return;
+        }
+    }
+}
+
+
 
 void SDLRenderer::handleEvent(const SDL_Event& event) {
     switch (event.type) {
         case SDL_EVENT_TEXT_INPUT:
             if (m_isSearchInputFocused && event.text.text) {
-                m_searchQuery += event.text.text;
+                insertSearchText(event.text.text);
             }
             break;
 
@@ -118,35 +257,45 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 
                 // 处理搜索输入框快捷键
                 if (m_isSearchInputFocused) {
-                    if (event.key.key == SDLK_BACKSPACE) {
-                        if (!m_searchQuery.empty()) {
-                            // 简单的 UTF-8 字符删除逻辑
-                            while (!m_searchQuery.empty() && (m_searchQuery.back() & 0xC0) == 0x80) {
-                                m_searchQuery.pop_back();
-                            }
-                            if (!m_searchQuery.empty()) m_searchQuery.pop_back();
+                    bool ctrl = (event.key.mod & SDL_KMOD_CTRL) != 0;
+                    if (ctrl && event.key.key == SDLK_A) {
+                        selectAllSearchQuery();
+                        return;
+                    } else if (ctrl && event.key.key == SDLK_C) {
+                        if (hasSearchSelection()) {
+                            copySearchSelection();
+                        } else {
+                            copyLastAIChatMessage();
                         }
+                        return;
+                    } else if (ctrl && event.key.key == SDLK_X) {
+                        cutSearchSelection();
+                        return;
+                    } else if (ctrl && event.key.key == SDLK_V) {
+                        pasteSearchClipboard();
+                        return;
+                    } else if (event.key.key == SDLK_BACKSPACE) {
+                        deleteSearchCharBefore();
+                        return; // 拦截按键
+                    } else if (event.key.key == SDLK_DELETE) {
+                        deleteSearchCharAfter();
                         return; // 拦截按键
                     } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
                         if (!m_searchQuery.empty() && m_searchCallback) {
                             m_searchCallback(m_searchQuery);
                             m_searchQuery.clear(); // 发送后清空
+                            clearSearchSelection();
                         }
                         return; // 拦截按键
                     } else if (event.key.key == SDLK_ESCAPE) {
                         toggleSearchPanel(); // 关闭搜索面板
                         return;
-                    } else if (event.key.key == SDLK_V && (event.key.mod & SDL_KMOD_CTRL)) {
-                        if (SDL_HasClipboardText()) {
-                            char* text = SDL_GetClipboardText();
-                            if (text) {
-                                m_searchQuery += text;
-                                SDL_free(text);
-                            }
-                        }
-                        return;
                     }
                     return; // 焦点在输入框时拦截所有按键，防止空格暂停等
+                } else if (m_showSearchPanel && event.key.key == SDLK_C &&
+                           (event.key.mod & SDL_KMOD_CTRL)) {
+                    copyLastAIChatMessage();
+                    return;
                 }
             }
             
@@ -367,6 +516,9 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                         m_tooltip = "Chapter " + std::to_string(m_hoveredControlValue + 1);
                     }
                 }
+                break;
+            case ControlType::SearchMessageCopy:
+                m_tooltip = "复制回答";
                 break;
             default:
                 m_tooltip.clear();
@@ -793,6 +945,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             break;
         case ControlType::SearchInput:
             m_isSearchInputFocused = true;
+            clearSearchSelection();
             SDL_StartTextInput(m_window);
             break;
         default:
@@ -830,6 +983,9 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
                         ratio = std::max(0.0, std::min(1.0, ratio));
                         m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
                     }
+                    break;
+                case ControlType::SearchMessageCopy:
+                    copyChatMessage(static_cast<size_t>(m_pressedControlValue));
                     break;
                 default:
                     break;
