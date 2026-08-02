@@ -10,10 +10,13 @@ namespace VideoPlay {
 
 namespace {
 Logger& logger() {
-    static auto logger = Logger::get("subtitle");
-    return *logger;
+    static auto instance = Logger::get("subtitle");
+    return *instance;
 }
 }
+
+// 字幕解析器通常不涉及初始 STDOUT/STDERR，但若日志初始化失败，
+// 使用 root logger 可能更安全；这里保持模块级 logger
 
 
 SubtitleParser::SubtitleParser()

@@ -1,4 +1,5 @@
 #include "subtitles/subtitleparser.h"
+#include "utils/logger.h"
 
 #include <gtest/gtest.h>
 
@@ -7,6 +8,25 @@
 #include <string>
 
 using namespace VideoPlay;
+
+// 在测试中禁用日志，避免 Release 模式下 LoggerBackend 静态初始化崩溃
+// 通过定义一个空实现的 logger 函数来替代原始实现
+namespace VideoPlay {
+namespace {
+Logger& logger() {
+    // 返回一个空的 Logger 实例，不创建文件
+    static std::shared_ptr<Logger> nullLogger = []() {
+        // 先禁用 root logger
+        Logger::root().setEnabled(false);
+        // 创建一个独立的 logger
+        auto ptr = Logger::get("test");
+        ptr->setEnabled(false);
+        return ptr;
+    }();
+    return *nullLogger;
+}
+}
+}
 
 namespace {
 

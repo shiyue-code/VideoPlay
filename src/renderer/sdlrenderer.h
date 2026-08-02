@@ -47,6 +47,8 @@ using SearchCallback = std::function<void(const std::string&)>;
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
 using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
+using AudioTrackCallback = std::function<void(int)>;  // 音轨下标，-1=关闭
+using SubtitleTrackCallback = std::function<void(int)>;  // 字幕轨下标，-1=关闭内封
 
 enum class OSDType {
     Message,
@@ -180,6 +182,12 @@ public:
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
     void setABLoopCallback(ABLoopCallback callback);
     void setChapterSeekCallback(ChapterSeekCallback callback);
+    void setAudioTrackCallback(AudioTrackCallback callback);
+    void setSubtitleTrackCallback(SubtitleTrackCallback callback);
+
+    // 多轨道数据
+    void setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
+    void setSubtitleTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
 
     // 章节数据
     void setChapters(const std::vector<ChapterInfo>& chapters);
@@ -271,6 +279,7 @@ private:
     // 菜单处理
     void initMenus();
     void updateChapterMenuItems();
+    void updateTrackMenus();
     void renderMenuBar();
     void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
     bool handleMenuClick(int x, int y);
@@ -538,6 +547,14 @@ private:
     SubtitleSyncCallback m_subtitleSyncCallback;
     ABLoopCallback m_abLoopCallback;
     ChapterSeekCallback m_chapterSeekCallback;
+    AudioTrackCallback m_audioTrackCallback;
+    SubtitleTrackCallback m_subtitleTrackCallback;
+
+    // 多轨道数据
+    std::vector<TrackInfo> m_audioTracks;
+    std::vector<TrackInfo> m_subtitleTracks;
+    int m_currentAudioTrack = 0;
+    int m_currentSubtitleTrack = -1;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

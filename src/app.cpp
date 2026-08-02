@@ -218,6 +218,38 @@ bool VideoPlayerApp::initialize() {
     m_renderer->setMenuCallback([this](int menuId) {
         handleMenu(menuId);
     });
+    m_renderer->setAudioTrackCallback([this](int trackIndex) {
+        if (m_player) {
+            if (m_player->setAudioTrack(trackIndex)) {
+                if (m_renderer) {
+                    m_renderer->setAudioTracks(m_player->audioTracks(),
+                                               m_player->currentAudioTrack());
+                    m_renderer->showOSD(OSDType::Info, "音轨已切换");
+                }
+            }
+        }
+    });
+    m_renderer->setSubtitleTrackCallback([this](int trackIndex) {
+        if (m_player) {
+            if (m_player->setSubtitleTrack(trackIndex)) {
+                if (m_renderer) {
+                    m_renderer->setSubtitleTracks(m_player->subtitleTracks(),
+                                                  m_player->currentSubtitleTrack());
+                    if (trackIndex == -1) {
+                        m_renderer->showOSD(OSDType::Info, "内封字幕已关闭");
+                    } else {
+                        m_renderer->showOSD(OSDType::Info, "字幕轨已切换");
+                    }
+                }
+            }
+        }
+    });
+
+    // 内封字幕回调：将解码出的字幕文本交给字幕解析器
+    m_player->setSubtitleTextCallback([this](int64_t ptsMs, const std::string& text) {
+        // TODO: 后续可将内封字幕注入 SubtitleParser 或直接显示
+        logger().debug("Embedded subtitle @ " + std::to_string(ptsMs) + "ms: " + text);
+    });
 
     // 恢复循环模式设置
     auto loopMode = Settings::instance().loopMode();
@@ -341,6 +373,8 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
                 m_renderer->setWindowTitle(
                     displayNameForSource(session.filePath) + " - " + APP_TITLE);
                 m_renderer->setMediaInfo(m_player->mediaInfo());
+                m_renderer->setAudioTracks(m_player->audioTracks(), m_player->currentAudioTrack());
+                m_renderer->setSubtitleTracks(m_player->subtitleTracks(), m_player->currentSubtitleTrack());
                 if (!isNetworkUrl(session.filePath)) {
                     loadSubtitle(session.filePath);
                     detectSeries(session.filePath);
@@ -672,6 +706,9 @@ void VideoPlayerApp::openFile(const std::string& path) {
         if (m_renderer) {
             auto chapters = m_player->chapters();
             m_renderer->setChapters(chapters);
+            // 更新音轨/字幕轨菜单
+            m_renderer->setAudioTracks(m_player->audioTracks(), m_player->currentAudioTrack());
+            m_renderer->setSubtitleTracks(m_player->subtitleTracks(), m_player->currentSubtitleTrack());
         }
 
         // 尝试加载 AI 分析缓存

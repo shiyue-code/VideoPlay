@@ -128,6 +128,22 @@ void SDLRenderer::initMenus() {
     };
     m_menus.push_back(playMenu);
 
+    // 音轨菜单（动态填充）
+    Menu audioMenu;
+    audioMenu.label = "音轨";
+    audioMenu.items = {
+        {400, "无可用音轨", "", false, false}
+    };
+    m_menus.push_back(audioMenu);
+
+    // 字幕菜单（动态填充）
+    Menu subtitleMenu;
+    subtitleMenu.label = "字幕";
+    subtitleMenu.items = {
+        {450, "无可用字幕", "", false, false}
+    };
+    m_menus.push_back(subtitleMenu);
+
     // 章节菜单
     Menu chapterMenu;
     chapterMenu.label = "章节";
@@ -208,6 +224,8 @@ bool SDLRenderer::handleMenuClick(int x, int y) {
     int menuX = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+        if (m_menus[i].label == "音轨" && m_audioTracks.empty()) continue;
+        if (m_menus[i].label == "字幕" && m_subtitleTracks.empty()) continue;
         int textW = getTextWidth(m_menus[i].label);
         int menuWidth = textW + kTopMenuPaddingX * 2;
         if (x >= menuX && x <= menuX + menuWidth) {
@@ -289,6 +307,8 @@ void SDLRenderer::renderMenuBar() {
     int x = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
         if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+        if (m_menus[i].label == "音轨" && m_audioTracks.empty()) continue;
+        if (m_menus[i].label == "字幕" && m_subtitleTracks.empty()) continue;
         int textW = getTextWidth(m_menus[i].label);
         int itemWidth = textW + kTopMenuPaddingX * 2;
         
@@ -745,6 +765,56 @@ bool SDLRenderer::handleContextMenuClick(int x, int y) {
 
     hideContextMenu();
     return true;
+}
+
+void SDLRenderer::updateTrackMenus() {
+    // 音轨菜单 index = 2, 字幕菜单 index = 3
+    if (m_menus.size() < 4) return;
+
+    // 音轨菜单
+    Menu& audioMenu = m_menus[2];
+    audioMenu.items.clear();
+    if (m_audioTracks.empty()) {
+        audioMenu.items.push_back({400, "无可用音轨", "", false, false});
+    } else {
+        for (size_t i = 0; i < m_audioTracks.size(); i++) {
+            MenuItem item;
+            item.id = 400 + static_cast<int>(i);
+            item.label = trackLabel(m_audioTracks[i], static_cast<int>(i + 1));
+            item.enabled = true;
+            // 标记当前选中
+            if (static_cast<int>(i) == m_currentAudioTrack) {
+                item.label = "✓ " + item.label;
+            }
+            audioMenu.items.push_back(item);
+        }
+    }
+
+    // 字幕菜单
+    Menu& subtitleMenu = m_menus[3];
+    subtitleMenu.items.clear();
+    // 第一项：关闭内封字幕
+    {
+        MenuItem off;
+        off.id = 450;
+        off.label = (m_currentSubtitleTrack == -1) ? "✓ 关闭内封字幕" : "关闭内封字幕";
+        off.enabled = true;
+        subtitleMenu.items.push_back(off);
+    }
+    if (m_subtitleTracks.empty()) {
+        // 只保留"关闭"项
+    } else {
+        for (size_t i = 0; i < m_subtitleTracks.size(); i++) {
+            MenuItem item;
+            item.id = 451 + static_cast<int>(i);
+            item.label = trackLabel(m_subtitleTracks[i], static_cast<int>(i + 1));
+            item.enabled = true;
+            if (static_cast<int>(i) == m_currentSubtitleTrack) {
+                item.label = "✓ " + item.label;
+            }
+            subtitleMenu.items.push_back(item);
+        }
+    }
 }
 
 } // namespace VideoPlay

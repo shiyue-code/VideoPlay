@@ -35,6 +35,51 @@ struct ChapterInfo {
     std::string title;
 };
 
+// 音轨/字幕轨信息
+struct TrackInfo {
+    int streamIndex = -1;       // FFmpeg 流索引
+    std::string language;       // 语言代码（如 "chi", "eng"）
+    std::string title;          // 流标题（来自 metadata）
+    std::string codecName;      // 编码器名称
+    bool isDefault = false;     // 是否为默认流
+    bool isForced = false;      // 字幕：是否为强制字幕
+    // 音轨特有
+    int channels = 0;
+    int sampleRate = 0;
+    // 字幕特有
+    std::string subtitleType;   // "text" / "ass" / "pgs" 等
+};
+
+// 轨道语言代码转可读名称
+inline std::string trackLanguageName(const std::string& code) {
+    if (code.empty()) return "未知";
+    if (code == "chi" || code == "zho" || code == "zh" || code == "chinese") return "中文";
+    if (code == "eng" || code == "en" || code == "english") return "英语";
+    if (code == "jpn" || code == "ja" || code == "japanese") return "日语";
+    if (code == "kor" || code == "ko" || code == "korean") return "韩语";
+    if (code == "fra" || code == "fre" || code == "fr" || code == "french") return "法语";
+    if (code == "deu" || code == "ger" || code == "de" || code == "german") return "德语";
+    if (code == "spa" || code == "es" || code == "spanish") return "西班牙语";
+    if (code == "rus" || code == "ru" || code == "russian") return "俄语";
+    if (code == "und") return "未指定";
+    return code;
+}
+
+// 生成轨道显示标签
+inline std::string trackLabel(const TrackInfo& t, int index) {
+    std::string label = std::to_string(index) + ". " + trackLanguageName(t.language);
+    if (!t.title.empty()) {
+        label += " (" + t.title + ")";
+    }
+    if (t.isForced) {
+        label += " [强制]";
+    }
+    if (t.channels > 0) {
+        label += " [" + std::to_string(t.channels) + "ch]";
+    }
+    return label;
+}
+
 enum class SourceType {
     LocalFile = 0,
     NetworkStream = 1

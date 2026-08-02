@@ -10,6 +10,11 @@
 #include <sstream>
 #include <vector>
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #if defined(VIDEOPLAY_HAS_SPDLOG)
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -28,13 +33,20 @@ std::string toLower(std::string value) {
 
 std::string defaultLogFilePath() {
 #ifdef _WIN32
-    const char* appData = getenv("APPDATA");
-    if (appData) {
+    const char* appData = nullptr;
+    if (const char* p = getenv("APPDATA"); p) {
+        appData = p;
+    } else if (const char* p2 = getenv("LOCALAPPDATA"); p2) {
+        appData = p2;
+    } else if (const char* p3 = getenv("USERPROFILE"); p3) {
+        appData = p3;
+    }
+    if (appData && *appData) {
         return std::string(appData) + "/VideoPlay/logs/videoplay.log";
     }
 #else
     const char* home = getenv("HOME");
-    if (home) {
+    if (home && *home) {
         return std::string(home) + "/.local/share/VideoPlay/logs/videoplay.log";
     }
 #endif
@@ -78,6 +90,8 @@ spdlog::level::level_enum toSpdlogLevel(LogLevel level) {
 } // namespace
 
 struct LoggerBackend {
+    friend class Logger;
+
     mutable std::mutex mutex;
     std::ofstream file;
     bool enabled = true;
@@ -93,9 +107,7 @@ struct LoggerBackend {
     std::shared_ptr<spdlog::logger> logger;
 #endif
 
-    LoggerBackend() {
-        reopenFile();
-    }
+    LoggerBackend() = default;
 
     ~LoggerBackend() {
         flush();
@@ -229,6 +241,15 @@ private:
     }
 };
 
+namespace {
+struct LoggerRegistry {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::weak_ptr<Logger>> map;
+    LoggerRegistry() = default;
+    ~LoggerRegistry() = default;
+};
+} // namespace
+
 Logger& Logger::root() {
     static auto backend = std::make_shared<LoggerBackend>();
     static Logger logger("", backend);
@@ -240,20 +261,18 @@ std::shared_ptr<Logger> Logger::get(std::string_view name) {
         return std::shared_ptr<Logger>(&root(), [](Logger*) {});
     }
 
-    static std::mutex registryMutex;
-    static std::unordered_map<std::string, std::weak_ptr<Logger>> registry;
-
-    std::lock_guard<std::mutex> lock(registryMutex);
+    static auto s_registry = std::make_shared<LoggerRegistry>();
+    std::lock_guard<std::mutex> lock(s_registry->mutex);
     const std::string key(name);
-    auto it = registry.find(key);
-    if (it != registry.end()) {
+    auto it = s_registry->map.find(key);
+    if (it != s_registry->map.end()) {
         if (auto logger = it->second.lock()) {
             return logger;
         }
     }
 
     auto logger = std::shared_ptr<Logger>(new Logger(key, root().m_backend));
-    registry[key] = logger;
+    s_registry->map[key] = logger;
     return logger;
 }
 
@@ -408,6 +427,14 @@ void Logger::write(LogLevel level, const std::string& message) {
 
     const std::string formattedMessage = modulePrefix() + message;
 
+    // 首次写日志时确保文件已打开
+    {
+        std::lock_guard<std::mutex> lazyLock(m_backend->mutex);
+        if (!m_backend->file.is_open()) {
+            m_backend->reopenFile();
+        }
+    }
+
 #if defined(VIDEOPLAY_HAS_SPDLOG)
     if (!logger) {
         return;
@@ -422,6 +449,10 @@ void Logger::write(LogLevel level, const std::string& message) {
 
     const std::string formatted = "[" + currentTimestamp() + "] [" +
                                   levelToString(level) + "] " + formattedMessage;
+
+    if (!m_backend->file.is_open()) {
+        m_backend->reopenFile();
+    }
 
     if (m_backend->file.is_open()) {
         m_backend->file << formatted << '\n';

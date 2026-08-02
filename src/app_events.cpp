@@ -217,6 +217,37 @@ void VideoPlayerApp::handleMenu(int menuId) {
                     " at " + formatTime(targetPos));
             }
         }
+        return;
+    }
+
+    // 音轨切换菜单项 ID 范围 400-449
+    if (menuId >= 400 && menuId < 450) {
+        int trackIndex = menuId - 400;
+        if (m_player && m_renderer) {
+            if (m_player->setAudioTrack(trackIndex)) {
+                m_renderer->setAudioTracks(m_player->audioTracks(),
+                                           m_player->currentAudioTrack());
+                m_renderer->showOSD(OSDType::Info, "音轨已切换");
+            }
+        }
+        return;
+    }
+
+    // 字幕切换菜单项 ID 范围 450-499
+    if (menuId >= 450 && menuId < 500) {
+        int trackIndex = (menuId == 450) ? -1 : (menuId - 451);
+        if (m_player && m_renderer) {
+            if (m_player->setSubtitleTrack(trackIndex)) {
+                m_renderer->setSubtitleTracks(m_player->subtitleTracks(),
+                                              m_player->currentSubtitleTrack());
+                if (trackIndex == -1) {
+                    m_renderer->showOSD(OSDType::Info, "内封字幕已关闭");
+                } else {
+                    m_renderer->showOSD(OSDType::Info, "字幕轨已切换");
+                }
+            }
+        }
+        return;
     }
 }
 

@@ -41,6 +41,9 @@ using MuteCallback = std::function<void(bool)>;
 using VideoFrameCallback = std::function<void(VideoFrame)>;
 using NetworkStateCallback = std::function<void(NetworkState)>;
 
+// 内封字幕回调：ptsMs=字幕开始时间(毫秒)，text=字幕文本
+using SubtitleTextCallback = std::function<void(int64_t ptsMs, const std::string& text)>;
+
 class FFmpegPlayer {
 public:
     FFmpegPlayer();
@@ -83,6 +86,7 @@ public:
     void setMuteCallback(MuteCallback callback);
     void setVideoFrameCallback(VideoFrameCallback callback);
     void setNetworkStateCallback(NetworkStateCallback callback);
+    void setSubtitleTextCallback(SubtitleTextCallback callback);
 
     bool isPreloading() const;
     bool checkPreloadComplete();
@@ -92,6 +96,16 @@ public:
     std::vector<ChapterInfo> chapters() const;
     void setChapters(const std::vector<ChapterInfo>& chapters);
     MediaInfo mediaInfo() const;
+
+    // 多音轨/多字幕轨支持
+    const std::vector<TrackInfo>& audioTracks() const { return m_audioTracks; }
+    const std::vector<TrackInfo>& subtitleTracks() const { return m_subtitleTracks; }
+    int currentAudioTrack() const { return m_currentAudioTrack; }
+    int currentSubtitleTrack() const { return m_currentSubtitleTrack; }
+    // 切换音轨（trackIndex 为 m_audioTracks 的下标，-1 表示关闭）
+    bool setAudioTrack(int trackIndex);
+    // 切换内封字幕轨（trackIndex 为 m_subtitleTracks 的下标，-1 表示关闭内封字幕）
+    bool setSubtitleTrack(int trackIndex);
 
 private:
     struct StreamContext {
@@ -137,6 +151,14 @@ private:
     std::string buildAudioFilterDescription() const;
     void setNetworkState(NetworkState state);
 
+    // 多轨道支持
+    void scanTracks();
+    std::string streamTitle(AVStream* stream) const;
+    std::string streamLanguage(AVStream* stream) const;
+    bool openAudioStream(int streamIndex);
+    bool openSubtitleStream(int streamIndex);
+    void closeSubtitleStream();
+
     AVFormatContext* m_formatContext = nullptr;
     VideoContext m_videoCtx;
     AudioContext m_audioCtx;
@@ -165,6 +187,12 @@ private:
     std::string m_filePath;
     int64_t m_duration = 0;
     std::vector<ChapterInfo> m_chapters;
+    // 多轨道支持
+    std::vector<TrackInfo> m_audioTracks;
+    std::vector<TrackInfo> m_subtitleTracks;
+    int m_currentAudioTrack = 0;       // m_audioTracks 下标
+    int m_currentSubtitleTrack = -1;   // m_subtitleTracks 下标，-1=关闭内封字幕
+    StreamContext m_subtitleCtx;       // 当前内封字幕流上下文
     std::atomic<int64_t> m_position{0};
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};
@@ -203,6 +231,7 @@ private:
     MuteCallback m_muteCallback;
     VideoFrameCallback m_videoFrameCallback;
     NetworkStateCallback m_networkStateCallback;
+    SubtitleTextCallback m_subtitleTextCallback;
 };
 
 } // namespace VideoPlay

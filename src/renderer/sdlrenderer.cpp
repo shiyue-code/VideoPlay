@@ -701,6 +701,26 @@ void SDLRenderer::setChapterSeekCallback(ChapterSeekCallback callback) {
     m_chapterSeekCallback = callback;
 }
 
+void SDLRenderer::setAudioTrackCallback(AudioTrackCallback callback) {
+    m_audioTrackCallback = std::move(callback);
+}
+
+void SDLRenderer::setSubtitleTrackCallback(SubtitleTrackCallback callback) {
+    m_subtitleTrackCallback = std::move(callback);
+}
+
+void SDLRenderer::setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex) {
+    m_audioTracks = tracks;
+    m_currentAudioTrack = currentIndex;
+    updateTrackMenus();
+}
+
+void SDLRenderer::setSubtitleTracks(const std::vector<TrackInfo>& tracks, int currentIndex) {
+    m_subtitleTracks = tracks;
+    m_currentSubtitleTrack = currentIndex;
+    updateTrackMenus();
+}
+
 void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
     m_chapters = chapters;
     m_hasChapters = !chapters.empty();
@@ -712,8 +732,8 @@ void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {
 }
 
 void SDLRenderer::updateChapterMenuItems() {
-    if (m_menus.size() < 3) return; // Chapter menu is index 2
-    Menu& chapterMenu = m_menus[2];
+    if (m_menus.size() < 5) return; // Chapter menu is index 4 (after 文件/播放/音轨/字幕)
+    Menu& chapterMenu = m_menus[4];
     
     chapterMenu.items.clear();
     
