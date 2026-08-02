@@ -25,7 +25,7 @@ namespace {
 
 bool EpisodeDetector::isMediaFile(const std::string& path)
 {
-    std::string ext = std::filesystem::path(path).extension().string();
+    std::string ext = std::filesystem::u8path(path).extension().u8string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return std::find(kMediaExtensions.begin(), kMediaExtensions.end(), ext) != kMediaExtensions.end();
@@ -47,7 +47,7 @@ std::string EpisodeDetector::normalizeSeriesName(const std::string& name)
 std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeInfo(
     const std::string& filename)
 {
-    std::string name = std::filesystem::path(filename).stem().string();
+    std::string name = std::filesystem::u8path(filename).stem().u8string();
     int season = 0;
     int episode = 0;
     std::string seriesName = name;
@@ -177,13 +177,13 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
 std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& filePath)
 {
-    if (!std::filesystem::exists(filePath))
+    if (!std::filesystem::exists(std::filesystem::u8path(filePath)))
     {
         return std::nullopt;
     }
 
-    std::filesystem::path path(filePath);
-    std::string filename = path.filename().string();
+    std::filesystem::path path = std::filesystem::u8path(filePath);
+    std::string filename = path.filename().u8string();
 
     auto selfInfo = parseEpisodeInfo(filename);
     if (!selfInfo)
@@ -220,13 +220,13 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
                 continue;
             }
 
-            std::string otherPath = entry.path().string();
+            std::string otherPath = entry.path().u8string();
             if (!isMediaFile(otherPath))
             {
                 continue;
             }
 
-            std::string otherName = entry.path().filename().string();
+            std::string otherName = entry.path().filename().u8string();
             auto otherInfo = parseEpisodeInfo(otherName);
             if (!otherInfo)
             {
@@ -305,7 +305,8 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
     for (size_t i = 0; i < group.episodes.size(); ++i)
     {
         try {
-            if (std::filesystem::equivalent(group.episodes[i].path, filePath))
+            if (std::filesystem::equivalent(std::filesystem::u8path(group.episodes[i].path),
+                                            std::filesystem::u8path(filePath)))
             {
                 group.currentIndex = i;
                 break;

@@ -189,6 +189,7 @@ private:
     std::deque<VideoFrame> m_videoFrameQueue;
     std::mutex m_videoQueueMutex;
     static constexpr size_t kMaxVideoQueueSize = 10;
+    static constexpr int kMaxAudioQueueMs = 1000;
     static constexpr int kPreloadAudioMs = 40;
     static constexpr int kPreloadTimeoutMs = 1000;
     void pushVideoFrame(VideoFrame&& frame);

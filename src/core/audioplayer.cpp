@@ -75,17 +75,23 @@ void AudioPlayer::play() {
 
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_playing) {
-        if (SDL_ResumeAudioStreamDevice(m_stream)) {
+        // 尝试同时用 stream 和 device ID 恢复，确保设备真正开始播放
+        bool streamResumed = SDL_ResumeAudioStreamDevice(m_stream);
+        bool deviceResumed = (m_deviceId != 0) ? SDL_ResumeAudioDevice(m_deviceId) : true;
+        if (streamResumed || deviceResumed) {
             m_playing = true;
             m_paused = false;
             m_timerStart = Clock::now();
             m_timerRunning = true;
-            logger().debug("Audio playback started");
+            bool streamPaused = SDL_AudioStreamDevicePaused(m_stream);
+            logger().debug("Audio playback started, streamPaused=" +
+                           std::string(streamPaused ? "true" : "false"));
         } else {
             logger().error("Failed to start audio stream: " + std::string(SDL_GetError()));
         }
     } else if (m_paused) {
-        if (SDL_ResumeAudioStreamDevice(m_stream)) {
+        if (SDL_ResumeAudioStreamDevice(m_stream) ||
+            (m_deviceId != 0 && SDL_ResumeAudioDevice(m_deviceId))) {
             m_paused = false;
             m_timerStart = Clock::now();
             m_timerRunning = true;
@@ -100,6 +106,9 @@ void AudioPlayer::pause() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_paused) {
         SDL_PauseAudioStreamDevice(m_stream);
+        if (m_deviceId != 0) {
+            SDL_PauseAudioDevice(m_deviceId);
+        }
         m_paused = true;
         if (m_timerRunning) {
             auto physicalElapsed = std::chrono::duration<double, std::milli>(Clock::now() - m_timerStart).count();
@@ -116,6 +125,9 @@ void AudioPlayer::stop() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_playing) {
         SDL_PauseAudioStreamDevice(m_stream);
+        if (m_deviceId != 0) {
+            SDL_PauseAudioDevice(m_deviceId);
+        }
         SDL_ClearAudioStream(m_stream);
         m_playing = false;
         m_paused = false;

@@ -88,7 +88,7 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     if (networkSource) {
         setNetworkState(NetworkState::Connecting);
     }
-    if (!networkSource && !std::filesystem::exists(filePath)) {
+    if (!networkSource && !std::filesystem::exists(std::filesystem::u8path(filePath))) {
         if (m_errorCallback) {
             m_errorCallback("File not found: " + filePath);
         }
@@ -182,17 +182,43 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
         logger().info("Found " + std::to_string(m_chapters.size()) + " chapters");
     }
     
+    // 使用 av_find_best_stream 选择最佳视频/音频流，避免选到封面图等附加流
+    int bestVideoIdx = av_find_best_stream(m_formatContext, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    int bestAudioIdx = av_find_best_stream(m_formatContext, AVMEDIA_TYPE_AUDIO, -1, bestVideoIdx, nullptr, 0);
+
+    // 如果 av_find_best_stream 仍选到了 attached_pic，手动找第一个非 attached_pic 的视频流
+    if (bestVideoIdx >= 0) {
+        AVStream* vs = m_formatContext->streams[bestVideoIdx];
+        if (vs->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
+            (vs->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+            logger().warning("Best video stream is attached_pic, searching for real video stream");
+            bestVideoIdx = -1;
+            for (unsigned int i = 0; i < m_formatContext->nb_streams; i++) {
+                AVStream* s = m_formatContext->streams[i];
+                if (s->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
+                    !(s->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+                    bestVideoIdx = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+    }
+
     for (unsigned int i = 0; i < m_formatContext->nb_streams; i++) {
         AVStream* stream = m_formatContext->streams[i];
         AVCodecParameters* codecPar = stream->codecpar;
         const AVCodec* codec = avcodec_find_decoder(codecPar->codec_id);
-        
+
         if (!codec) continue;
-        
-        if (codecPar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            logger().info("Found video stream: " + 
-                                   std::to_string(codecPar->width) + "x" + 
-                                   std::to_string(codecPar->height));
+
+        bool isBestVideo = (static_cast<int>(i) == bestVideoIdx);
+        bool isBestAudio = (static_cast<int>(i) == bestAudioIdx);
+
+        if (codecPar->codec_type == AVMEDIA_TYPE_VIDEO && isBestVideo) {
+            logger().info("Selected video stream " + std::to_string(i) + ": " +
+                                   std::to_string(codecPar->width) + "x" +
+                                   std::to_string(codecPar->height) +
+                                   " (disposition=0x" + std::to_string(stream->disposition) + ")");
 
             m_mediaInfo.hasVideo = true;
             m_mediaInfo.videoCodec = codecDisplayName(codec, codecPar->codec_id);
@@ -203,11 +229,11 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
                 m_mediaInfo.fps = rationalToDouble(stream->r_frame_rate);
             }
             m_mediaInfo.videoBitrate = codecPar->bit_rate;
-            
+
             m_videoCtx.stream = stream;
             m_videoCtx.codecContext = avcodec_alloc_context3(codec);
             if (!m_videoCtx.codecContext) continue;
-            
+
             avcodec_parameters_to_context(m_videoCtx.codecContext, codecPar);
             m_videoCtx.codecContext->thread_count = 4;
             m_videoCtx.codecContext->thread_type = FF_THREAD_FRAME;
@@ -232,12 +258,12 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
                 m_mediaInfo.hardwareDecoder = true;
                 m_mediaInfo.hardwareDevice = hardwareDeviceName(m_hwDeviceType);
             }
-            
+
             m_videoCtx.startTime = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : 0;
             initializeVideoContext();
-            
-        } else if (codecPar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            logger().info("Found audio stream: " + 
+
+        } else if (codecPar->codec_type == AVMEDIA_TYPE_AUDIO && isBestAudio) {
+            logger().info("Selected audio stream " + std::to_string(i) + ": " +
                                    std::to_string(codecPar->ch_layout.nb_channels) + " channels, " +
                                    std::to_string(codecPar->sample_rate) + " Hz");
 
@@ -246,22 +272,22 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             m_mediaInfo.sampleRate = codecPar->sample_rate;
             m_mediaInfo.channels = codecPar->ch_layout.nb_channels;
             m_mediaInfo.audioBitrate = codecPar->bit_rate;
-            
+
             m_audioCtx.stream = stream;
             m_audioCtx.codecContext = avcodec_alloc_context3(codec);
             if (!m_audioCtx.codecContext) continue;
-            
+
             avcodec_parameters_to_context(m_audioCtx.codecContext, codecPar);
             if (avcodec_open2(m_audioCtx.codecContext, codec, nullptr) < 0) {
                 avcodec_free_context(&m_audioCtx.codecContext);
                 continue;
             }
-            
+
             m_audioCtx.startTime = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : 0;
             initializeAudioContext();
         }
     }
-    
+
     if (!m_videoCtx.codecContext && !m_audioCtx.codecContext) {
         if (m_errorCallback) {
             m_errorCallback("No supported streams found");
@@ -403,8 +429,11 @@ void FFmpegPlayer::releaseHardwareDecoder() {
 }
 
 AVPixelFormat FFmpegPlayer::selectHardwareFormat(AVCodecContext* ctx, const AVPixelFormat* pixFmts) {
+    if (!pixFmts) {
+        return AV_PIX_FMT_NONE;
+    }
     auto* player = static_cast<FFmpegPlayer*>(ctx ? ctx->opaque : nullptr);
-    if (player) {
+    if (player && player->m_hwPixelFormat != AV_PIX_FMT_NONE) {
         for (const AVPixelFormat* fmt = pixFmts; *fmt != AV_PIX_FMT_NONE; ++fmt) {
             if (*fmt == player->m_hwPixelFormat) {
                 return *fmt;
@@ -1042,6 +1071,12 @@ void FFmpegPlayer::decodeLoop() {
             }
         }
         else if (m_audioCtx.stream && packet->stream_index == m_audioCtx.stream->index && m_audioCtx.codecContext) {
+            // Audio backpressure: skip decoding if audio buffer is already full enough.
+            // This prevents unbounded audio buffer growth without blocking video decoding.
+            if (m_audioPlayer && m_audioPlayer->queuedMs() > kMaxAudioQueueMs) {
+                av_packet_unref(packet);
+                continue;
+            }
             // Decode all available audio frames from this packet
             ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
             if (ret == AVERROR(EAGAIN)) {

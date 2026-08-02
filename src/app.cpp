@@ -58,7 +58,8 @@ namespace {
 
     std::string displayNameForSource(const std::string& path) {
         if (!isNetworkUrl(path)) {
-            return std::filesystem::path(path).filename().string();
+            size_t slash = path.find_last_of("/\\");
+            return (slash != std::string::npos && slash + 1 < path.size()) ? path.substr(slash + 1) : path;
         }
         size_t query = path.find_first_of("?#");
         std::string trimmed = query == std::string::npos ? path : path.substr(0, query);
@@ -329,7 +330,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
     if (argc <= 1) {
         auto session = Settings::instance().lastSession();
         if (session.hasValidSession && !session.filePath.empty() &&
-            (isNetworkUrl(session.filePath) || std::filesystem::exists(session.filePath))) {
+            (isNetworkUrl(session.filePath) || std::filesystem::exists(std::filesystem::u8path(session.filePath)))) {
             logger().info("Restoring last session: " + session.filePath);
             // 重建单文件播放列表
             m_playlist.push_back(session.filePath);
@@ -359,7 +360,7 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
     // 处理命令行参数
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (isNetworkUrl(arg) || std::filesystem::exists(arg)) {
+        if (isNetworkUrl(arg) || std::filesystem::exists(std::filesystem::u8path(arg))) {
             addToPlaylist(arg);
         }
     }
@@ -623,7 +624,7 @@ void VideoPlayerApp::render() {
 
 void VideoPlayerApp::openFile(const std::string& path) {
     const bool networkSource = isNetworkUrl(path);
-    if (!networkSource && !std::filesystem::exists(path)) {
+    if (!networkSource && !std::filesystem::exists(std::filesystem::u8path(path))) {
         logger().error("File not found: " + path);
         return;
     }
@@ -797,17 +798,17 @@ void VideoPlayerApp::openFolderDialog() {
 }
 
 void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
-    std::filesystem::path video(videoPath);
-    std::filesystem::path srtPath = video.parent_path() / (video.stem().string() + ".srt");
-    std::filesystem::path assPath = video.parent_path() / (video.stem().string() + ".ass");
-    std::filesystem::path vttPath = video.parent_path() / (video.stem().string() + ".vtt");
+    std::filesystem::path video = std::filesystem::u8path(videoPath);
+    std::filesystem::path srtPath = video.parent_path() / (video.stem().u8string() + ".srt");
+    std::filesystem::path assPath = video.parent_path() / (video.stem().u8string() + ".ass");
+    std::filesystem::path vttPath = video.parent_path() / (video.stem().u8string() + ".vtt");
 
     if (std::filesystem::exists(srtPath)) {
-        m_currentSubtitle = srtPath.string();
+        m_currentSubtitle = srtPath.u8string();
     } else if (std::filesystem::exists(assPath)) {
-        m_currentSubtitle = assPath.string();
+        m_currentSubtitle = assPath.u8string();
     } else if (std::filesystem::exists(vttPath)) {
-        m_currentSubtitle = vttPath.string();
+        m_currentSubtitle = vttPath.u8string();
     } else {
         m_currentSubtitle.clear();
         if (m_subtitleParser) {

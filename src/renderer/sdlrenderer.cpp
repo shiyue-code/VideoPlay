@@ -527,7 +527,7 @@ void SDLRenderer::updateRecentFilesMenu() {
         // 在退出前添加分隔线和最近文件
         fixedItems.insert(fixedItems.end() - 1, {0, "", "", true}); // 分隔线
         for (size_t i = 0; i < recent.size() && i < 10; ++i) {
-            std::string label = std::filesystem::path(recent[i]).filename().string();
+            std::string label = std::filesystem::u8path(recent[i]).filename().u8string();
             if (label.length() > 40) {
                 label = label.substr(0, 37) + "...";
             }
