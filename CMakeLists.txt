@@ -148,6 +148,7 @@ set(SOURCES
     src/ai/gemini_client.cpp
     src/ai/mimo_client.cpp
     src/ai/searchengine.cpp
+    src/utils/subprocess_runner.cpp
 )
 
 if(WIN32)
@@ -166,6 +167,7 @@ set(HEADERS
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/utils/string_utils.h
+    src/utils/subprocess_runner.h
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h

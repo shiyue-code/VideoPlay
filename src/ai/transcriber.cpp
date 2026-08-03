@@ -2,6 +2,7 @@
 #include "ai/aianalyzer.h"
 #include "ai/ai_utils.h"
 #include "ai/cache_manager.h"
+#include "utils/subprocess_runner.h"
 #include "subtitles/subtitleparser.h"
 #include <filesystem>
 #include <fstream>
@@ -338,7 +339,7 @@ std::string Transcriber::extractVideoForAI(const std::string& videoPath,
         if (onProgress) onProgress(0.2f + i * 0.1f, "正在转码视频 (" + std::string(preset.name) + ")...");
         
         std::string ffmpegErr;
-        int ret = runLowImpactProcess(cmd, ffmpegErr);
+        int ret = SubprocessRunner::run(cmd, ffmpegErr);
         if (ret != 0) {
             logger().error("[AI] FFmpeg failed with code: " + std::to_string(ret));
             if (!ffmpegErr.empty()) {
