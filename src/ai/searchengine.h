@@ -43,7 +43,6 @@ private:
     bool m_hasIndex = false;
 
     std::vector<std::string> tokenize(const std::string& text) const;
-    std::string toLower(const std::string& str) const;
     float calculateRelevance(const std::string& query, const std::string& text) const;
 };
 

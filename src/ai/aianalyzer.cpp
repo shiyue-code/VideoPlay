@@ -1,5 +1,6 @@
 ﻿#include "ai/aianalyzer.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
@@ -134,28 +135,6 @@ int runLowImpactProcess(const std::string& command, std::string& stdErr) {
     }
     return pclose(pipe.get());
 #endif
-}
-
-std::string trim(const std::string& value) {
-    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-        return std::isspace(c);
-    }).base();
-    return start < end ? std::string(start, end) : std::string();
-}
-
-std::string toLower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
-
-bool startsWith(const std::string& value, const std::string& prefix) {
-    return value.size() >= prefix.size() &&
-           std::equal(prefix.begin(), prefix.end(), value.begin());
 }
 
 std::string normalizeProvider(std::string provider, const std::string& baseUrl,

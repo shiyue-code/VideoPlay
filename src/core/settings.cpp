@@ -1,5 +1,6 @@
 ﻿#include "core/settings.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -16,25 +17,9 @@ Logger& logger() {
     return *logger;
 }
 
-std::string trimSetting(const std::string& value) {
-    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-        return std::isspace(c);
-    }).base();
-    return start < end ? std::string(start, end) : std::string();
-}
-
-std::string lowerSetting(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
 
 std::string normalizeAIProvider(std::string provider) {
-    provider = lowerSetting(trimSetting(provider));
+    provider = toLower(trim(provider));
     if (provider.empty() || provider == "auto") {
         return "mimo";
     }
@@ -55,7 +40,7 @@ AIProviderConfig defaultAIProviderConfig(const std::string& provider) {
 }
 
 void sanitizeAIBaseUrl(std::string& url) {
-    url = trimSetting(url);
+    url = trim(url);
 
     size_t firstHttps = url.find("https://");
     if (firstHttps != std::string::npos) {
@@ -78,11 +63,11 @@ void sanitizeAIBaseUrl(std::string& url) {
 
 void normalizeAIProviderConfig(const std::string& provider, AIProviderConfig& providerConfig) {
     sanitizeAIBaseUrl(providerConfig.baseUrl);
-    providerConfig.model = trimSetting(providerConfig.model);
+    providerConfig.model = trim(providerConfig.model);
 
     AIProviderConfig defaults = defaultAIProviderConfig(provider);
-    std::string lowerUrl = lowerSetting(providerConfig.baseUrl);
-    std::string lowerModel = lowerSetting(providerConfig.model);
+    std::string lowerUrl = toLower(providerConfig.baseUrl);
+    std::string lowerModel = toLower(providerConfig.model);
 
     if (provider == "gemini") {
         if (providerConfig.baseUrl.empty() ||

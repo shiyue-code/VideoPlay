@@ -18,66 +18,6 @@ uint8_t scaledAlpha(int base, float alpha)
     return static_cast<uint8_t>(std::clamp(value, 0, 255));
 }
 
-bool isSubmenuParent(int id)
-{
-    return id == 58 || id == 59 || id == 69 || id == 89;
-}
-
-int submenuItemCount(int parentId)
-{
-    switch (parentId) {
-        case 58: return 3; // AB loop
-        case 59: return 3; // Loop mode
-        case 69: return 4; // Aspect mode
-        case 89: return 4; // Audio filter
-        default: return 0;
-    }
-}
-
-int submenuItemId(int parentId, int index)
-{
-    switch (parentId) {
-        case 58: return 90 + index;
-        case 59: return 60 + index;
-        case 69: return 70 + index;
-        case 89: return 93 + index;
-        default: return 0;
-    }
-}
-
-const char* submenuItemLabel(int parentId, int index)
-{
-    static constexpr const char* abLoopLabels[] = { "设置 A 点", "设置 B 点", "清除" };
-    static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
-    static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
-    static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
-
-    switch (parentId) {
-        case 58: return abLoopLabels[index];
-        case 59: return loopLabels[index];
-        case 69: return aspectLabels[index];
-        case 89: return audioFilterLabels[index];
-        default: return "";
-    }
-}
-
-std::string submenuParentLabel(const MenuItem& item, int loopMode, AspectMode aspectMode,
-                               AudioFilterPreset audioFilterPreset)
-{
-    if (item.id == 59) {
-        int index = std::clamp(loopMode, 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    if (item.id == 69) {
-        int index = std::clamp(static_cast<int>(aspectMode), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    if (item.id == 89) {
-        int index = std::clamp(static_cast<int>(audioFilterPreset), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    return item.label;
-}
 }
 
 

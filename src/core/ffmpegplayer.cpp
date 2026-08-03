@@ -29,19 +29,6 @@ namespace {
     const double VIDEO_FRAME_TOLERANCE = 0.005;
     const int AUDIO_QUEUE_SIZE = 100;
 
-    bool isNetworkUrl(const std::string& path) {
-        auto startsWith = [&path](const char* prefix) {
-            size_t len = std::strlen(prefix);
-            return path.size() >= len &&
-                   std::equal(prefix, prefix + len, path.begin(),
-                              [](char a, char b) {
-                                  return std::tolower(static_cast<unsigned char>(a)) ==
-                                         std::tolower(static_cast<unsigned char>(b));
-                              });
-        };
-        return startsWith("http://") || startsWith("https://") ||
-               startsWith("rtsp://") || startsWith("rtmp://");
-    }
 
     double rationalToDouble(AVRational value) {
         if (value.num == 0 || value.den == 0) {

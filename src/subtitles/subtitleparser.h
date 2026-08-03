@@ -35,7 +35,6 @@ private:
     bool parseVTT(const std::string& content);
     int64_t parseTimecode(const std::string& timecode);
     std::string removeFormatting(const std::string& text);
-    std::string trim(const std::string& str);
 
     std::vector<SubtitleEntry> m_entries;
     std::string m_filePath;

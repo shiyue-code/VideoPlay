@@ -1,5 +1,6 @@
 #include "renderer/settingsdialog.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,25 +26,8 @@ Logger& logger() {
     return *logger;
 }
 
-std::string trimCopy(const std::string& value) {
-    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-        return std::isspace(c);
-    }).base();
-    return start < end ? std::string(start, end) : std::string();
-}
-
-std::string lowerCopy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
-
 std::string normalizeProvider(std::string provider) {
-    provider = lowerCopy(trimCopy(provider));
+    provider = toLower(trim(provider));
     if (provider.empty() || provider == "auto") {
         return "mimo";
     }

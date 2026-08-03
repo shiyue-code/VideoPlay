@@ -1,5 +1,6 @@
 ﻿#include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -133,12 +134,6 @@ int64_t SubtitleParser::offset() const {
 
 void SubtitleParser::adjustOffset(int64_t deltaMs) {
     m_offset += deltaMs;
-}
-
-std::string SubtitleParser::trim(const std::string& str) {
-    auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
-    auto end = std::find_if_not(str.rbegin(), str.rend(), [](unsigned char c) { return std::isspace(c); }).base();
-    return (start < end) ? std::string(start, end) : "";
 }
 
 std::string SubtitleParser::removeFormatting(const std::string& text) {

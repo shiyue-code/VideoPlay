@@ -3,6 +3,7 @@
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include "subtitles/subtitleparser.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -18,22 +19,7 @@ Logger& logger() {
     return *logger;
 }
 
-std::string trimCopy(const std::string& value) {
-    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-        return std::isspace(c);
-    }).base();
-    return start < end ? std::string(start, end) : std::string();
-}
 
-std::string lowerCopy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
 }
 
 
@@ -531,7 +517,7 @@ void VideoPlayerApp::showAISettings() {
     SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont());
     dialog.show(settings, [this](const AISettings& newSettings) {
         AIConfig config = Settings::instance().aiConfig();
-        config.provider = lowerCopy(trimCopy(newSettings.provider));
+        config.provider = toLower(trim(newSettings.provider));
         config.analysisDetailLevel = std::clamp(newSettings.analysisDetailLevel, 0, 2);
         if (config.provider.empty() || config.provider == "auto") {
             config.provider = "mimo";
@@ -543,7 +529,7 @@ void VideoPlayerApp::showAISettings() {
 
         config.providers.clear();
         for (const auto& entry : newSettings.providers) {
-            std::string providerId = lowerCopy(trimCopy(entry.first));
+            std::string providerId = toLower(trim(entry.first));
             if (providerId.empty() || providerId == "auto") {
                 providerId = "mimo";
             } else if (providerId == "google") {
@@ -553,9 +539,9 @@ void VideoPlayerApp::showAISettings() {
             }
 
             config.providers[providerId] = {
-                trimCopy(entry.second.baseUrl),
+                trim(entry.second.baseUrl),
                 entry.second.apiKey,
-                trimCopy(entry.second.model)
+                trim(entry.second.model)
             };
         }
 

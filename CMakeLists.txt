@@ -161,6 +161,7 @@ set(HEADERS
     src/core/episodedetector.h
     src/subtitles/subtitleparser.h
     src/utils/logger.h
+    src/utils/string_utils.h
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/windowframe.h

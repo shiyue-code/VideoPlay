@@ -1,5 +1,7 @@
 #pragma once
 
+#include "utils/string_utils.h"
+
 #include <string>
 #include <cstdint>
 #include <functional>
@@ -284,6 +286,13 @@ struct SearchResult {
     float relevance = 0.0f;
     int source = 0;         // 0=转录, 1=外挂字幕
 };
+
+// 判断路径/URL 是否为网络串流
+inline bool isNetworkUrl(const std::string& path) {
+    const std::string lower = toLower(path);
+    return startsWith(lower, "http://") || startsWith(lower, "https://") ||
+           startsWith(lower, "rtsp://") || startsWith(lower, "rtmp://");
+}
 
 struct AIAnalysisResult {
     std::string summary;

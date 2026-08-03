@@ -1,5 +1,6 @@
 ﻿#include "ai/httpclient.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <sstream>
 #include <fstream>
 #include <filesystem>
@@ -22,22 +23,6 @@ Logger& logger() {
     return *logger;
 }
 
-std::string trimHeaderValue(const std::string& value) {
-    auto start = std::find_if_not(value.begin(), value.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-        return std::isspace(c);
-    }).base();
-    return start < end ? std::string(start, end) : std::string();
-}
-
-std::string lowerHeaderName(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
 
 std::string narrowHeaderText(const std::wstring& value) {
     std::string result;
@@ -79,7 +64,7 @@ std::map<std::string, std::string> readResponseHeaders(HINTERNET hRequest) {
         if (colon != std::wstring::npos) {
             std::string name = narrowHeaderText(line.substr(0, colon));
             std::string value = narrowHeaderText(line.substr(colon + 1));
-            headers[lowerHeaderName(name)] = trimHeaderValue(value);
+            headers[toLower(name)] = trim(value);
         }
 
         pos = end + 2;

@@ -1,5 +1,6 @@
 #include "ai/searchengine.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <algorithm>
 #include <sstream>
 #include <cctype>
@@ -139,12 +140,6 @@ std::vector<std::string> SearchEngine::tokenize(const std::string& text) const {
     return tokens;
 }
 
-std::string SearchEngine::toLower(const std::string& str) const {
-    std::string result = str;
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return result;
-}
 
 float SearchEngine::calculateRelevance(const std::string& query, const std::string& text) const {
     std::string lowerQuery = toLower(query);

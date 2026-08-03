@@ -1,4 +1,5 @@
 ﻿#include "utils/logger.h"
+#include "utils/string_utils.h"
 
 #include <algorithm>
 #include <chrono>
@@ -25,12 +26,6 @@
 namespace VideoPlay {
 
 namespace {
-
-std::string toLower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value;
-}
 
 std::string defaultLogFilePath() {
 #ifdef _WIN32

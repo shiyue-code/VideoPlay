@@ -17,64 +17,6 @@ constexpr int kTopMenuX = 10;
 constexpr int kTopMenuPaddingX = 16;
 constexpr int kTopMenuGap = 8;
 
-bool isSubmenuParent(int id)
-{
-    return id == 58 || id == 59 || id == 69 || id == 89;
-}
-
-int submenuItemCount(int parentId)
-{
-    switch (parentId) {
-        case 58: return 3;
-        case 59: return 3;
-        case 69: return 4;
-        case 89: return 4;
-        default: return 0;
-    }
-}
-
-int submenuItemId(int parentId, int index)
-{
-    switch (parentId) {
-        case 58: return 90 + index;
-        case 59: return 60 + index;
-        case 69: return 70 + index;
-        case 89: return 93 + index;
-        default: return 0;
-    }
-}
-
-const char* submenuItemLabel(int parentId, int index)
-{
-    static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
-    static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
-    static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
-
-    switch (parentId) {
-        case 59: return loopLabels[index];
-        case 69: return aspectLabels[index];
-        case 89: return audioFilterLabels[index];
-        default: return "";
-    }
-}
-
-std::string submenuParentLabel(const MenuItem& item, int loopMode, AspectMode aspectMode,
-                               AudioFilterPreset audioFilterPreset)
-{
-    if (item.id == 59) {
-        int index = std::clamp(loopMode, 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    if (item.id == 69) {
-        int index = std::clamp(static_cast<int>(aspectMode), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    if (item.id == 89) {
-        int index = std::clamp(static_cast<int>(audioFilterPreset), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    return item.label;
-}
 }
 
 
