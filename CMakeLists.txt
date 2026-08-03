@@ -143,6 +143,10 @@ set(SOURCES
     src/renderer/settingsdialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
+    src/ai/transcriber.cpp
+    src/ai/cache_manager.cpp
+    src/ai/gemini_client.cpp
+    src/ai/mimo_client.cpp
     src/ai/searchengine.cpp
 )
 
@@ -170,6 +174,11 @@ set(HEADERS
     src/renderer/settingsdialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h
+    src/ai/transcriber.h
+    src/ai/cache_manager.h
+    src/ai/gemini_client.h
+    src/ai/mimo_client.h
+    src/ai/ai_utils.h
     src/ai/searchengine.h
 )
 
