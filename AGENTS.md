@@ -256,7 +256,7 @@ main.cpp
 ## Testing Strategy
 - 测试框架: Google Test (gtest)
 - 测试文件位于 `tests/`
-- **当前状态**: 测试配置损坏，需要修复 `tests/CMakeLists.txt` 中的目标引用和 Qt 依赖
+- **当前状态**: `tests/CMakeLists.txt` 已修复，使用 Google Test；`ctest -C Release --output-on-failure` 可运行 9 个测试
 
 ## Security Considerations
 - 文件路径处理使用 C++17 `std::filesystem`，避免缓冲区溢出
