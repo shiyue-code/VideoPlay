@@ -14,6 +14,8 @@
 #include <memory>
 #include <thread>
 #include <vector>
+#include <array>
+#include <cstdio>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -41,7 +43,7 @@ Logger& logger() {
 constexpr const char* kAnalysisCacheVersion = "detail-v2";
 constexpr const char* kVideoTranscodeCacheVersion = "transcode-v1";
 
-int runLowImpactProcess(const std::string& command) {
+int runLowImpactProcess(const std::string& command, std::string& stdErr) {
 #ifdef _WIN32
     // 命令行按 UTF-8 解析，避免 CJK 路径被当前代码页截断
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, nullptr, 0);
@@ -51,10 +53,24 @@ int runLowImpactProcess(const std::string& command) {
     std::vector<wchar_t> wcommand(wideLen);
     MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, wcommand.data(), wideLen);
 
+    // 创建 stderr 管道捕获 FFmpeg 错误输出
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE hRead = nullptr;
+    HANDLE hWrite = nullptr;
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+        return -1;
+    }
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
-    startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+    startupInfo.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
     startupInfo.wShowWindow = SW_HIDE;
+    startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startupInfo.hStdError = hWrite;
 
     PROCESS_INFORMATION processInfo{};
     BOOL ok = CreateProcessW(
@@ -62,25 +78,61 @@ int runLowImpactProcess(const std::string& command) {
         wcommand.data(),
         nullptr,
         nullptr,
-        FALSE,
+        TRUE,
         CREATE_NO_WINDOW | IDLE_PRIORITY_CLASS,
         nullptr,
         nullptr,
         &startupInfo,
         &processInfo);
 
+    CloseHandle(hWrite);
+
     if (!ok) {
+        CloseHandle(hRead);
         return static_cast<int>(GetLastError());
     }
 
-    WaitForSingleObject(processInfo.hProcess, INFINITE);
+    // 边等边读 stderr，避免子进程因管道满阻塞
+    while (WaitForSingleObject(processInfo.hProcess, 100) == WAIT_TIMEOUT) {
+        DWORD bytesAvailable = 0;
+        while (PeekNamedPipe(hRead, nullptr, 0, nullptr, &bytesAvailable, nullptr) && bytesAvailable > 0) {
+            std::vector<char> buf(bytesAvailable);
+            DWORD bytesRead = 0;
+            if (ReadFile(hRead, buf.data(), bytesAvailable, &bytesRead, nullptr)) {
+                stdErr.append(buf.data(), bytesRead);
+            }
+        }
+    }
+
+    // 读完剩余输出
+    while (true) {
+        DWORD bytesAvailable = 0;
+        if (!PeekNamedPipe(hRead, nullptr, 0, nullptr, &bytesAvailable, nullptr) || bytesAvailable == 0) {
+            break;
+        }
+        std::vector<char> buf(bytesAvailable);
+        DWORD bytesRead = 0;
+        if (!ReadFile(hRead, buf.data(), bytesAvailable, &bytesRead, nullptr)) {
+            break;
+        }
+        stdErr.append(buf.data(), bytesRead);
+    }
+
+    CloseHandle(hRead);
+
     DWORD exitCode = 1;
     GetExitCodeProcess(processInfo.hProcess, &exitCode);
     CloseHandle(processInfo.hThread);
     CloseHandle(processInfo.hProcess);
     return static_cast<int>(exitCode);
 #else
-    return system(command.c_str());
+    std::array<char, 1024> buffer;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen((command + " 2>&1").c_str(), "r"), pclose);
+    if (!pipe) return -1;
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        stdErr += buffer.data();
+    }
+    return pclose(pipe.get());
 #endif
 }
 
@@ -595,6 +647,12 @@ AIConfig AIAnalyzer::snapshotConfig() const {
 
 void AIAnalyzer::cancel() {
     m_cancelled = true;
+    for (auto& worker : m_workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    m_workers.clear();
 }
 
 std::string AIAnalyzer::getCacheDir() const {
@@ -685,7 +743,7 @@ std::string AIAnalyzer::getTranscodeCacheDir() const {
 std::string AIAnalyzer::getTranscodeCachePath(const std::string& sourceHash,
                                               int clipSeconds,
                                               int64_t maxOutputBytes) const {
-    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    std::filesystem::path cacheDir = std::filesystem::u8path(getTranscodeCacheDir());
     int64_t limitKb = std::max<int64_t>(1, maxOutputBytes / 1024);
     std::string fileName = sourceHash + "_clip" + std::to_string(clipSeconds) +
                            "_limit" + std::to_string(limitKb) + "kb_ai.mp4";
@@ -695,7 +753,7 @@ std::string AIAnalyzer::getTranscodeCachePath(const std::string& sourceHash,
 std::string AIAnalyzer::findReusableTranscodeCache(const std::string& sourceHash,
                                                    int clipSeconds,
                                                    int64_t maxOutputBytes) const {
-    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    std::filesystem::path cacheDir = std::filesystem::u8path(getTranscodeCacheDir());
     if (!std::filesystem::exists(cacheDir)) {
         return "";
     }
@@ -872,7 +930,7 @@ void AIAnalyzer::clearTranscodeCache(const std::string& videoPath) {
         return;
     }
 
-    std::filesystem::path cacheDir = getTranscodeCacheDir();
+    std::filesystem::path cacheDir = std::filesystem::u8path(getTranscodeCacheDir());
     std::string prefix = sourceHash + "_clip";
     size_t removedCount = 0;
 
@@ -1320,7 +1378,7 @@ void AIAnalyzer::analyze(const std::string& videoPath,
         return;
     }
 
-    std::thread([this, videoPath, config, provider, onComplete, onProgress, onError]() {
+    m_workers.emplace_back([this, videoPath, config, provider, onComplete, onProgress, onError]() {
         try {
             if (onProgress) onProgress(0.1f, "正在使用 " + provider.displayName + " 视频理解分析...");
 
@@ -1345,7 +1403,7 @@ void AIAnalyzer::analyze(const std::string& videoPath,
             logger().error("[AI] Analysis failed: " + std::string(e.what()));
             if (onError) onError(std::string("分析异常: ") + e.what());
         }
-    }).detach();
+    });
 }
 
 AIAnalysisResult AIAnalyzer::analyzeWithMimoVideoUnderstanding(const std::string& videoPath,
@@ -1950,7 +2008,7 @@ void AIAnalyzer::askVideoDirect(const std::string& videoPath,
         return;
     }
 
-    std::thread([this, videoPath, question, config, onComplete, onProgress, onError]() {
+    m_workers.emplace_back([this, videoPath, question, config, onComplete, onProgress, onError]() {
         try {
             bool errorReported = false;
             auto reportError = [&](const std::string& error) {
@@ -1984,7 +2042,7 @@ void AIAnalyzer::askVideoDirect(const std::string& videoPath,
         } catch (const std::exception& e) {
             if (onError) onError(std::string("API 搜索异常: ") + e.what());
         }
-    }).detach();
+    });
 }
 
 std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
@@ -2022,7 +2080,8 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         : static_cast<double>(maxDurationSeconds);
     int clipSeconds = std::max(1, static_cast<int>(std::ceil(effectiveDuration)));
     std::string outputPath = getTranscodeCachePath(sourceHash, clipSeconds, maxOutputBytes);
-    std::filesystem::create_directories(std::filesystem::path(outputPath).parent_path());
+    std::filesystem::path outputPathObj = std::filesystem::u8path(outputPath);
+    std::filesystem::create_directories(outputPathObj.parent_path());
 
     std::string reusablePath = findReusableTranscodeCache(sourceHash, clipSeconds, maxOutputBytes);
     if (!reusablePath.empty()) {
@@ -2051,8 +2110,8 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         
         if (i > 0) {
             logger().info("[AI] Retrying with lower quality: " + std::string(preset.name));
-            if (std::filesystem::exists(outputPath)) {
-                std::filesystem::remove(outputPath);
+            if (std::filesystem::exists(outputPathObj)) {
+                std::filesystem::remove(outputPathObj);
             }
         }
         
@@ -2078,14 +2137,18 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
         logger().info("[AI] FFmpeg command: " + cmd);
         if (onProgress) onProgress(0.2f + i * 0.1f, "正在转码视频 (" + std::string(preset.name) + ")...");
         
-        int ret = runLowImpactProcess(cmd);
+        std::string ffmpegErr;
+        int ret = runLowImpactProcess(cmd, ffmpegErr);
         if (ret != 0) {
             logger().error("[AI] FFmpeg failed with code: " + std::to_string(ret));
+            if (!ffmpegErr.empty()) {
+                logger().error("[AI] FFmpeg stderr: " + ffmpegErr);
+            }
             continue;
         }
         
-        if (std::filesystem::exists(outputPath)) {
-            auto fileSize = std::filesystem::file_size(outputPath);
+        if (std::filesystem::exists(outputPathObj)) {
+            auto fileSize = std::filesystem::file_size(outputPathObj);
             logger().info("[AI] Output video size: " + std::to_string(fileSize / 1024) + " KB (" + std::string(preset.name) + ")");
             
             if (fileSize <= maxOutputBytes) {
@@ -2098,8 +2161,8 @@ std::string AIAnalyzer::extractVideoForAI(const std::string& videoPath,
     
     // 所有质量级别都失败
     logger().error("[AI] Failed to compress video to acceptable size");
-    if (std::filesystem::exists(outputPath)) {
-        std::filesystem::remove(outputPath);
+    if (std::filesystem::exists(outputPathObj)) {
+        std::filesystem::remove(outputPathObj);
     }
     return "";
 }
@@ -2185,7 +2248,7 @@ std::vector<TranscriptSegment> AIAnalyzer::loadSubtitleAsTranscript(const std::s
 
 void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult& context, QuestionCallback onComplete, ErrorCallback onError) {
     m_cancelled = false;
-    std::thread([this, question, context, onComplete, onError]() {
+    m_workers.emplace_back([this, question, context, onComplete, onError]() {
         AIConfig config = snapshotConfig();
         if (config.apiKey.empty() || config.baseUrl.empty()) {
             if (onError) onError("API Key 或 Base URL 未配置");
@@ -2284,7 +2347,7 @@ void AIAnalyzer::askQuestion(const std::string& question, const AIAnalysisResult
         } catch (const std::exception& e) {
             if (onError) onError(std::string("解析失败: ") + e.what());
         }
-    }).detach();
+    });
 }
 
 } // namespace VideoPlay

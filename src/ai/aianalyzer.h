@@ -10,6 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace VideoPlay {
 
@@ -59,6 +60,7 @@ private:
     AIConfig m_config;
     std::atomic<bool> m_cancelled{false};
     mutable std::mutex m_mutex;
+    std::vector<std::thread> m_workers;
 
     AIConfig snapshotConfig() const;
     std::string extractAudio(const std::string& videoPath, ProgressCallback onProgress);
