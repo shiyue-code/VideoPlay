@@ -257,8 +257,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         } else if (m_fullscreen) {
                             toggleFullscreen();
                         }
-                        closeAllMenus();
-                        hideContextMenu();
+                        m_menuManager->closeAllMenus();
+                        m_menuManager->hideContextMenu();
                         break;
                     case SDLK_TAB:
                         toggleMediaInfoPanel();
@@ -363,13 +363,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                 m_mouseDown = true;
                 // 先检查右键菜单点击
                 if (m_showContextMenu) {
-                    handleContextMenuClick(m_mouseX, m_mouseY);
+                    m_menuManager->handleContextMenuClick(m_mouseX, m_mouseY);
                     break;
                 }
                 handleMouseButtonDown(m_mouseX, m_mouseY);
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 // 右键菜单
-                showContextMenu(m_mouseX, m_mouseY);
+                m_menuManager->showContextMenu(m_mouseX, m_mouseY);
             }
             break;
 
@@ -479,7 +479,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
         int menuX = kTopMenuX;
         for (int i = 0; i < (int)m_menus.size(); i++) {
-            if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
+            if (!m_menuManager->isTopMenuVisible(static_cast<size_t>(i))) continue;
             int textW = getTextWidth(m_menus[i].label);
             int itemWidth = textW + kTopMenuPaddingX * 2;
             if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
@@ -668,7 +668,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
     
     // 处理菜单栏区域的点击
     if (y < m_menuBarHeight) {
-        bool clickedMenu = handleMenuClick(x, y);
+        bool clickedMenu = m_menuManager->handleMenuClick(x, y);
         
         //  无边框模式下点击菜单栏空白处：双击最大化/还原，单击拖�?
         if (m_borderless && !clickedMenu && m_windowFrame) {
@@ -702,7 +702,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
         int menuX = kTopMenuX;
         for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
-            if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
+            if (!m_menuManager->isTopMenuVisible(static_cast<size_t>(i))) continue;
             menuX += getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2 + kTopMenuGap;
         }
         // 计算实际菜单宽度（与 renderMenu 一致）
@@ -782,7 +782,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                 int itemIndex = localY / itemHeight;
                 if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
                     m_menuCallback(submenuItemId(m_activeSubmenuParent, itemIndex));
-                    closeAllMenus();
+                    m_menuManager->closeAllMenus();
                     m_pressedControl = ControlType::None;
                 }
             }
@@ -801,7 +801,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                             m_pressedControl = ControlType::None;
                         } else if (!item.separator && item.enabled && m_menuCallback) {
                             m_menuCallback(item.id);
-                            closeAllMenus();
+                            m_menuManager->closeAllMenus();
                             // 防止 handleMouseButtonUp 触发菜单下方的控件点击
                             m_pressedControl = ControlType::None;
                         }
@@ -812,7 +812,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             }
         }
         if (!inMenu) {
-            closeAllMenus();
+            m_menuManager->closeAllMenus();
         }
 
         // 点击空白处取消搜索框焦点

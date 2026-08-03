@@ -131,7 +131,7 @@ bool parseTimestampMs(std::string text, int& valueMs) {
 namespace VideoPlay {
 
 
-void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
+void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, bool isMuted,
                            bool isPlaying, double speed, const std::string& filename,
                            const std::string& subtitle,
                            const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
@@ -169,7 +169,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
 
     if (m_showControls) {
         // 菜单栏随控制栏一起显隐
-        renderMenuBar();
+        m_menuManager->renderMenuBar();
         // 底部渐变遮罩，让控制栏自然融入视频
         drawGradientVignette();
         renderControls(position, duration, volume, isMuted, isPlaying, speed, isPreloading);
@@ -213,7 +213,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
 
     // 预缓冲加载动画已集成到进度条�?    
     //  渲染打开的菜�?
-    updateMenuAnimation();
+    m_menuManager->updateMenuAnimation();
     if ((m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) || m_menuAnimating) {
         if (m_menuAnimAlpha > 0.01f) {
             constexpr int kTopMenuX = 10;
@@ -233,7 +233,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     renderTooltip();
 
     // 渲染右键上下文菜单
-    renderContextMenu();
+    m_menuManager->renderContextMenu();
 
     // 自绘 1px 边框，确�?Win10 �?Win11 显示效果完全一�?    // （Win11 �?DWMWA_BORDER_COLOR 是独占特性，Win10 不支持，因此统一�?SDL 自绘�?    // 圆角窗口下不绘制四边直边框，�?DWM 圆角自然呈现
     if (m_borderless && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {

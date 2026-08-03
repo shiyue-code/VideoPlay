@@ -148,8 +148,13 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 启用文件拖放
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
 
+    // 初始化管理器
+    m_menuManager = std::make_unique<MenuManager>(this);
+    m_uiManager = std::make_unique<UIManager>(this);
+    m_dialogManager = std::make_unique<DialogManager>(this);
+
     // 初始化菜单
-    initMenus();
+    m_menuManager->initMenus();
 
     // 加载 PNG 图标
     loadIconTextures();
@@ -378,99 +383,29 @@ bool SDLRenderer::processEvents() {
     }
 
     //  处理异步对话框结果（确保在主线程回调�?
-    {
-        std::lock_guard<std::mutex> lock(m_dialogMutex);
-        if (m_dialogResultReady) {
-            if (m_dialogCallback) {
-                m_dialogCallback(m_pendingDialogResult);
-            }
-            m_dialogResultReady = false;
-            m_pendingDialogResult.clear();
-            m_dialogCallback = nullptr;
-        }
+    if (m_dialogManager) {
+        m_dialogManager->processPendingResult();
     }
 
     return m_initialized;
 }
 
 void SDLRenderer::openSubtitleDialog(std::function<void(const std::string&)> callback) {
-    {
-        std::lock_guard<std::mutex> lock(m_dialogMutex);
-        m_dialogResultReady = false;
-        m_pendingDialogResult.clear();
-        m_dialogCallback = std::move(callback);
-    }
-
-    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
-        auto* renderer = static_cast<SDLRenderer*>(userdata);
-        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
-        if (filelist && filelist[0]) {
-            renderer->m_pendingDialogResult = filelist[0];
-        }
-        renderer->m_dialogResultReady = true;
-    };
-
-    SDL_DialogFileFilter sdlFilters[] = {
-        { "字幕文件", "srt;ass;ssa;vtt" }
-    };
-
-    // parent 传 nullptr 避免无边框窗口遮挡对话框
-    SDL_ShowOpenFileDialog(sdlCallback, this, nullptr, sdlFilters, 1, nullptr, false);
+    m_dialogManager->openSubtitleDialog(std::move(callback));
 }
 
 void SDLRenderer::openFolderDialog(std::function<void(const std::string&)> callback) {
-    {
-        std::lock_guard<std::mutex> lock(m_dialogMutex);
-        m_dialogResultReady = false;
-        m_pendingDialogResult.clear();
-        m_dialogCallback = std::move(callback);
-    }
-
-    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
-        auto* renderer = static_cast<SDLRenderer*>(userdata);
-        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
-        if (filelist && filelist[0]) {
-            renderer->m_pendingDialogResult = filelist[0];
-        }
-        renderer->m_dialogResultReady = true;
-    };
-
-    // parent 传 nullptr 避免无边框窗口遮挡对话框
-    SDL_ShowOpenFolderDialog(sdlCallback, this, nullptr, nullptr, false);
+    m_dialogManager->openFolderDialog(std::move(callback));
 }
 
-void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& /*filters*/) {
-    {
-        std::lock_guard<std::mutex> lock(m_dialogMutex);
-        m_dialogResultReady = false;
-        m_pendingDialogResult.clear();
-        m_dialogCallback = std::move(callback);
-    }
-
-    auto sdlCallback = [](void* userdata, const char* const* filelist, int /*filter*/) {
-        auto* renderer = static_cast<SDLRenderer*>(userdata);
-        std::lock_guard<std::mutex> lock(renderer->m_dialogMutex);
-        if (filelist && filelist[0]) {
-            renderer->m_pendingDialogResult = filelist[0];
-        }
-        renderer->m_dialogResultReady = true;
-    };
-
-    SDL_DialogFileFilter sdlFilters[] = {
-        { "媒体文件", "mp4;mkv;avi;mov;wmv;flv;webm;m4v;ts;m2ts;mpeg;mpg;vob;3gp;ogv;asf;rm;rmvb;mp3;aac;wav;flac;ogg;m4a;wma;opus;ape;ac3;dts;eac3;wv;weba;srt;ass;ssa;vtt" }
-    };
-
-    // parent 传 nullptr 避免无边框窗口遮挡对话框
-    SDL_ShowOpenFileDialog(sdlCallback, this, nullptr, sdlFilters, 1, nullptr, false);
+void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters) {
+    m_dialogManager->openFileDialog(std::move(callback), filters);
 }
 
 void SDLRenderer::showMessageBox(const std::string& title, const std::string& message,
                                  bool isError,
                                  std::function<void(int64_t timestampMs)> timestampCallback) {
-    if (!m_messageBox) {
-        m_messageBox = std::make_unique<CustomMessageBox>(m_window, m_font);
-    }
-    m_messageBox->show(title, message, isError, std::move(timestampCallback));
+    m_dialogManager->showMessageBox(title, message, isError, std::move(timestampCallback));
 }
 
 void SDLRenderer::setLoopMode(int mode) {
@@ -511,6 +446,10 @@ void SDLRenderer::restoreWindow() {
 }
 
 void SDLRenderer::updateRecentFilesMenu() {
+    m_menuManager->updateRecentFilesMenu();
+}
+
+void SDLRenderer::updateRecentFilesMenuImpl() {
     if (m_menus.empty()) return;
     Menu& fileMenu = m_menus[0];
 
@@ -712,13 +651,13 @@ void SDLRenderer::setSubtitleTrackCallback(SubtitleTrackCallback callback) {
 void SDLRenderer::setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex) {
     m_audioTracks = tracks;
     m_currentAudioTrack = currentIndex;
-    updateTrackMenus();
+    m_menuManager->updateTrackMenus();
 }
 
 void SDLRenderer::setSubtitleTracks(const std::vector<TrackInfo>& tracks, int currentIndex) {
     m_subtitleTracks = tracks;
     m_currentSubtitleTrack = currentIndex;
-    updateTrackMenus();
+    m_menuManager->updateTrackMenus();
 }
 
 void SDLRenderer::setSubtitleBitmap(const SubtitleBitmap& bitmap) {
@@ -762,7 +701,7 @@ void SDLRenderer::clearSubtitleBitmap() {
 void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
     m_chapters = chapters;
     m_hasChapters = !chapters.empty();
-    updateChapterMenuItems();
+    m_menuManager->updateChapterMenuItems();
 }
 
 void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {
@@ -915,6 +854,17 @@ void SDLRenderer::setPlaylistProgress(const std::vector<float>& progress) {
 void SDLRenderer::setPrevNextTooltip(const std::string& prevTooltip, const std::string& nextTooltip) {
     m_tooltipPrev = prevTooltip;
     m_tooltipNext = nextTooltip;
+}
+
+void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool isMuted,
+                           bool isPlaying, double speed, const std::string& filename,
+                           const std::string& subtitle,
+                           const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
+                           int64_t audioPts, int64_t videoPts, double avDiff,
+                           bool isPreloading) {
+    m_uiManager->renderUI(position, duration, volume, isMuted, isPlaying, speed,
+                          filename, subtitle, playlist, currentPlaylistIndex,
+                          audioPts, videoPts, avDiff, isPreloading);
 }
 
 } // namespace VideoPlay

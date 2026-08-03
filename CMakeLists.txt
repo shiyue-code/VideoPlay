@@ -137,6 +137,9 @@ set(SOURCES
     src/renderer/sdlrenderer_menus.cpp
     src/renderer/sdlrenderer_ui.cpp
     src/renderer/sdlrenderer_draw.cpp
+    src/renderer/menu_manager.cpp
+    src/renderer/ui_manager.cpp
+    src/renderer/dialog_manager.cpp
     src/renderer/windowframe.cpp
     src/renderer/custommessagebox.cpp
     src/renderer/inputfield.cpp
@@ -170,6 +173,9 @@ set(HEADERS
     src/utils/subprocess_runner.h
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
+    src/renderer/menu_manager.h
+    src/renderer/ui_manager.h
+    src/renderer/dialog_manager.h
     src/renderer/windowframe.h
     src/renderer/custommessagebox.h
     src/renderer/inputfield.h

@@ -3,6 +3,9 @@
 #include "core/common.h"
 #include "core/episodedetector.h"
 #include "renderer/windowframe.h"
+#include "renderer/menu_manager.h"
+#include "renderer/ui_manager.h"
+#include "renderer/dialog_manager.h"
 
 #include <string>
 #include <functional>
@@ -21,8 +24,6 @@ typedef struct TTF_Font TTF_Font;
 typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
-
-class CustomMessageBox;
 
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
@@ -327,6 +328,18 @@ public:
     void takeScreenshot();
 
 private:
+    friend class MenuManager;
+    friend class UIManager;
+    friend class DialogManager;
+
+    // 内部实现（由 Managers 调用）
+    void renderUIImpl(int64_t position, int64_t duration, int volume, bool isMuted,
+                      bool isPlaying, double speed, const std::string& filename,
+                      const std::string& subtitle, const std::vector<std::string>& playlist,
+                      size_t currentPlaylistIndex, int64_t audioPts, int64_t videoPts,
+                      double avDiff, bool isPreloading);
+    void updateRecentFilesMenuImpl();
+
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);
     void handleMouseMotion(int x, int y);
@@ -434,8 +447,10 @@ private:
     TTF_Font* m_fontLarge = nullptr;
     std::string m_fontPath;
 
-    // 自定义消息框
-    std::unique_ptr<CustomMessageBox> m_messageBox;
+    // 子系统管理器
+    std::unique_ptr<MenuManager> m_menuManager;
+    std::unique_ptr<UIManager> m_uiManager;
+    std::unique_ptr<DialogManager> m_dialogManager;
 
     // 图标纹理
     std::unordered_map<std::string, SDL_Texture*> m_iconTextures;
@@ -626,11 +641,6 @@ private:
     SDL_Texture* m_subtitleTexture = nullptr;
     SubtitleBitmap m_currentBitmap;
 
-    // 异步对话框结果（跨线程安全）
-    std::mutex m_dialogMutex;
-    std::string m_pendingDialogResult;
-    bool m_dialogResultReady = false;
-    std::function<void(const std::string&)> m_dialogCallback;
 };
 
 } // namespace VideoPlay
