@@ -105,6 +105,12 @@ private:
     std::unique_ptr<FFmpegPlayer> m_player;
     std::unique_ptr<SubtitleParser> m_subtitleParser;
 
+    // 内封字幕回调状态（由解码线程写入，主线程读取）
+    std::mutex m_embeddedSubtitleMutex;
+    std::string m_embeddedSubtitleText;
+    int64_t m_embeddedSubtitleStartMs = 0;
+    int64_t m_embeddedSubtitleEndMs = 0;
+
     // 播放列表
     std::vector<std::string> m_playlist;
     size_t m_currentIndex = 0;

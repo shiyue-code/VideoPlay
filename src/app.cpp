@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
@@ -245,10 +246,13 @@ bool VideoPlayerApp::initialize() {
         }
     });
 
-    // 内封字幕回调：将解码出的字幕文本交给字幕解析器
+    // 内封字幕回调：保存当前字幕文本供 render() 渲染
     m_player->setSubtitleTextCallback([this](int64_t ptsMs, const std::string& text) {
-        // TODO: 后续可将内封字幕注入 SubtitleParser 或直接显示
-        logger().debug("Embedded subtitle @ " + std::to_string(ptsMs) + "ms: " + text);
+        std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
+        m_embeddedSubtitleText = text;
+        m_embeddedSubtitleStartMs = ptsMs;
+        // 未提供结束时间，默认显示 5 秒；下一条字幕会覆盖
+        m_embeddedSubtitleEndMs = ptsMs + 5000;
     });
 
     // 恢复循环模式设置
@@ -537,6 +541,12 @@ void VideoPlayerApp::render() {
     if (m_subtitleParser && m_subtitleParser->isLoaded()) {
         subtitleText = m_subtitleParser->subtitleAt(m_position);
     }
+    if (subtitleText.empty() && m_player && m_player->currentSubtitleTrack() >= 0) {
+        std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
+        if (m_position >= m_embeddedSubtitleStartMs && m_position < m_embeddedSubtitleEndMs) {
+            subtitleText = m_embeddedSubtitleText;
+        }
+    }
 
     bool isPreloading = (m_player && m_player->isPreloading());
 
@@ -668,6 +678,13 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
     // 停止当前播放
     stop();
+
+    {
+        std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
+        m_embeddedSubtitleText.clear();
+        m_embeddedSubtitleStartMs = 0;
+        m_embeddedSubtitleEndMs = 0;
+    }
 
     // 添加到播放列表
     addToPlaylist(path);
