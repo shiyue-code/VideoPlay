@@ -721,6 +721,39 @@ void SDLRenderer::setSubtitleTracks(const std::vector<TrackInfo>& tracks, int cu
     updateTrackMenus();
 }
 
+void SDLRenderer::setSubtitleBitmap(const SubtitleBitmap& bitmap) {
+    if (!m_renderer || bitmap.width <= 0 || bitmap.height <= 0 || bitmap.pixels.empty()) {
+        clearSubtitleBitmap();
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+    if (m_subtitleTexture) {
+        SDL_DestroyTexture(m_subtitleTexture);
+    }
+
+    m_subtitleTexture = SDL_CreateTexture(m_renderer,
+        SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+        bitmap.width, bitmap.height);
+    if (!m_subtitleTexture) {
+        m_currentBitmap = {};
+        return;
+    }
+
+    SDL_SetTextureBlendMode(m_subtitleTexture, SDL_BLENDMODE_BLEND);
+    SDL_UpdateTexture(m_subtitleTexture, nullptr, bitmap.pixels.data(), bitmap.width * 4);
+    m_currentBitmap = bitmap;
+}
+
+void SDLRenderer::clearSubtitleBitmap() {
+    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+    if (m_subtitleTexture) {
+        SDL_DestroyTexture(m_subtitleTexture);
+        m_subtitleTexture = nullptr;
+    }
+    m_currentBitmap = {};
+}
+
 void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
     m_chapters = chapters;
     m_hasChapters = !chapters.empty();

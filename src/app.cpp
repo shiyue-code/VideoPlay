@@ -234,6 +234,7 @@ bool VideoPlayerApp::initialize() {
         if (m_player) {
             if (m_player->setSubtitleTrack(trackIndex)) {
                 if (m_renderer) {
+                    m_renderer->clearSubtitleBitmap();
                     m_renderer->setSubtitleTracks(m_player->subtitleTracks(),
                                                   m_player->currentSubtitleTrack());
                     if (trackIndex == -1) {
@@ -604,6 +605,16 @@ void VideoPlayerApp::render() {
         }
         m_renderer->setAIAnalysisState(aiAnalyzing, aiProgress, aiStatus);
     }
+    if (m_player) {
+        std::optional<SubtitleBitmap> latestBitmap;
+        while (auto bm = m_player->popSubtitleBitmap()) {
+            latestBitmap = std::move(bm);
+        }
+        if (latestBitmap) {
+            m_renderer->setSubtitleBitmap(*latestBitmap);
+        }
+    }
+
     m_renderer->renderUI(
         m_position,
         m_duration,

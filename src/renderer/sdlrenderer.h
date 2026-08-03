@@ -189,6 +189,10 @@ public:
     void setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
     void setSubtitleTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
 
+    // 图形字幕（PGS）位图
+    void setSubtitleBitmap(const SubtitleBitmap& bitmap);
+    void clearSubtitleBitmap();
+
     // 章节数据
     void setChapters(const std::vector<ChapterInfo>& chapters);
 
@@ -307,6 +311,7 @@ private:
     void renderTimeDisplay(int64_t position, int64_t duration, int controlY);
     void renderFilename(const std::string& filename);
     void renderSubtitle(const std::string& subtitle);
+    void renderSubtitleBitmap(int64_t positionMs);
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
     void renderOSD();
@@ -556,6 +561,11 @@ private:
     std::vector<TrackInfo> m_subtitleTracks;
     int m_currentAudioTrack = 0;
     int m_currentSubtitleTrack = -1;
+
+    // 图形字幕（PGS）位图
+    std::mutex m_subtitleBitmapMutex;
+    SDL_Texture* m_subtitleTexture = nullptr;
+    SubtitleBitmap m_currentBitmap;
 
     // 异步对话框结果（跨线程安全）
     std::mutex m_dialogMutex;

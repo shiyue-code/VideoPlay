@@ -17,6 +17,17 @@ struct VideoFrame {
     int64_t pts = 0;
 };
 
+// 图形字幕（PGS/DVB）位图
+struct SubtitleBitmap {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int64_t startMs = 0;
+    int64_t endMs = 0;
+    std::vector<uint32_t> pixels; // RGBA，每像素 4 字节
+};
+
 enum class PlaybackState {
     Stopped = 0,
     Playing = 1,

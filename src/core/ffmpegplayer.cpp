@@ -1138,23 +1138,50 @@ void FFmpegPlayer::decodeLoop() {
             }
         }
         else if (m_subtitleCtx.stream && packet->stream_index == m_subtitleCtx.stream->index && m_subtitleCtx.codecContext) {
-            // 解码内封字幕包
-            ret = avcodec_send_packet(m_subtitleCtx.codecContext, packet);
-            if (ret >= 0) {
-                while (avcodec_receive_frame(m_subtitleCtx.codecContext, aframe) >= 0) {
-                    // 字幕帧的 data[0] 通常是字幕文本（SRT/ASS/VTT/TEXT）
-                    if (aframe->data[0] && m_subtitleTextCallback) {
-                        const char* text = reinterpret_cast<const char*>(aframe->data[0]);
-                        int64_t ptsMs = 0;
-                        if (aframe->pts != AV_NOPTS_VALUE) {
-                            int64_t startTime = m_subtitleCtx.stream->start_time != AV_NOPTS_VALUE ? m_subtitleCtx.stream->start_time : 0;
-                            ptsMs = av_rescale_q(aframe->pts - startTime,
-                                                 m_subtitleCtx.stream->time_base, {1, 1000});
+            // 解码内封字幕包（文本/ASS/PGS 等统一用 avcodec_decode_subtitle2）
+            AVSubtitle sub{};
+            int gotSub = 0;
+            if (avcodec_decode_subtitle2(m_subtitleCtx.codecContext, &sub, &gotSub, packet) >= 0 && gotSub) {
+                int64_t ptsMs = av_rescale_q(sub.pts, {1, AV_TIME_BASE}, {1, 1000});
+                for (unsigned i = 0; i < sub.num_rects; i++) {
+                    AVSubtitleRect* rect = sub.rects[i];
+                    if (!rect) continue;
+
+                    if (rect->type == SUBTITLE_BITMAP) {
+                        SubtitleBitmap bm;
+                        bm.x = rect->x;
+                        bm.y = rect->y;
+                        bm.width = rect->w;
+                        bm.height = rect->h;
+                        bm.startMs = ptsMs + sub.start_display_time;
+                        bm.endMs = bm.startMs + sub.end_display_time;
+
+                        const uint8_t* src = rect->data[0];
+                        const int linesize = rect->linesize[0];
+                        const uint32_t* palette = reinterpret_cast<const uint32_t*>(rect->data[1]);
+
+                        if (src && bm.width > 0 && bm.height > 0) {
+                            bm.pixels.resize(static_cast<size_t>(bm.width) * bm.height);
+                            for (int y = 0; y < bm.height; y++) {
+                                for (int x = 0; x < bm.width; x++) {
+                                    uint8_t idx = src[y * linesize + x];
+                                    bm.pixels[y * bm.width + x] = palette ? palette[idx] : 0xFF000000;
+                                }
+                            }
+                            std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+                            m_subtitleBitmapQueue.push_back(std::move(bm));
+                            if (m_subtitleBitmapQueue.size() > 10) {
+                                m_subtitleBitmapQueue.pop_front();
+                            }
                         }
-                        m_subtitleTextCallback(ptsMs, std::string(text));
+                    } else if (rect->ass && m_subtitleTextCallback) {
+                        // ASS/SRT/SSA 等通常以 ass 字符串形式返回
+                        m_subtitleTextCallback(ptsMs + sub.start_display_time, std::string(rect->ass));
+                    } else if (rect->text && m_subtitleTextCallback) {
+                        m_subtitleTextCallback(ptsMs + sub.start_display_time, std::string(rect->text));
                     }
-                    av_frame_unref(aframe);
                 }
+                avsubtitle_free(&sub);
             }
         }
 
@@ -1806,18 +1833,7 @@ bool FFmpegPlayer::openSubtitleStream(int streamIndex) {
     AVStream* stream = m_formatContext->streams[streamIndex];
     if (!stream || stream->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) return false;
 
-    // 只支持文本类字幕（SRT/ASS/SSA/VTT），PGS 等图形字幕暂不解码
-    AVCodecID cid = stream->codecpar->codec_id;
-    if (cid != AV_CODEC_ID_SUBRIP && cid != AV_CODEC_ID_SRT &&
-        cid != AV_CODEC_ID_ASS && cid != AV_CODEC_ID_SSA &&
-        cid != AV_CODEC_ID_WEBVTT && cid != AV_CODEC_ID_TEXT) {
-        logger().warning("Subtitle stream " + std::to_string(streamIndex) +
-                         " is graphical (" + std::string(avcodec_get_name(cid)) +
-                         "), not supported yet");
-        return false;
-    }
-
-    const AVCodec* codec = avcodec_find_decoder(cid);
+    const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) return false;
 
     closeSubtitleStream();
@@ -1841,6 +1857,22 @@ void FFmpegPlayer::closeSubtitleStream() {
     }
     m_subtitleCtx.stream = nullptr;
     m_subtitleCtx.startTime = 0;
+    clearSubtitleBitmaps();
+}
+
+std::optional<SubtitleBitmap> FFmpegPlayer::popSubtitleBitmap() {
+    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+    if (m_subtitleBitmapQueue.empty()) {
+        return std::nullopt;
+    }
+    SubtitleBitmap bm = std::move(m_subtitleBitmapQueue.front());
+    m_subtitleBitmapQueue.pop_front();
+    return bm;
+}
+
+void FFmpegPlayer::clearSubtitleBitmaps() {
+    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+    m_subtitleBitmapQueue.clear();
 }
 
 bool FFmpegPlayer::setAudioTrack(int trackIndex) {

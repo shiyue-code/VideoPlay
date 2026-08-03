@@ -11,6 +11,7 @@
 #include <atomic>
 #include <vector>
 #include <deque>
+#include <optional>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -87,6 +88,10 @@ public:
     void setVideoFrameCallback(VideoFrameCallback callback);
     void setNetworkStateCallback(NetworkStateCallback callback);
     void setSubtitleTextCallback(SubtitleTextCallback callback);
+
+    // 图形字幕（PGS）位图：解码线程产生，主线程消费
+    std::optional<SubtitleBitmap> popSubtitleBitmap();
+    void clearSubtitleBitmaps();
 
     bool isPreloading() const;
     bool checkPreloadComplete();
@@ -193,6 +198,8 @@ private:
     int m_currentAudioTrack = 0;       // m_audioTracks 下标
     int m_currentSubtitleTrack = -1;   // m_subtitleTracks 下标，-1=关闭内封字幕
     StreamContext m_subtitleCtx;       // 当前内封字幕流上下文
+    std::mutex m_subtitleBitmapMutex;
+    std::deque<SubtitleBitmap> m_subtitleBitmapQueue;
     std::atomic<int64_t> m_position{0};
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};

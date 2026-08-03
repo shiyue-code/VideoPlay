@@ -200,6 +200,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     if (!subtitle.empty()) {
         renderSubtitle(subtitle);
     }
+    renderSubtitleBitmap(position);
 
     renderNetworkState();
     renderAIAnalysisOverlay();
@@ -631,6 +632,50 @@ void SDLRenderer::renderSubtitle(const std::string& subtitle) {
         textY += lineHeight;
     }
 #endif
+}
+
+void SDLRenderer::renderSubtitleBitmap(int64_t positionMs) {
+    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+    if (!m_subtitleTexture || m_currentBitmap.width <= 0 || m_currentBitmap.height <= 0) {
+        return;
+    }
+    if (positionMs < m_currentBitmap.startMs || positionMs >= m_currentBitmap.endMs) {
+        return;
+    }
+    if (m_videoWidth <= 0 || m_videoHeight <= 0 || m_windowWidth <= 0 || m_windowHeight <= 0) {
+        return;
+    }
+
+    float targetAspect = static_cast<float>(m_videoWidth) / static_cast<float>(m_videoHeight);
+    float windowAspect = static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight);
+    SDL_FRect videoDst;
+    if (m_aspectMode == AspectMode::FillWindow) {
+        videoDst.x = 0;
+        videoDst.y = 0;
+        videoDst.w = static_cast<float>(m_windowWidth);
+        videoDst.h = static_cast<float>(m_windowHeight);
+    } else if (windowAspect > targetAspect) {
+        videoDst.h = static_cast<float>(m_windowHeight);
+        videoDst.w = videoDst.h * targetAspect;
+        videoDst.x = (m_windowWidth - videoDst.w) / 2.0f;
+        videoDst.y = 0;
+    } else {
+        videoDst.w = static_cast<float>(m_windowWidth);
+        videoDst.h = videoDst.w / targetAspect;
+        videoDst.x = 0;
+        videoDst.y = (m_windowHeight - videoDst.h) / 2.0f;
+    }
+
+    float scaleX = videoDst.w / static_cast<float>(m_videoWidth);
+    float scaleY = videoDst.h / static_cast<float>(m_videoHeight);
+
+    SDL_FRect dst;
+    dst.x = videoDst.x + static_cast<float>(m_currentBitmap.x) * scaleX;
+    dst.y = videoDst.y + static_cast<float>(m_currentBitmap.y) * scaleY;
+    dst.w = static_cast<float>(m_currentBitmap.width) * scaleX;
+    dst.h = static_cast<float>(m_currentBitmap.height) * scaleY;
+
+    SDL_RenderTexture(m_renderer, m_subtitleTexture, nullptr, &dst);
 }
 
 void SDLRenderer::renderOSD() {

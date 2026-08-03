@@ -238,6 +238,7 @@ void VideoPlayerApp::handleMenu(int menuId) {
         int trackIndex = (menuId == 450) ? -1 : (menuId - 451);
         if (m_player && m_renderer) {
             if (m_player->setSubtitleTrack(trackIndex)) {
+                m_renderer->clearSubtitleBitmap();
                 m_renderer->setSubtitleTracks(m_player->subtitleTracks(),
                                               m_player->currentSubtitleTrack());
                 if (trackIndex == -1) {
