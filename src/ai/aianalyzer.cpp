@@ -43,18 +43,23 @@ constexpr const char* kVideoTranscodeCacheVersion = "transcode-v1";
 
 int runLowImpactProcess(const std::string& command) {
 #ifdef _WIN32
-    std::vector<char> commandLine(command.begin(), command.end());
-    commandLine.push_back('\0');
+    // 命令行按 UTF-8 解析，避免 CJK 路径被当前代码页截断
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, nullptr, 0);
+    if (wideLen <= 0) {
+        return -1;
+    }
+    std::vector<wchar_t> wcommand(wideLen);
+    MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, wcommand.data(), wideLen);
 
-    STARTUPINFOA startupInfo{};
+    STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
     startupInfo.dwFlags = STARTF_USESHOWWINDOW;
     startupInfo.wShowWindow = SW_HIDE;
 
     PROCESS_INFORMATION processInfo{};
-    BOOL ok = CreateProcessA(
+    BOOL ok = CreateProcessW(
         nullptr,
-        commandLine.data(),
+        wcommand.data(),
         nullptr,
         nullptr,
         FALSE,
@@ -613,10 +618,11 @@ std::string AIAnalyzer::getCacheDir() const {
 
 std::string AIAnalyzer::computeSourceHash(const std::string& filePath) const {
     try {
-        if (!std::filesystem::exists(filePath)) return "";
+        auto filePathObj = std::filesystem::u8path(filePath);
+        if (!std::filesystem::exists(filePathObj)) return "";
 
-        auto fileSize = std::filesystem::file_size(filePath);
-        auto modTime = std::filesystem::last_write_time(filePath).time_since_epoch().count();
+        auto fileSize = std::filesystem::file_size(filePathObj);
+        auto modTime = std::filesystem::last_write_time(filePathObj).time_since_epoch().count();
 
         std::stringstream ss;
         ss << filePath << "_" << fileSize << "_" << modTime
@@ -673,7 +679,7 @@ std::string AIAnalyzer::getCachePath(const std::string& videoPath) const {
 std::string AIAnalyzer::getTranscodeCacheDir() const {
     std::filesystem::path cacheDir = std::filesystem::path(getCacheDir()) / "video";
     std::filesystem::create_directories(cacheDir);
-    return cacheDir.string();
+    return cacheDir.u8string();
 }
 
 std::string AIAnalyzer::getTranscodeCachePath(const std::string& sourceHash,
@@ -683,7 +689,7 @@ std::string AIAnalyzer::getTranscodeCachePath(const std::string& sourceHash,
     int64_t limitKb = std::max<int64_t>(1, maxOutputBytes / 1024);
     std::string fileName = sourceHash + "_clip" + std::to_string(clipSeconds) +
                            "_limit" + std::to_string(limitKb) + "kb_ai.mp4";
-    return (cacheDir / fileName).string();
+    return (cacheDir / fileName).u8string();
 }
 
 std::string AIAnalyzer::findReusableTranscodeCache(const std::string& sourceHash,
@@ -705,7 +711,7 @@ std::string AIAnalyzer::findReusableTranscodeCache(const std::string& sourceHash
             }
 
             std::filesystem::path path = entry.path();
-            std::string fileName = path.filename().string();
+            std::string fileName = path.filename().u8string();
             if (fileName.rfind(prefix, 0) != 0 || path.extension() != ".mp4") {
                 continue;
             }
@@ -718,7 +724,7 @@ std::string AIAnalyzer::findReusableTranscodeCache(const std::string& sourceHash
 
             if (fileSize <= static_cast<uintmax_t>(maxOutputBytes) && fileSize > bestSize) {
                 bestSize = fileSize;
-                bestPath = path.string();
+                bestPath = path.u8string();
             }
         }
     } catch (const std::exception& e) {
@@ -738,7 +744,7 @@ std::string AIAnalyzer::getGeminiFileCachePath(const std::string& sourceHash,
     std::string fileName = "gemini_" + sourceHash + "_clip" +
                            std::to_string(clipSeconds) + "_limit" +
                            std::to_string(limitKb) + "kb_file.json";
-    return (cacheDir / fileName).string();
+    return (cacheDir / fileName).u8string();
 }
 
 bool AIAnalyzer::hasCache(const std::string& videoPath) const {
@@ -877,7 +883,7 @@ void AIAnalyzer::clearTranscodeCache(const std::string& videoPath) {
                     continue;
                 }
 
-                std::string fileName = entry.path().filename().string();
+                std::string fileName = entry.path().filename().u8string();
                 if (fileName.rfind(prefix, 0) == 0 && entry.path().extension() == ".mp4") {
                     std::filesystem::remove(entry.path());
                     ++removedCount;
@@ -900,7 +906,7 @@ void AIAnalyzer::clearTranscodeCache(const std::string& videoPath) {
                     continue;
                 }
 
-                std::string fileName = entry.path().filename().string();
+                std::string fileName = entry.path().filename().u8string();
                 if (fileName.rfind(remotePrefix, 0) == 0 &&
                     entry.path().extension() == ".json") {
                     std::filesystem::remove(entry.path());
@@ -1309,7 +1315,7 @@ void AIAnalyzer::analyze(const std::string& videoPath,
     }
 
     // 检查文件是否存在
-    if (!std::filesystem::exists(videoPath)) {
+    if (!std::filesystem::exists(std::filesystem::u8path(videoPath))) {
         if (onError) onError("视频文件不存在: " + videoPath);
         return;
     }
@@ -1739,7 +1745,7 @@ AIAnalyzer::GeminiVideoFile AIAnalyzer::uploadGeminiVideoFile(const std::string&
     if (onProgress) onProgress(0.48f, "正在上传视频到 Gemini...");
     nlohmann::json startBody = {
         {"file", {
-            {"display_name", std::filesystem::path(mp4Path).filename().string()}
+            {"display_name", std::filesystem::path(mp4Path).filename().u8string()}
         }}
     };
 
@@ -2137,8 +2143,8 @@ std::string AIAnalyzer::fileToBase64(const std::string& filePath) {
 
 std::string AIAnalyzer::findSubtitleFile(const std::string& videoPath) {
     std::filesystem::path video(videoPath);
-    std::string baseName = video.stem().string();
-    std::string dir = video.parent_path().string();
+    std::string baseName = video.stem().u8string();
+    std::string dir = video.parent_path().u8string();
     
     // 常见字幕扩展名
     std::vector<std::string> extensions = {".srt", ".ass", ".ssa", ".vtt"};

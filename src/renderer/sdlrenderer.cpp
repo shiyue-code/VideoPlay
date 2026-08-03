@@ -39,9 +39,9 @@ namespace {
 #ifdef _WIN32
         char path[MAX_PATH];
         GetModuleFileNameA(nullptr, path, MAX_PATH);
-        return std::filesystem::path(path).parent_path().string();
+        return std::filesystem::path(path).parent_path().u8string();
 #else
-        return std::filesystem::current_path().string();
+        return std::filesystem::current_path().u8string();
 #endif
     }
 }

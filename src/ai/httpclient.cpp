@@ -390,7 +390,7 @@ HttpResponse HttpClient::uploadFile(const std::string& path,
         body += value + "\r\n";
     }
     
-    std::string filename = std::filesystem::path(filePath).filename().string();
+    std::string filename = std::filesystem::path(filePath).filename().u8string();
     body += "--" + boundary + "\r\n";
     body += "Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + filename + "\"\r\n";
     body += "Content-Type: audio/wav\r\n\r\n";

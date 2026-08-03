@@ -694,7 +694,7 @@ void VideoPlayerApp::handleSearchInternal(const std::string& query, bool addUser
                 if (m_renderer) {
                     std::string displayAnswer = answer;
                     if (requestedFile != m_currentFile) {
-                        std::string fileName = std::filesystem::path(requestedFile).filename().string();
+                        std::string fileName = std::filesystem::path(requestedFile).filename().u8string();
                         displayAnswer = "（以下回答来自提问时的视频：" + fileName + "）\n" + answer;
                     }
                     m_renderer->addChatMessage(false, displayAnswer);

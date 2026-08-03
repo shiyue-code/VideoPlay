@@ -318,8 +318,7 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
 
     if (m_providerDropdownOpen) {
         for (size_t i = 0; i < m_providerOptions.size(); ++i) {
-            SDL_FRect optionRect = m_providerDropdownRect;
-            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            SDL_FRect optionRect = dropdownOptionRect(m_providerDropdownRect, i, m_providerOptions.size());
             if (isPointInRect(mx, my, optionRect)) {
                 selectProvider(m_providerOptions[i]);
                 return true;
@@ -340,8 +339,7 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
 
     if (m_modelDropdownOpen) {
         for (size_t i = 0; i < m_modelOptions.size(); ++i) {
-            SDL_FRect optionRect = m_modelDropdownRect;
-            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            SDL_FRect optionRect = dropdownOptionRect(m_modelDropdownRect, i, m_modelOptions.size());
             if (isPointInRect(mx, my, optionRect)) {
                 currentProviderSettings().model = m_modelOptions[i];
                 m_modelDropdownOpen = false;
@@ -362,8 +360,7 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
 
     if (m_detailDropdownOpen) {
         for (size_t i = 0; i < m_detailOptions.size(); ++i) {
-            SDL_FRect optionRect = m_detailDropdownRect;
-            optionRect.y += optionRect.h * static_cast<float>(i + 1);
+            SDL_FRect optionRect = dropdownOptionRect(m_detailDropdownRect, i, m_detailOptions.size());
             if (isPointInRect(mx, my, optionRect)) {
                 setDetailByLabel(m_detailOptions[i]);
                 m_detailDropdownOpen = false;
@@ -482,12 +479,18 @@ void SettingsDialog::render() {
     drawButton("取消", m_cancelBtnRect, cancelHovered);
 
     updateModelOptions();
-    drawDropdown(m_providerDropdownRect, m_settings.provider, m_providerDropdownOpen,
-                 m_providerOptions, mx, my);
-    drawDropdown(m_modelDropdownRect, currentProviderSettings().model, m_modelDropdownOpen,
-                 m_modelOptions, mx, my);
-    drawDropdown(m_detailDropdownRect, detailLabel(), m_detailDropdownOpen,
-                 m_detailOptions, mx, my);
+    drawDropdown(m_providerDropdownRect, m_settings.provider, m_providerDropdownOpen, mx, my);
+    drawDropdown(m_modelDropdownRect, currentProviderSettings().model, m_modelDropdownOpen, mx, my);
+    drawDropdown(m_detailDropdownRect, detailLabel(), m_detailDropdownOpen, mx, my);
+
+    // 下拉选项最后绘制，确保在其它控件之上
+    if (m_providerDropdownOpen) {
+        drawDropdownOptions(m_providerDropdownRect, m_providerOptions, mx, my);
+    } else if (m_modelDropdownOpen) {
+        drawDropdownOptions(m_modelDropdownRect, m_modelOptions, mx, my);
+    } else if (m_detailDropdownOpen) {
+        drawDropdownOptions(m_detailDropdownRect, m_detailOptions, mx, my);
+    }
 
     SDL_RenderPresent(m_renderer);
 }
@@ -622,7 +625,6 @@ void SettingsDialog::handleEvents() {
 void SettingsDialog::drawDropdown(const SDL_FRect& rect,
                                   const std::string& value,
                                   bool open,
-                                  const std::vector<std::string>& options,
                                   float mouseX,
                                   float mouseY) {
     fillRoundRect(m_renderer, rect, 7,
@@ -642,16 +644,39 @@ void SettingsDialog::drawDropdown(const SDL_FRect& rect,
     int arrowY = static_cast<int>(rect.y + rect.h / 2.0f) - 2;
     SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1],
                            COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
-    SDL_RenderLine(m_renderer, arrowX, arrowY, arrowX + 5, arrowY + 5);
-    SDL_RenderLine(m_renderer, arrowX + 10, arrowY, arrowX + 5, arrowY + 5);
-
-    if (!open) {
-        return;
+    if (open) {
+        // 展开时箭头朝上
+        SDL_RenderLine(m_renderer, arrowX, arrowY + 5, arrowX + 5, arrowY);
+        SDL_RenderLine(m_renderer, arrowX + 10, arrowY + 5, arrowX + 5, arrowY);
+    } else {
+        SDL_RenderLine(m_renderer, arrowX, arrowY, arrowX + 5, arrowY + 5);
+        SDL_RenderLine(m_renderer, arrowX + 10, arrowY, arrowX + 5, arrowY + 5);
     }
+}
 
+bool SettingsDialog::dropdownShouldOpenUpward(const SDL_FRect& rect, size_t optionCount) const {
+    int listBottom = static_cast<int>(rect.y + rect.h * static_cast<float>(optionCount + 1));
+    return listBottom > m_windowHeight - 20;
+}
+
+SDL_FRect SettingsDialog::dropdownOptionRect(const SDL_FRect& rect,
+                                             size_t index,
+                                             size_t optionCount) const {
+    SDL_FRect optionRect = rect;
+    if (dropdownShouldOpenUpward(rect, optionCount)) {
+        optionRect.y = rect.y - rect.h * static_cast<float>(optionCount - index);
+    } else {
+        optionRect.y = rect.y + rect.h * static_cast<float>(index + 1);
+    }
+    return optionRect;
+}
+
+void SettingsDialog::drawDropdownOptions(const SDL_FRect& rect,
+                                         const std::vector<std::string>& options,
+                                         float mouseX,
+                                         float mouseY) {
     for (size_t i = 0; i < options.size(); ++i) {
-        SDL_FRect optionRect = rect;
-        optionRect.y += rect.h * static_cast<float>(i + 1);
+        SDL_FRect optionRect = dropdownOptionRect(rect, i, options.size());
         bool hovered = isPointInRect(mouseX, mouseY, optionRect);
         const uint8_t* bg = hovered ? COLOR_DROPDOWN_HOVER : COLOR_INPUT_BG;
         fillRoundRect(m_renderer, optionRect, 5, bg[0], bg[1], bg[2], bg[3]);

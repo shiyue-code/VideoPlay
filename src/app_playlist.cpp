@@ -150,30 +150,38 @@ void VideoPlayerApp::playPreviousEpisode() {
 void VideoPlayerApp::saveSeriesProgress() {
     if (!m_currentSeries) return;
 
-    std::string seriesKey = m_currentSeries->episodes[0].path;
-    seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
+    try {
+        std::string seriesKey = m_currentSeries->episodes[0].path;
+        seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
 
-    std::unordered_map<std::string, int64_t> positions;
-    for (const auto& ep : m_currentSeries->episodes) {
-        int64_t pos = Settings::instance().lastPosition(ep.path);
-        if (pos > 0) {
-            positions[ep.path] = pos;
+        std::unordered_map<std::string, int64_t> positions;
+        for (const auto& ep : m_currentSeries->episodes) {
+            int64_t pos = Settings::instance().lastPosition(ep.path);
+            if (pos > 0) {
+                positions[ep.path] = pos;
+            }
         }
-    }
 
-    Settings::instance().setSeriesProgress(seriesKey, static_cast<int>(m_currentSeries->currentIndex), positions);
+        Settings::instance().setSeriesProgress(seriesKey, static_cast<int>(m_currentSeries->currentIndex), positions);
+    } catch (const std::exception& e) {
+        logger().error("Failed to save series progress: " + std::string(e.what()));
+    }
 }
 
 void VideoPlayerApp::restoreSeriesPosition() {
     if (!m_currentSeries) return;
 
-    std::string seriesKey = m_currentSeries->episodes[0].path;
-    seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
+    try {
+        std::string seriesKey = m_currentSeries->episodes[0].path;
+        seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
 
-    auto progress = Settings::instance().seriesProgress(seriesKey);
-    if (progress.lastEpisodeIndex >= 0 &&
-        static_cast<size_t>(progress.lastEpisodeIndex) < m_currentSeries->episodes.size()) {
-        m_currentSeries->currentIndex = static_cast<size_t>(progress.lastEpisodeIndex);
+        auto progress = Settings::instance().seriesProgress(seriesKey);
+        if (progress.lastEpisodeIndex >= 0 &&
+            static_cast<size_t>(progress.lastEpisodeIndex) < m_currentSeries->episodes.size()) {
+            m_currentSeries->currentIndex = static_cast<size_t>(progress.lastEpisodeIndex);
+        }
+    } catch (const std::exception& e) {
+        logger().error("Failed to restore series position: " + std::string(e.what()));
     }
 }
 

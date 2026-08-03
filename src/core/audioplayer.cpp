@@ -20,11 +20,10 @@ AudioPlayer::~AudioPlayer() {
 }
 
 bool AudioPlayer::initialize(const AudioFormat& format) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // 先销毁旧的 audio stream，避免在持有 m_mutex 时调用 shutdown() 造成递归上锁
+    shutdown();
 
-    if (m_initialized) {
-        shutdown();
-    }
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     m_format = format;
 
@@ -71,9 +70,9 @@ void AudioPlayer::shutdown() {
 }
 
 void AudioPlayer::play() {
-    if (!m_stream) return;
-
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream || !m_initialized) { return; }
+
     if (!m_playing) {
         // 尝试同时用 stream 和 device ID 恢复，确保设备真正开始播放
         bool streamResumed = SDL_ResumeAudioStreamDevice(m_stream);
@@ -101,9 +100,9 @@ void AudioPlayer::play() {
 }
 
 void AudioPlayer::pause() {
-    if (!m_stream || !m_playing) return;
-
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream || !m_playing) { return; }
+
     if (!m_paused) {
         SDL_PauseAudioStreamDevice(m_stream);
         if (m_deviceId != 0) {
@@ -120,9 +119,9 @@ void AudioPlayer::pause() {
 }
 
 void AudioPlayer::stop() {
-    if (!m_stream) return;
-
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream) { return; }
+
     if (m_playing) {
         SDL_PauseAudioStreamDevice(m_stream);
         if (m_deviceId != 0) {
@@ -149,6 +148,7 @@ void AudioPlayer::reset() {
 }
 
 void AudioPlayer::setVolume(int volume) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_volume = std::clamp(volume, 0, 100);
     applyStreamGain();
 }
@@ -158,6 +158,7 @@ int AudioPlayer::volume() const {
 }
 
 void AudioPlayer::setMuted(bool muted) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_muted = muted;
     applyStreamGain();
 }
@@ -167,7 +168,8 @@ bool AudioPlayer::isMuted() const {
 }
 
 void AudioPlayer::applyStreamGain() {
-    if (!m_stream) return;
+    // 调用方需要持有 m_mutex
+    if (!m_stream) { return; }
     float gain = m_muted ? 0.0f : (m_volume.load() / 100.0f);
     SDL_SetAudioStreamGain(m_stream, gain);
 }
@@ -188,7 +190,10 @@ double AudioPlayer::playbackSpeed() const {
 }
 
 void AudioPlayer::enqueue(const std::vector<float>& audioData) {
-    if (audioData.empty() || !m_stream) return;
+    if (audioData.empty()) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream) { return; }
 
     // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
     if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
@@ -197,7 +202,10 @@ void AudioPlayer::enqueue(const std::vector<float>& audioData) {
 }
 
 void AudioPlayer::enqueue(const float* data, size_t sampleCount) {
-    if (!data || sampleCount == 0 || !m_stream) return;
+    if (!data || sampleCount == 0) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_stream) { return; }
 
     // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
     if (!SDL_PutAudioStreamData(m_stream, data, static_cast<int>(sampleCount * sizeof(float)))) {

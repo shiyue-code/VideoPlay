@@ -84,9 +84,14 @@ private:
     void drawDropdown(const SDL_FRect& rect,
                       const std::string& value,
                       bool open,
-                      const std::vector<std::string>& options,
                       float mouseX,
                       float mouseY);
+    void drawDropdownOptions(const SDL_FRect& rect,
+                             const std::vector<std::string>& options,
+                             float mouseX,
+                             float mouseY);
+    bool dropdownShouldOpenUpward(const SDL_FRect& rect, size_t optionCount) const;
+    SDL_FRect dropdownOptionRect(const SDL_FRect& rect, size_t index, size_t optionCount) const;
     void calculateLayout();
     void render();
     void handleEvents();

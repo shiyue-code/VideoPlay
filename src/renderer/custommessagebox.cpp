@@ -167,15 +167,26 @@ void CustomMessageBox::calculateSize() {
     int minTitleWidth = 300;
     m_windowWidth = std::max(minTitleWidth, titleWidth);
 
+    // 先按自然换行拆出消息中的每一行，取最长行的宽度作为窗口宽度参考
+    auto naturalLines = wrapText(m_message, 100000);
+    int maxContentLineWidth = 0;
+    for (const auto& line : naturalLines) {
+        int lineW = getTextWidth(line);
+        if (lineW > maxContentLineWidth) {
+            maxContentLineWidth = lineW;
+        }
+    }
+
+    m_windowWidth = std::max({m_windowWidth, maxContentLineWidth + 60, 400});
+    m_windowWidth = std::min(m_windowWidth, 900);
+
     auto lines = wrapText(m_message, m_windowWidth - 60);
     int lineHeight = getFontHeight() + 4;
     int contentHeight = static_cast<int>(lines.size()) * lineHeight;
     m_windowHeight = TITLE_HEIGHT + 20 + contentHeight + 20 + 40 + 20;
 
-    m_windowWidth = std::max(m_windowWidth, 400);
-    m_windowWidth = std::min(m_windowWidth, 800);
     m_windowHeight = std::max(m_windowHeight, 200);
-    m_windowHeight = std::min(m_windowHeight, 600);
+    m_windowHeight = std::min(m_windowHeight, 800);
 }
 
 std::vector<std::string> CustomMessageBox::wrapText(const std::string& text, int maxWidth) {

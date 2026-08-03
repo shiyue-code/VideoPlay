@@ -256,7 +256,7 @@ private:
 
         const auto base = std::filesystem::path(logFilePath);
         const auto parent = base.parent_path();
-        const auto filename = base.filename().string();
+        const auto filename = base.filename().u8string();
 
         if (maxFiles <= 1) {
             std::filesystem::remove(base, ec);

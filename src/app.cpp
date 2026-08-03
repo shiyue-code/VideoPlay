@@ -344,9 +344,9 @@ void VideoPlayerApp::shutdown() {
         m_player->stop();
     }
 
-    m_renderer.reset();
-    m_player.reset();
     m_subtitleParser.reset();
+    m_player.reset();
+    m_renderer.reset();
 
     logger().info("VideoPlayerApp shutdown complete");
 }
@@ -811,10 +811,10 @@ void VideoPlayerApp::openFolderDialog() {
         try {
             for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {
                 if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
+                    std::string ext = entry.path().extension().u8string();
                     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
                     if (std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
-                        mediaFiles.push_back(entry.path().string());
+                        mediaFiles.push_back(entry.path().u8string());
                     }
                 }
             }
