@@ -642,6 +642,7 @@ void SDLRenderer::renderSubtitleBitmap(int64_t positionMs) {
     if (positionMs < m_currentBitmap.startMs || positionMs >= m_currentBitmap.endMs) {
         return;
     }
+
     if (m_videoWidth <= 0 || m_videoHeight <= 0 || m_windowWidth <= 0 || m_windowHeight <= 0) {
         return;
     }

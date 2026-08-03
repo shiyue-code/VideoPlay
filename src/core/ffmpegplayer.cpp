@@ -1142,7 +1142,9 @@ void FFmpegPlayer::decodeLoop() {
             AVSubtitle sub{};
             int gotSub = 0;
             if (avcodec_decode_subtitle2(m_subtitleCtx.codecContext, &sub, &gotSub, packet) >= 0 && gotSub) {
-                int64_t ptsMs = av_rescale_q(sub.pts, {1, AV_TIME_BASE}, {1, 1000});
+                int64_t pktPts = packet->pts != AV_NOPTS_VALUE ? packet->pts : (packet->dts != AV_NOPTS_VALUE ? packet->dts : 0);
+                int64_t ptsMs = av_rescale_q(pktPts - m_subtitleCtx.startTime,
+                                             m_subtitleCtx.stream->time_base, {1, 1000});
                 for (unsigned i = 0; i < sub.num_rects; i++) {
                     AVSubtitleRect* rect = sub.rects[i];
                     if (!rect) continue;
@@ -1154,7 +1156,7 @@ void FFmpegPlayer::decodeLoop() {
                         bm.width = rect->w;
                         bm.height = rect->h;
                         bm.startMs = ptsMs + sub.start_display_time;
-                        bm.endMs = bm.startMs + sub.end_display_time;
+                        bm.endMs = bm.startMs + (sub.end_display_time > 0 ? sub.end_display_time : 5000);
 
                         const uint8_t* src = rect->data[0];
                         const int linesize = rect->linesize[0];

@@ -732,6 +732,11 @@ void SDLRenderer::setSubtitleBitmap(const SubtitleBitmap& bitmap) {
         SDL_DestroyTexture(m_subtitleTexture);
     }
 
+    logger().info("[PGS] setSubtitleBitmap " + std::to_string(bitmap.width) + "x" +
+                  std::to_string(bitmap.height) + " @(" + std::to_string(bitmap.x) + "," +
+                  std::to_string(bitmap.y) + ") t=" + std::to_string(bitmap.startMs) + ".." +
+                  std::to_string(bitmap.endMs));
+
     m_subtitleTexture = SDL_CreateTexture(m_renderer,
         SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
         bitmap.width, bitmap.height);
