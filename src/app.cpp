@@ -657,13 +657,14 @@ void VideoPlayerApp::render() {
 }
 
 void VideoPlayerApp::openFile(const std::string& path) {
+    try {
     const bool networkSource = isNetworkUrl(path);
     if (!networkSource && !std::filesystem::exists(std::filesystem::u8path(path))) {
         logger().error("File not found: " + path);
         return;
     }
 
-    logger().info("Opening file: " + path);
+    logger().info("openFile: " + path + ", currentIndex=" + std::to_string(m_currentIndex));
 
     // 停止当前播放
     stop();
@@ -675,6 +676,10 @@ void VideoPlayerApp::openFile(const std::string& path) {
     // 加载文件
     if (m_player->loadFile(path)) {
         m_currentFile = path;
+        auto it = std::find(m_playlist.begin(), m_playlist.end(), m_currentFile);
+        if (it != m_playlist.end()) {
+            m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
+        }
         m_aiResult = AIAnalysisResult();
         if (m_searchEngine) {
             m_searchEngine->clearIndex();
@@ -759,6 +764,12 @@ void VideoPlayerApp::openFile(const std::string& path) {
         logger().error("Failed to load file: " + path);
         if (m_renderer) {
             m_renderer->showMessageBox("打开文件失败", "无法加载文件: " + path + "\n请检查文件格式是否受支持。", true);
+        }
+    }
+    } catch (const std::exception& e) {
+        logger().error("openFile exception for " + path + ": " + std::string(e.what()));
+        if (m_renderer) {
+            m_renderer->showMessageBox("打开文件异常", "无法打开文件: " + path + "\n" + e.what(), true);
         }
     }
 }

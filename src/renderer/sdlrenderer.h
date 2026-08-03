@@ -285,6 +285,7 @@ private:
     bool handleMenuClick(int x, int y);
     void closeAllMenus(bool animate = true);
     bool isMenuOpen() const;
+    bool isTopMenuVisible(size_t index) const;
 
     // 右键上下文菜单
     void showContextMenu(int x, int y);

@@ -759,6 +759,12 @@ void SDLRenderer::setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_
     m_currentEpisodeIndex = currentIndex;
     m_episodeSeriesName = seriesName;
     m_episodeSeasonNumber = seasonNumber;
+    if (m_episodeData) {
+        logger().info("[Episode] setEpisodeData: count=" + std::to_string(m_episodeData->size()) +
+                      ", current=" + std::to_string(currentIndex));
+    } else {
+        logger().info("[Episode] setEpisodeData: null");
+    }
 }
 
 void SDLRenderer::toggleEpisodePanel() {

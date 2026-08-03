@@ -4,6 +4,8 @@
 
 #include "renderer/windowframe.h"
 #include <SDL3/SDL.h>
+
+#define NOMINMAX
 #include <windows.h>
 
 namespace VideoPlay {

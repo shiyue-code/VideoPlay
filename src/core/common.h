@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <chrono>
+#include <cstdio>
 #include <vector>
 
 namespace VideoPlay {

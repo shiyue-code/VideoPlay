@@ -635,13 +635,14 @@ std::string AIAnalyzer::computeSourceHash(const std::string& filePath) const {
 
 std::string AIAnalyzer::computeFileHash(const std::string& filePath) const {
     try {
-        if (!std::filesystem::exists(filePath)) return "";
-        
-        std::ifstream file(filePath, std::ios::binary);
+        auto filePathObj = std::filesystem::u8path(filePath);
+        if (!std::filesystem::exists(filePathObj)) return "";
+
+        std::ifstream file(filePathObj, std::ios::binary);
         if (!file.is_open()) return "";
 
-        auto fileSize = std::filesystem::file_size(filePath);
-        auto modTime = std::filesystem::last_write_time(filePath).time_since_epoch().count();
+        auto fileSize = std::filesystem::file_size(filePathObj);
+        auto modTime = std::filesystem::last_write_time(filePathObj).time_since_epoch().count();
 
         std::stringstream ss;
         AIConfig config = snapshotConfig();

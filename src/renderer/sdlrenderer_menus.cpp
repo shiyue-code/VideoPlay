@@ -223,9 +223,7 @@ bool SDLRenderer::handleMenuClick(int x, int y) {
     
     int menuX = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
-        if (m_menus[i].label == "章节" && !m_hasChapters) continue;
-        if (m_menus[i].label == "音轨" && m_audioTracks.empty()) continue;
-        if (m_menus[i].label == "字幕" && m_subtitleTracks.empty()) continue;
+        if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
         int textW = getTextWidth(m_menus[i].label);
         int menuWidth = textW + kTopMenuPaddingX * 2;
         if (x >= menuX && x <= menuX + menuWidth) {
@@ -264,6 +262,15 @@ void SDLRenderer::closeAllMenus(bool animate) {
 
 bool SDLRenderer::isMenuOpen() const {
     return m_activeMenu >= 0;
+}
+
+bool SDLRenderer::isTopMenuVisible(size_t index) const {
+    if (index >= m_menus.size()) return false;
+    const std::string& label = m_menus[index].label;
+    if (label == "章节") return m_hasChapters;
+    if (label == "音轨") return !m_audioTracks.empty();
+    if (label == "字幕") return !m_subtitleTracks.empty();
+    return !label.empty();
 }
 
 void SDLRenderer::updateMenuAnimation() {
@@ -306,9 +313,7 @@ void SDLRenderer::renderMenuBar() {
     // 菜单项
     int x = kTopMenuX;
     for (int i = 0; i < (int)m_menus.size(); i++) {
-        if (m_menus[i].label == "章节" && !m_hasChapters) continue;
-        if (m_menus[i].label == "音轨" && m_audioTracks.empty()) continue;
-        if (m_menus[i].label == "字幕" && m_subtitleTracks.empty()) continue;
+        if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
         int textW = getTextWidth(m_menus[i].label);
         int itemWidth = textW + kTopMenuPaddingX * 2;
         

@@ -47,6 +47,7 @@ std::string EpisodeDetector::normalizeSeriesName(const std::string& name)
 std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeInfo(
     const std::string& filename)
 {
+    try {
     std::string name = std::filesystem::u8path(filename).stem().u8string();
     int season = 0;
     int episode = 0;
@@ -54,20 +55,20 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 1. 匹配 S01E02 / s01e02 / S1E02
     {
-        std::regex re(R"((.*?)\s*[Ss](\d+)[Ee](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
+        std::regex re(R"([Ss](\d+)[Ee](\d+))", std::regex::ECMAScript | std::regex::icase);
         std::smatch match;
-        if (std::regex_match(name, match, re))
+        if (std::regex_search(name, match, re))
         {
-            season = std::stoi(match[2].str());
-            episode = std::stoi(match[3].str());
-            seriesName = match[1].str();
+            season = std::stoi(match[1].str());
+            episode = std::stoi(match[2].str());
+            seriesName = match.prefix().str();
             return std::make_tuple(seriesName, season, episode);
         }
     }
 
     // 2. 匹配 1x02 / 01x02
     {
-        std::regex re(R"((.*?)\s*(\d+)[Xx](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*(\d+)[Xx](\d+).*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -80,7 +81,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 3. 匹配 EP02 / ep02 / Ep02
     {
-        std::regex re(R"((.*?)\s*[Ee][Pp](\d+)(?:\s+.*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[Ee][Pp](\d+).*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -92,7 +93,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 4. 匹配 第02集 / 第2话 / 第02回
     {
-        std::regex re(R"((.*?)\s*第\s*(\d+)\s*[集话回](?:\s+.*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*第\s*(\d+)\s*[集话回].*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -104,7 +105,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 5. 匹配 [02] / (02) / 【02】 在开头或中间
     {
-        std::regex re(R"((.*?)\s*[\[\(【]\s*(\d+)\s*[\]\)】](?:\s+.*)?)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*[\[\(【]\s*(\d+)\s*[\]\)】].*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -173,10 +174,15 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
     }
 
     return std::nullopt;
+    } catch (const std::exception& e) {
+        logger().warning("parseEpisodeInfo failed for " + filename + ": " + e.what());
+        return std::nullopt;
+    }
 }
 
 std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& filePath)
 {
+    try {
     if (!std::filesystem::exists(std::filesystem::u8path(filePath)))
     {
         return std::nullopt;
@@ -325,6 +331,10 @@ std::optional<SeriesGroup> EpisodeDetector::detectFromFile(const std::string& fi
                             std::to_string(group.episodes.size()) + " episodes");
 
     return group;
+    } catch (const std::exception& e) {
+        logger().warning("EpisodeDetector failed for " + filePath + ": " + e.what());
+        return std::nullopt;
+    }
 }
 
 } // namespace VideoPlay

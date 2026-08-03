@@ -4,8 +4,6 @@
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "core/episodedetector.h"
-#include <SDL3/SDL.h>
-#include <iostream>
 #include <filesystem>
 
 namespace VideoPlay {
@@ -95,28 +93,39 @@ void VideoPlayerApp::detectSeries(const std::string& path) {
 void VideoPlayerApp::playEpisode(size_t index) {
     if (!m_currentSeries || index >= m_currentSeries->episodes.size()) return;
 
-    m_progressCacheDirty = true;
-    // 保存当前集的进度
-    saveSeriesProgress();
+    try {
+        logger().info("playEpisode: index=" + std::to_string(index) +
+                      ", total=" + std::to_string(m_currentSeries->episodes.size()) +
+                      ", path=" + m_currentSeries->episodes[index].path);
 
-    std::string path = m_currentSeries->episodes[index].path;
-    if (!m_currentFile.empty() && m_currentFile == path) {
-        logger().debug("Already playing episode: " + path);
-        return;
+        m_progressCacheDirty = true;
+        // 保存当前集的进度
+        saveSeriesProgress();
+
+        std::string path = m_currentSeries->episodes[index].path;
+        if (!m_currentFile.empty() && m_currentFile == path) {
+            logger().debug("Already playing episode: " + path);
+            return;
+        }
+
+        // 同步播放列表索引（若该集已在列表中）
+        auto it = std::find(m_playlist.begin(), m_playlist.end(), path);
+        if (it != m_playlist.end()) {
+            m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
+        }
+
+        // 临时清空剧集数据，防止 openFile -> stop() -> onStateChanged(Stopped)
+        // 触发自动连播，导致递归跳过多集
+        m_currentSeries = std::nullopt;
+        m_renderer->setEpisodeData(nullptr, 0);
+        m_isManualOperation = true;
+        openFile(path);
+    } catch (const std::exception& e) {
+        logger().error("playEpisode exception: " + std::string(e.what()));
+        if (m_renderer) {
+            m_renderer->showMessageBox("切换剧集失败", "无法切换到指定剧集:\n" + std::string(e.what()), true);
+        }
     }
-
-    // 同步播放列表索引（若该集已在列表中）
-    auto it = std::find(m_playlist.begin(), m_playlist.end(), path);
-    if (it != m_playlist.end()) {
-        m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
-    }
-
-    // 临时清空剧集数据，防止 openFile -> stop() -> onStateChanged(Stopped)
-    // 触发自动连播，导致递归跳过多集
-    m_currentSeries = std::nullopt;
-    m_renderer->setEpisodeData(nullptr, 0);
-    m_isManualOperation = true;
-    openFile(path);
 }
 
 void VideoPlayerApp::playNextEpisode() {
@@ -142,7 +151,7 @@ void VideoPlayerApp::saveSeriesProgress() {
     if (!m_currentSeries) return;
 
     std::string seriesKey = m_currentSeries->episodes[0].path;
-    seriesKey = std::filesystem::path(seriesKey).parent_path().string() + "/" + m_currentSeries->seriesName;
+    seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
 
     std::unordered_map<std::string, int64_t> positions;
     for (const auto& ep : m_currentSeries->episodes) {
@@ -159,7 +168,7 @@ void VideoPlayerApp::restoreSeriesPosition() {
     if (!m_currentSeries) return;
 
     std::string seriesKey = m_currentSeries->episodes[0].path;
-    seriesKey = std::filesystem::path(seriesKey).parent_path().string() + "/" + m_currentSeries->seriesName;
+    seriesKey = std::filesystem::u8path(seriesKey).parent_path().u8string() + "/" + m_currentSeries->seriesName;
 
     auto progress = Settings::instance().seriesProgress(seriesKey);
     if (progress.lastEpisodeIndex >= 0 &&

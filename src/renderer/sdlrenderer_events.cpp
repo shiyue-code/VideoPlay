@@ -537,7 +537,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
         int menuX = kTopMenuX;
         for (int i = 0; i < (int)m_menus.size(); i++) {
-            if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+            if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
             int textW = getTextWidth(m_menus[i].label);
             int itemWidth = textW + kTopMenuPaddingX * 2;
             if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
@@ -697,6 +697,12 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
     }
 
     m_pressedControl = getControlAt(x, y, &m_pressedControlValue);
+    if (m_pressedControl == ControlType::EpisodeItem) {
+        logger().info("[Episode] Mouse down on item " + std::to_string(m_pressedControlValue));
+    }
+    if (m_pressedControl == ControlType::PlaylistItem) {
+        logger().info("[Playlist] Mouse down on item " + std::to_string(m_pressedControlValue));
+    }
 
     //  处理系统按钮（无边框模式下位于菜单栏区域�?
     if (m_pressedControl == ControlType::SysMinButton) {
@@ -754,7 +760,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
         int menuX = kTopMenuX;
         for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
-            if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+            if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
             menuX += getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2 + kTopMenuGap;
         }
         // 计算实际菜单宽度（与 renderMenu 一致）
@@ -969,6 +975,7 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
                     if (m_playlistItemCallback) m_playlistItemCallback(static_cast<size_t>(m_pressedControlValue));
                     break;
                 case ControlType::EpisodeItem:
+                    logger().info("[Episode] Clicked episode item " + std::to_string(m_pressedControlValue));
                     if (m_episodeItemCallback) m_episodeItemCallback(static_cast<size_t>(m_pressedControlValue));
                     break;
                 case ControlType::EpisodePrev:

@@ -180,19 +180,20 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
         // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏）
         renderSyncInfo(audioPts, videoPts, avDiff, m_showPlaylistPanel && !playlist.empty());
 
-        // 侧边面板随控制栏一起显隐
-        if (m_showPlaylistPanel && !playlist.empty()) {
-            renderPlaylistPanel(playlist, currentPlaylistIndex);
-        }
-        if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
-            renderEpisodePanel();
-        }
         if (m_showSearchPanel) {
             renderSearchPanel();
         }
     } else {
         // 控制栏隐藏时关闭已打开的菜单
         closeAllMenus(false);
+    }
+
+    // 侧边面板独立生命周期，不受控制栏自动隐藏影响
+    if (m_showPlaylistPanel && !playlist.empty()) {
+        renderPlaylistPanel(playlist, currentPlaylistIndex);
+    }
+    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+        renderEpisodePanel();
     }
 
     // 渲染字幕（始终显示，不受控制栏影响）
@@ -219,7 +220,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
             constexpr int kTopMenuGap = 8;
             int menuX = kTopMenuX;
             for (int i = 0; i < m_activeMenu; i++) {
-                if (m_menus[i].label == "章节" && !m_hasChapters) continue;
+                if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
                 int textW = getTextWidth(m_menus[i].label);
                 menuX += textW + kTopMenuPaddingX * 2 + kTopMenuGap;
             }

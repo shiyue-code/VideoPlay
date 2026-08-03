@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -239,6 +240,43 @@ private:
         std::filesystem::create_directories(std::filesystem::path(logFilePath).parent_path());
         file.open(logFilePath, std::ios::out | std::ios::app);
     }
+
+    bool shouldRotateLocked() const {
+        if (maxFileSize == 0) {
+            return false;
+        }
+        std::error_code ec;
+        auto size = std::filesystem::file_size(logFilePath, ec);
+        return !ec && size >= maxFileSize;
+    }
+
+    void rotateLogFilesLocked() {
+        std::error_code ec;
+        file.close();
+
+        const auto base = std::filesystem::path(logFilePath);
+        const auto parent = base.parent_path();
+        const auto filename = base.filename().string();
+
+        if (maxFiles <= 1) {
+            std::filesystem::remove(base, ec);
+            reopenFile();
+            return;
+        }
+
+        auto oldest = parent / (filename + "." + std::to_string(maxFiles - 1));
+        std::filesystem::remove(oldest, ec);
+
+        for (size_t i = maxFiles - 1; i > 1; --i) {
+            auto from = parent / (filename + "." + std::to_string(i - 1));
+            auto to = parent / (filename + "." + std::to_string(i));
+            std::filesystem::rename(from, to, ec);
+        }
+
+        auto firstBackup = parent / (filename + ".1");
+        std::filesystem::rename(base, firstBackup, ec);
+        reopenFile();
+    }
 };
 
 namespace {
@@ -383,6 +421,7 @@ LogLevel Logger::levelFromString(const std::string& level) {
     const std::string normalized = toLower(level);
     if (normalized == "trace") return LogLevel::Trace;
     if (normalized == "debug") return LogLevel::Debug;
+    if (normalized == "info") return LogLevel::Info;
     if (normalized == "warning" || normalized == "warn") return LogLevel::Warning;
     if (normalized == "error") return LogLevel::Error;
     if (normalized == "critical" || normalized == "fatal") return LogLevel::Critical;
@@ -452,6 +491,10 @@ void Logger::write(LogLevel level, const std::string& message) {
 
     if (!m_backend->file.is_open()) {
         m_backend->reopenFile();
+    }
+
+    if (m_backend->file.is_open() && m_backend->shouldRotateLocked()) {
+        m_backend->rotateLogFilesLocked();
     }
 
     if (m_backend->file.is_open()) {
