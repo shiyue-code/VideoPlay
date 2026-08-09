@@ -191,6 +191,7 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
                 case MenuId::VideoFilterContrastDown: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
                 case MenuId::VideoFilterSaturationUp: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
                 case MenuId::VideoFilterReset: config = VideoFilterConfig{}; break;  // 重置
+                default: break;
             }
             Settings::instance().setVideoFilterConfig(config);
             Settings::instance().save();
