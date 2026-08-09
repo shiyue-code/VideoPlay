@@ -82,8 +82,9 @@ bool VideoPlayerApp::initialize() {
         m_renderer->toggleBorderless();
     }
 
-    // 确保窗口获得焦点
+    // 先显示窗口，再获得焦点
     if (m_renderer->getWindow()) {
+        SDL_ShowWindow(m_renderer->getWindow());
         SDL_RaiseWindow(m_renderer->getWindow());
     }
 

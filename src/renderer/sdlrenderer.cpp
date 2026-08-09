@@ -116,7 +116,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         title.c_str(),
         width,
         height,
-        SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN
     );
 
     if (!m_window) {
@@ -125,7 +125,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
         return false;
     }
 
-    // 创建渲染器：优先尝试 OpenGL（使多重采样�?GL 特性生效）
+    // 创建渲染器：优先尝试 OpenGL（使多重采样、GL 特性生效）
     m_renderer = SDL_CreateRenderer(m_window, "opengl");
     if (m_renderer) {
         logger().info("Renderer backend: opengl");
