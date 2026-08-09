@@ -454,6 +454,7 @@ private:
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);
     void handleMouseMotion(int x, int y);
+    void handleMenuAutoDismiss(int x, int y);
     void handleMouseButtonDown(int x, int y);
     void handleMouseButtonUp(int x, int y);
     void handleMouseWheel(int y);
