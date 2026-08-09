@@ -24,11 +24,12 @@ Logger& logger() {
 
 
 
-void VideoPlayerApp::handleMenu(int menuId) {
+void VideoPlayerApp::handleMenu(MenuId menuId) {
+    int rawId = static_cast<int>(menuId);
     // 最近文件菜单项 ID 范围 100-109
-    if (menuId >= 100 && menuId < 110) {
+    if (rawId >= 100 && rawId < 110) {
         auto recent = Settings::instance().recentFiles();
-        size_t idx = static_cast<size_t>(menuId - 100);
+        size_t idx = static_cast<size_t>(rawId - 100);
         if (idx < recent.size()) {
             openFile(recent[idx]);
         }
@@ -36,114 +37,114 @@ void VideoPlayerApp::handleMenu(int menuId) {
     }
 
     switch (menuId) {
-        case 1: // 打开文件
+        case MenuId::OpenFile: // 打开文件
             openFileDialog();
             break;
-        case 2: // 打开文件夹
+        case MenuId::OpenFolder: // 打开文件夹
             openFolderDialog();
             break;
-        case 4: // 导入字幕
+        case MenuId::ImportSubtitle: // 导入字幕
             openSubtitleDialog();
             break;
-        case 3: // 退出
+        case MenuId::Exit: // 退出
             m_running = false;
             break;
-        case 10: // 播放/暂停
+        case MenuId::PlayPause: // 播放/暂停
             togglePlayPause();
             break;
-        case 11: // 停止
+        case MenuId::Stop: // 停止
             stop();
             break;
-        case 12: // 上一个
+        case MenuId::Prev: // 上一个
             playPrevious();
             break;
-        case 13: // 下一个
+        case MenuId::Next: // 下一个
             playNext();
             break;
-        case 18: // 播放列表
+        case MenuId::Playlist: // 播放列表
             m_renderer->togglePlaylistPanel();
             break;
-        case 19: // 上一集（播放菜单就近入口）
+        case MenuId::PrevEpisodePlayMenu: // 上一集（播放菜单就近入口）
             playPreviousEpisode();
             break;
-        case 22: // 下一集（播放菜单就近入口）
+        case MenuId::NextEpisodePlayMenu: // 下一集（播放菜单就近入口）
             playNextEpisode();
             break;
-        case 30: // 上一集
+        case MenuId::PrevEpisode: // 上一集
             playPreviousEpisode();
             break;
-        case 31: // 下一集
+        case MenuId::NextEpisode: // 下一集
             playNextEpisode();
             break;
-        case 32: // 切换选集面板
+        case MenuId::EpisodePanel: // 切换选集面板
             m_renderer->toggleEpisodePanel();
             break;
-        case 14: // 增加速度
+        case MenuId::SpeedUp: // 增加速度
             setSpeed(m_speed * 1.25);
             break;
-        case 15: // 降低速度
+        case MenuId::SpeedDown: // 降低速度
             setSpeed(m_speed * 0.8);
             break;
-        case 16: // 全屏
+        case MenuId::Fullscreen: // 全屏
             if (m_renderer) m_renderer->toggleFullscreen();
             break;
-        case 17: // 无边框模式
+        case MenuId::Borderless: // 无边框模式
             if (m_renderer) m_renderer->toggleBorderless();
             break;
-        case 50: // 快捷键
+        case MenuId::Help: // 快捷键
             showHelp();
             break;
-        case 51: // 关于
+        case MenuId::About: // 关于
             showAbout();
             break;
-        case 60: // 不循环
+        case MenuId::LoopNone: // 不循环
             Settings::instance().setLoopMode(LoopMode::None);
             if (m_renderer) m_renderer->setLoopMode(0);
             break;
-        case 61: // 单曲循环
+        case MenuId::LoopSingle: // 单曲循环
             Settings::instance().setLoopMode(LoopMode::Single);
             if (m_renderer) m_renderer->setLoopMode(1);
             break;
-        case 62: // 列表循环
+        case MenuId::LoopPlaylist: // 列表循环
             Settings::instance().setLoopMode(LoopMode::Playlist);
             if (m_renderer) m_renderer->setLoopMode(2);
             break;
-        case 70: // 原始比例
+        case MenuId::AspectOriginal: // 原始比例
             Settings::instance().setAspectMode(AspectMode::Original);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::Original);
             break;
-        case 71: // 16:9
+        case MenuId::Aspect16_9: // 16:9
             Settings::instance().setAspectMode(AspectMode::R16_9);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::R16_9);
             break;
-        case 72: // 4:3
+        case MenuId::Aspect4_3: // 4:3
             Settings::instance().setAspectMode(AspectMode::R4_3);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::R4_3);
             break;
-        case 73: // 铺满
+        case MenuId::AspectFill: // 铺满
             Settings::instance().setAspectMode(AspectMode::FillWindow);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::FillWindow);
             break;
-        case 80: // 始终置顶
+        case MenuId::AlwaysOnTop: // 始终置顶
             if (m_renderer) {
                 m_renderer->toggleAlwaysOnTop();
                 Settings::instance().setAlwaysOnTop(m_renderer->isAlwaysOnTop());
             }
             break;
-        case 90: // AB循环: 设置A点
+        case MenuId::ABLoopSetA: // AB循环: 设置A点
             setLoopPointA();
             break;
-        case 91: // AB循环: 设置B点
+        case MenuId::ABLoopSetB: // AB循环: 设置B点
             setLoopPointB();
             break;
-        case 92: // AB循环: 清除
+        case MenuId::ABLoopClear: // AB循环: 清除
             clearLoop();
             break;
-        case 93:
-        case 94:
-        case 95:
-        case 96: {
-            auto preset = static_cast<AudioFilterPreset>(menuId - 93);
+        case MenuId::AudioFilterOff:
+        case MenuId::AudioFilterVoice:
+        case MenuId::AudioFilterBass:
+        case MenuId::AudioFilterNight: {
+            auto preset = static_cast<AudioFilterPreset>(rawId - 93);
             auto config = audioFilterConfigForPreset(preset);
             Settings::instance().setAudioFilterConfig(config);
             Settings::instance().save();
@@ -157,7 +158,7 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
-        case 97: {
+        case MenuId::HardwareDecoding: {
             bool enabled = !Settings::instance().hardwareDecodingEnabled();
             Settings::instance().setHardwareDecodingEnabled(enabled);
             Settings::instance().save();
@@ -174,22 +175,22 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
-        case 121:
-        case 122:
-        case 123:
-        case 124:
-        case 125:
-        case 126: {
+        case MenuId::VideoFilterBrightnessUp:
+        case MenuId::VideoFilterBrightnessDown:
+        case MenuId::VideoFilterContrastUp:
+        case MenuId::VideoFilterContrastDown:
+        case MenuId::VideoFilterSaturationUp:
+        case MenuId::VideoFilterReset: {
             if (!m_player) break;
             auto config = m_player->videoFilterConfig();
             config.enabled = true;
             switch (menuId) {
-                case 121: config.brightness = std::clamp(config.brightness + 0.05f, -1.0f, 1.0f); break;
-                case 122: config.brightness = std::clamp(config.brightness - 0.05f, -1.0f, 1.0f); break;
-                case 123: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
-                case 124: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
-                case 125: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
-                case 126: config = VideoFilterConfig{}; break;  // 重置
+                case MenuId::VideoFilterBrightnessUp: config.brightness = std::clamp(config.brightness + 0.05f, -1.0f, 1.0f); break;
+                case MenuId::VideoFilterBrightnessDown: config.brightness = std::clamp(config.brightness - 0.05f, -1.0f, 1.0f); break;
+                case MenuId::VideoFilterContrastUp: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
+                case MenuId::VideoFilterContrastDown: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
+                case MenuId::VideoFilterSaturationUp: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
+                case MenuId::VideoFilterReset: config = VideoFilterConfig{}; break;  // 重置
             }
             Settings::instance().setVideoFilterConfig(config);
             Settings::instance().save();
@@ -206,26 +207,26 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
-        case 300: // AI 分析当前视频
+        case MenuId::AIAnalyze: // AI 分析当前视频
             startAIAnalysis();
             break;
-        case 301: // 显示摘要
+        case MenuId::AISummary: // 显示摘要
             showAISummary();
             break;
-        case 302: // 搜索内容
+        case MenuId::Search: // 搜索内容
             showSearchPanel();
             break;
-        case 303: // 清除 AI 缓存
+        case MenuId::ClearAICache: // 清除 AI 缓存
             clearAICache();
             break;
-        case 304: // AI 设置
+        case MenuId::AISettings: // AI 设置
             showAISettings();
             break;
     }
 
     // 章节跳转菜单项 ID 范围 200-249
-    if (menuId >= 200 && menuId < 250) {
-        size_t idx = static_cast<size_t>(menuId - 200);
+    if (rawId >= 200 && rawId < 250) {
+        size_t idx = static_cast<size_t>(rawId - 200);
         auto chapters = m_player->chapters();
         if (idx < chapters.size()) {
             int64_t targetPos = chapters[idx].startTime;
@@ -239,8 +240,8 @@ void VideoPlayerApp::handleMenu(int menuId) {
     }
 
     // 音轨切换菜单项 ID 范围 400-449
-    if (menuId >= 400 && menuId < 450) {
-        int trackIndex = menuId - 400;
+    if (rawId >= 400 && rawId < 450) {
+        int trackIndex = rawId - 400;
         if (m_player && m_renderer) {
             if (m_player->setAudioTrack(trackIndex)) {
                 m_renderer->setAudioTracks(m_player->audioTracks(),
@@ -252,8 +253,8 @@ void VideoPlayerApp::handleMenu(int menuId) {
     }
 
     // 字幕切换菜单项 ID 范围 450-499
-    if (menuId >= 450 && menuId < 500) {
-        int trackIndex = (menuId == 450) ? -1 : (menuId - 451);
+    if (rawId >= 450 && rawId < 500) {
+        int trackIndex = (rawId == 450) ? -1 : (rawId - 451);
         if (m_player && m_renderer) {
             if (m_player->setSubtitleTrack(trackIndex)) {
                 m_renderer->clearSubtitleBitmap();

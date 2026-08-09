@@ -804,7 +804,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             if (localY >= 0) {
                 int itemIndex = localY / itemHeight;
                 if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
-                    m_menuCallback(submenuItemId(m_activeSubmenuParent, itemIndex));
+                    m_menuCallback(static_cast<MenuId>(submenuItemId(m_activeSubmenuParent, itemIndex)));
                     m_menuManager->closeAllMenus();
                     m_pressedControl = ControlType::None;
                 }
@@ -823,7 +823,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                         if (isSubmenuParent(item.id)) {
                             m_pressedControl = ControlType::None;
                         } else if (!item.separator && item.enabled && m_menuCallback) {
-                            m_menuCallback(item.id);
+                            m_menuCallback(static_cast<MenuId>(item.id));
                             m_menuManager->closeAllMenus();
                             // 防止 handleMouseButtonUp 触发菜单下方的控件点击
                             m_pressedControl = ControlType::None;

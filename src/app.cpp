@@ -218,7 +218,7 @@ bool VideoPlayerApp::initialize() {
             case 'c': clearLoop(); break;
         }
     });
-    m_renderer->setMenuCallback([this](int menuId) {
+    m_renderer->setMenuCallback([this](MenuId menuId) {
         handleMenu(menuId);
     });
     m_renderer->setAudioTrackCallback([this](int trackIndex) {

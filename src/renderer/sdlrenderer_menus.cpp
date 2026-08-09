@@ -703,7 +703,7 @@ bool SDLRenderer::handleContextMenuClick(int x, int y) {
             y >= itemY && y <= itemY + itemHeight && item.enabled) {
             hideContextMenu();
             if (m_menuCallback) {
-                m_menuCallback(item.id);
+                m_menuCallback(static_cast<MenuId>(item.id));
             }
             return true;
         }
