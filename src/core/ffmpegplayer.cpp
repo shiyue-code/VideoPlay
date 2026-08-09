@@ -1688,12 +1688,13 @@ std::string FFmpegPlayer::streamTitle(AVStream* stream) const {
 
 std::string FFmpegPlayer::streamLanguage(AVStream* stream) const {
     if (!stream) return {};
-    // 优先用 AVStream->language（FFmpeg 6.x），其次 metadata
-    if (stream->event_flags & AVSTREAM_EVENT_FLAG_NEW_PACKETS) {
-        // noop
+    // 优先读取 BCP-47 / IETF 语言标签（MKV/WebM 常见），信息更丰富
+    for (const char* key : {"language_ietf", "BCP47", "LanguageIETF", "Language", "language"}) {
+        AVDictionaryEntry* entry = av_dict_get(stream->metadata, key, nullptr, 0);
+        if (entry && entry->value[0]) {
+            return std::string(entry->value);
+        }
     }
-    AVDictionaryEntry* entry = av_dict_get(stream->metadata, "language", nullptr, 0);
-    if (entry && entry->value[0]) return std::string(entry->value);
     return {};
 }
 

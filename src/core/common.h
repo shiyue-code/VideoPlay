@@ -64,10 +64,43 @@ struct TrackInfo {
     std::string subtitleType;   // "text" / "ass" / "pgs" 等
 };
 
+namespace detail {
+
+inline bool isSimplifiedChinese(std::string_view key) {
+    // BCP-47 子标签 / 常见命名
+    return key.find("hans") != std::string_view::npos ||
+           key.find("cn") != std::string_view::npos ||
+           key.find("sg") != std::string_view::npos ||
+           key.find("sc") != std::string_view::npos ||
+           key.find("simplified") != std::string_view::npos;
+}
+
+inline bool isTraditionalChinese(std::string_view key) {
+    return key.find("hant") != std::string_view::npos ||
+           key.find("tw") != std::string_view::npos ||
+           key.find("hk") != std::string_view::npos ||
+           key.find("mo") != std::string_view::npos ||
+           key.find("tc") != std::string_view::npos ||
+           key.find("traditional") != std::string_view::npos;
+}
+
+} // namespace detail
+
 // 轨道语言代码转可读名称
+// 支持 BCP-47 标签（如 zh-CN、zh-TW、zh-Hant），并优先区分简繁体
 inline std::string trackLanguageName(const std::string& code) {
     if (code.empty()) return "未知";
-    if (code == "chi" || code == "zho" || code == "zh" || code == "chinese") return "中文";
+
+    const std::string lower = toLower(code);
+    const bool isChinese = lower == "chi" || lower == "zho" || lower == "zh" ||
+                           lower == "chinese" || lower.rfind("zh-", 0) == 0;
+
+    if (isChinese) {
+        if (detail::isSimplifiedChinese(lower)) return "简体中文";
+        if (detail::isTraditionalChinese(lower)) return "繁体中文";
+        return "中文";
+    }
+
     if (code == "eng" || code == "en" || code == "english") return "英语";
     if (code == "jpn" || code == "ja" || code == "japanese") return "日语";
     if (code == "kor" || code == "ko" || code == "korean") return "韩语";
@@ -79,9 +112,33 @@ inline std::string trackLanguageName(const std::string& code) {
     return code;
 }
 
+// 根据流标题中的简繁体关键字进一步区分中文
+inline std::string refineChineseName(const std::string& base, const std::string& title) {
+    if (base != "中文") return base;
+    if (title.empty()) return base;
+
+    const std::string lower = toLower(title);
+    // 优先检查明确的繁体关键字，再检查简体关键字
+    if (lower.find("繁體") != std::string::npos ||
+        lower.find("繁体") != std::string::npos ||
+        lower.find("traditional") != std::string::npos) {
+        return "繁体中文";
+    }
+    if (lower.find("簡體") != std::string::npos ||
+        lower.find("简体") != std::string::npos ||
+        lower.find("simplified") != std::string::npos) {
+        return "简体中文";
+    }
+    return base;
+}
+
 // 生成轨道显示标签
 inline std::string trackLabel(const TrackInfo& t, int index) {
-    std::string label = std::to_string(index) + ". " + trackLanguageName(t.language);
+    std::string lang = trackLanguageName(t.language);
+    if (lang == "中文") {
+        lang = refineChineseName(lang, t.title);
+    }
+    std::string label = std::to_string(index) + ". " + lang;
     if (!t.title.empty()) {
         label += " (" + t.title + ")";
     }
