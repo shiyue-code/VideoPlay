@@ -301,6 +301,7 @@ void FFmpegPlayer::closeFile() {
         m_videoCtx.swsContext = nullptr;
     }
     releaseHardwareDecoder();
+    cleanupVideoFilterGraph();
     if (m_videoCtx.codecContext) {
         avcodec_free_context(&m_videoCtx.codecContext);
     }
@@ -1206,6 +1207,7 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
         }
     };
     std::unique_ptr<AVFrame, decltype(frameDeleter)> transferredFrame(nullptr, frameDeleter);
+    std::unique_ptr<AVFrame, decltype(frameDeleter)> filteredFrame(nullptr, frameDeleter);
 
     AVFrame* sourceFrame = frame;
     if (m_hwPixelFormat != AV_PIX_FMT_NONE &&
@@ -1224,6 +1226,13 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
         }
         av_frame_copy_props(transferredFrame.get(), frame);
         sourceFrame = transferredFrame.get();
+    }
+
+    // 应用视频基础参数滤镜（eq / hue）
+    AVFrame* filterOut = processVideoFilter(sourceFrame);
+    if (filterOut != sourceFrame) {
+        filteredFrame.reset(filterOut);
+        sourceFrame = filterOut;
     }
 
     if (!sourceFrame->data[0]) return result;
@@ -1592,6 +1601,196 @@ void FFmpegPlayer::adjustAudioSync(int64_t deltaMs) {
 
 int64_t FFmpegPlayer::audioSyncOffsetMs() const {
     return m_audioSyncOffsetMs.load();
+}
+
+void FFmpegPlayer::setVideoFilterConfig(const VideoFilterConfig& config) {
+    std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+    m_videoFilterConfig = config;
+    m_videoFilterDescription.clear();  // 下次 convert 时重建 graph
+    logger().info("Video filter config updated");
+}
+
+VideoFilterConfig FFmpegPlayer::videoFilterConfig() const {
+    std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+    return m_videoFilterConfig;
+}
+
+void FFmpegPlayer::cleanupVideoFilterGraph() {
+    if (m_videoFilterGraph) {
+        avfilter_graph_free(&m_videoFilterGraph);
+    }
+    m_videoFilterSrc = nullptr;
+    m_videoFilterSink = nullptr;
+    m_videoFilterWidth = 0;
+    m_videoFilterHeight = 0;
+    m_videoFilterFormat = AV_PIX_FMT_NONE;
+    m_videoFilterDescription.clear();
+}
+
+std::string FFmpegPlayer::buildVideoFilterDescription() const {
+    if (!m_videoFilterConfig.enabled || m_videoFilterConfig.isDefault()) {
+        return {};
+    }
+
+    std::ostringstream desc;
+    // 先统一到 yuv420p（eq/hue 的要求）
+    desc << "format=pix_fmts=yuv420p,";
+    desc << "eq=brightness=" << m_videoFilterConfig.brightness
+         << ":contrast=" << m_videoFilterConfig.contrast
+         << ":saturation=" << m_videoFilterConfig.saturation
+         << ":gamma=" << m_videoFilterConfig.gamma;
+    desc << ",hue=h=" << m_videoFilterConfig.hue;
+    return desc.str();
+}
+
+bool FFmpegPlayer::ensureVideoFilterGraph(AVFrame* frame) {
+    if (!frame) return false;
+
+    std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+    std::string description = buildVideoFilterDescription();
+
+    int width = frame->width;
+    int height = frame->height;
+    AVPixelFormat format = static_cast<AVPixelFormat>(frame->format);
+
+    if (description.empty()) {
+        if (m_videoFilterGraph) {
+            cleanupVideoFilterGraph();
+        }
+        return false;
+    }
+
+    bool graphMatches =
+        m_videoFilterGraph &&
+        m_videoFilterWidth == width &&
+        m_videoFilterHeight == height &&
+        m_videoFilterFormat == format &&
+        m_videoFilterDescription == description;
+    if (graphMatches) {
+        return true;
+    }
+
+    cleanupVideoFilterGraph();
+
+    AVFilterGraph* graph = avfilter_graph_alloc();
+    if (!graph) {
+        logger().warning("Failed to allocate video filter graph");
+        return false;
+    }
+
+    const AVFilter* bufferSrc = avfilter_get_by_name("buffer");
+    const AVFilter* bufferSink = avfilter_get_by_name("buffersink");
+    if (!bufferSrc || !bufferSink) {
+        logger().warning("Required video filter endpoints are unavailable");
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    AVFilterContext* src = nullptr;
+    AVFilterContext* sink = nullptr;
+    int ret = avfilter_graph_create_filter(&src, bufferSrc, "in", nullptr, nullptr, graph);
+    if (ret < 0) {
+        logger().warning("Failed to create video filter source");
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    std::ostringstream args;
+    args << "video_size=" << width << "x" << height
+         << ":pix_fmt=" << static_cast<int>(format)
+         << ":time_base=" << (m_videoCtx.stream ? m_videoCtx.stream->time_base.num : 1)
+         << "/" << (m_videoCtx.stream ? m_videoCtx.stream->time_base.den : 1)
+         << ":pixel_aspect=" << (frame->sample_aspect_ratio.num ? frame->sample_aspect_ratio.num : 1)
+         << "/" << (frame->sample_aspect_ratio.den ? frame->sample_aspect_ratio.den : 1);
+
+    ret = avfilter_init_str(src, args.str().c_str());
+    if (ret < 0) {
+        logger().warning("Failed to init video filter source: " + args.str());
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    ret = avfilter_graph_create_filter(&sink, bufferSink, "out", nullptr, nullptr, graph);
+    if (ret < 0) {
+        logger().warning("Failed to create video filter sink");
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    AVFilterInOut* outputs = avfilter_inout_alloc();
+    AVFilterInOut* inputs = avfilter_inout_alloc();
+    if (!outputs || !inputs) {
+        avfilter_inout_free(&outputs);
+        avfilter_inout_free(&inputs);
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = src;
+    outputs->pad_idx = 0;
+    outputs->next = nullptr;
+
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = sink;
+    inputs->pad_idx = 0;
+    inputs->next = nullptr;
+
+    ret = avfilter_graph_parse_ptr(graph, description.c_str(), &inputs, &outputs, nullptr);
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    if (ret < 0) {
+        logger().warning("Failed to parse video filter graph: " + description);
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    ret = avfilter_graph_config(graph, nullptr);
+    if (ret < 0) {
+        logger().warning("Failed to configure video filter graph: " + description);
+        avfilter_graph_free(&graph);
+        return false;
+    }
+
+    m_videoFilterGraph = graph;
+    m_videoFilterSrc = src;
+    m_videoFilterSink = sink;
+    m_videoFilterWidth = width;
+    m_videoFilterHeight = height;
+    m_videoFilterFormat = format;
+    m_videoFilterDescription = description;
+    logger().info("Video filter graph enabled: " + description);
+    return true;
+}
+
+AVFrame* FFmpegPlayer::processVideoFilter(AVFrame* frame) {
+    if (!ensureVideoFilterGraph(frame)) {
+        return frame;
+    }
+
+    int ret = av_buffersrc_add_frame(m_videoFilterSrc, frame);
+    if (ret < 0) {
+        logger().warning("Failed to add frame to video filter");
+        return frame;
+    }
+
+    AVFrame* filtered = av_frame_alloc();
+    if (!filtered) return frame;
+
+    ret = av_buffersink_get_frame(m_videoFilterSink, filtered);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+        av_frame_free(&filtered);
+        return frame;
+    }
+    if (ret < 0) {
+        logger().warning("Failed to get frame from video filter");
+        av_frame_free(&filtered);
+        return frame;
+    }
+
+    // 保留原始 pts 等元数据
+    av_frame_copy_props(filtered, frame);
+    return filtered;
 }
 
 void FFmpegPlayer::setNetworkState(NetworkState state) {

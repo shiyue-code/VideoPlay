@@ -78,6 +78,9 @@ public:
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
 
+    void setVideoFilterConfig(const VideoFilterConfig& config);
+    VideoFilterConfig videoFilterConfig() const;
+
     // 音频同步偏移（毫秒）：正值=音频延后，负值=音频提前
     void setAudioSyncOffsetMs(int64_t offsetMs);
     void adjustAudioSync(int64_t deltaMs);
@@ -182,6 +185,18 @@ private:
     AVSampleFormat m_audioFilterSampleFormat = AV_SAMPLE_FMT_NONE;
     std::string m_audioFilterDescription;
     mutable std::mutex m_audioFilterMutex;
+
+    // 视频基础参数滤镜 (eq / hue)
+    VideoFilterConfig m_videoFilterConfig;
+    mutable std::mutex m_videoFilterMutex;
+    AVFilterGraph* m_videoFilterGraph = nullptr;
+    AVFilterContext* m_videoFilterSrc = nullptr;
+    AVFilterContext* m_videoFilterSink = nullptr;
+    int m_videoFilterWidth = 0;
+    int m_videoFilterHeight = 0;
+    AVPixelFormat m_videoFilterFormat = AV_PIX_FMT_NONE;
+    std::string m_videoFilterDescription;
+
     MediaInfo m_mediaInfo;
     AVBufferRef* m_hwDeviceCtx = nullptr;
     AVPixelFormat m_hwPixelFormat = AV_PIX_FMT_NONE;
@@ -234,6 +249,11 @@ private:
     static constexpr int kPreloadAudioMs = 40;
     static constexpr int kPreloadTimeoutMs = 1000;
     void pushVideoFrame(VideoFrame&& frame);
+
+    std::string buildVideoFilterDescription() const;
+    bool ensureVideoFilterGraph(AVFrame* frame);
+    void cleanupVideoFilterGraph();
+    AVFrame* processVideoFilter(AVFrame* frame);
 
     StateCallback m_stateCallback;
     PositionCallback m_positionCallback;

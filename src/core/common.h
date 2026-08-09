@@ -49,6 +49,12 @@ struct ChapterInfo {
     std::string title;
 };
 
+// 用户书签
+struct Bookmark {
+    int64_t timeMs = 0;  // 毫秒
+    std::string title;
+};
+
 // 音轨/字幕轨信息
 struct TrackInfo {
     int streamIndex = -1;       // FFmpeg 流索引
@@ -206,6 +212,21 @@ enum class AudioFilterPreset {
     Voice = 1,
     Bass = 2,
     Night = 3
+};
+
+struct VideoFilterConfig {
+    bool enabled = false;
+    float brightness = 0.0f;   // -1.0 ~ 1.0
+    float contrast = 1.0f;     //  0.0 ~ 2.0
+    float saturation = 1.0f;   //  0.0 ~ 3.0
+    float hue = 0.0f;          // -180 ~ 180
+    float gamma = 1.0f;        //  0.1 ~ 10.0
+
+    bool isDefault() const {
+        return !enabled ||
+               (brightness == 0.0f && contrast == 1.0f &&
+                saturation == 1.0f && hue == 0.0f && gamma == 1.0f);
+    }
 };
 
 struct EQBand {

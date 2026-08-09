@@ -103,6 +103,8 @@ public:
     bool hardwareDecodingEnabled() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
+    void setVideoFilterConfig(const VideoFilterConfig& config);
+    VideoFilterConfig videoFilterConfig() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);
@@ -120,6 +122,13 @@ public:
     int64_t lastPosition(const std::string& filePath) const;
     void setLastDuration(const std::string& filePath, int64_t duration);
     int64_t lastDuration(const std::string& filePath) const;
+
+    // 用户书签（按文件路径）
+    std::vector<Bookmark> bookmarksForFile(const std::string& filePath) const;
+    void setBookmarksForFile(const std::string& filePath, const std::vector<Bookmark>& bookmarks);
+    void addBookmark(const std::string& filePath, const Bookmark& bookmark);
+    void removeBookmark(const std::string& filePath, int64_t timeMs);
+    void clearBookmarksForFile(const std::string& filePath);
 
     // 剧集进度记忆
     void setSeriesProgress(const std::string& seriesKey, int lastEpisodeIndex,

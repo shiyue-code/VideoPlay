@@ -426,6 +426,39 @@ AudioFilterConfig Settings::audioFilterConfig() const {
     return config;
 }
 
+void Settings::setVideoFilterConfig(const VideoFilterConfig& config) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    m_config["playback"]["videoFilter"] = {
+        {"enabled", config.enabled},
+        {"brightness", config.brightness},
+        {"contrast", config.contrast},
+        {"saturation", config.saturation},
+        {"hue", config.hue},
+        {"gamma", config.gamma}
+    };
+}
+
+VideoFilterConfig Settings::videoFilterConfig() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    VideoFilterConfig config;
+    if (!m_config.contains("playback") ||
+        !m_config["playback"].contains("videoFilter")) {
+        return config;
+    }
+
+    const auto& video = m_config["playback"]["videoFilter"];
+    config.enabled = video.value("enabled", false);
+    config.brightness = video.value("brightness", 0.0f);
+    config.contrast = video.value("contrast", 1.0f);
+    config.saturation = video.value("saturation", 1.0f);
+    config.hue = video.value("hue", 0.0f);
+    config.gamma = video.value("gamma", 1.0f);
+
+    return config;
+}
+
 // 最近文件
 void Settings::addRecentFile(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -532,6 +565,76 @@ int64_t Settings::lastDuration(const std::string& filePath) const {
         return m_config["durations"][filePath].get<int64_t>();
     }
     return 0;
+}
+
+// 用户书签（按文件路径）
+static nlohmann::json bookmarkToJson(const Bookmark& b) {
+    return { {"timeMs", b.timeMs}, {"title", b.title} };
+}
+
+static Bookmark bookmarkFromJson(const nlohmann::json& j) {
+    Bookmark b;
+    b.timeMs = j.value("timeMs", 0);
+    b.title = j.value("title", "");
+    return b;
+}
+
+std::vector<Bookmark> Settings::bookmarksForFile(const std::string& filePath) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<Bookmark> result;
+    if (m_config.contains("bookmarks") && m_config["bookmarks"].contains(filePath) &&
+        m_config["bookmarks"][filePath].is_array()) {
+        for (const auto& item : m_config["bookmarks"][filePath]) {
+            result.push_back(bookmarkFromJson(item));
+        }
+    }
+    return result;
+}
+
+void Settings::setBookmarksForFile(const std::string& filePath, const std::vector<Bookmark>& bookmarks) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_config.contains("bookmarks")) {
+        m_config["bookmarks"] = nlohmann::json::object();
+    }
+    if (bookmarks.empty()) {
+        m_config["bookmarks"].erase(filePath);
+    } else {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& b : bookmarks) {
+            arr.push_back(bookmarkToJson(b));
+        }
+        m_config["bookmarks"][filePath] = arr;
+    }
+}
+
+void Settings::addBookmark(const std::string& filePath, const Bookmark& bookmark) {
+    auto bookmarks = bookmarksForFile(filePath);
+    // 若同一位置已存在，覆盖
+    for (auto& b : bookmarks) {
+        if (std::abs(b.timeMs - bookmark.timeMs) < 500) {
+            b.title = bookmark.title;
+            setBookmarksForFile(filePath, bookmarks);
+            return;
+        }
+    }
+    bookmarks.push_back(bookmark);
+    std::sort(bookmarks.begin(), bookmarks.end(),
+              [](const Bookmark& a, const Bookmark& b) { return a.timeMs < b.timeMs; });
+    setBookmarksForFile(filePath, bookmarks);
+}
+
+void Settings::removeBookmark(const std::string& filePath, int64_t timeMs) {
+    auto bookmarks = bookmarksForFile(filePath);
+    bookmarks.erase(std::remove_if(bookmarks.begin(), bookmarks.end(),
+                                   [timeMs](const Bookmark& b) {
+                                       return std::abs(b.timeMs - timeMs) < 500;
+                                   }),
+                    bookmarks.end());
+    setBookmarksForFile(filePath, bookmarks);
+}
+
+void Settings::clearBookmarksForFile(const std::string& filePath) {
+    setBookmarksForFile(filePath, {});
 }
 
 // 剧集进度记忆

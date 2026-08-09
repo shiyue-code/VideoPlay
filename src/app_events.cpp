@@ -174,6 +174,38 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
+        case 101:
+        case 102:
+        case 103:
+        case 104:
+        case 105:
+        case 106: {
+            if (!m_player) break;
+            auto config = m_player->videoFilterConfig();
+            config.enabled = true;
+            switch (menuId) {
+                case 101: config.brightness = std::clamp(config.brightness + 0.05f, -1.0f, 1.0f); break;
+                case 102: config.brightness = std::clamp(config.brightness - 0.05f, -1.0f, 1.0f); break;
+                case 103: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
+                case 104: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
+                case 105: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
+                case 106: config = VideoFilterConfig{}; break;  // 重置
+            }
+            Settings::instance().setVideoFilterConfig(config);
+            Settings::instance().save();
+            m_player->setVideoFilterConfig(config);
+            if (m_renderer) {
+                if (config.isDefault()) {
+                    m_renderer->showOSD(OSDType::Info, "视频基础参数 已重置");
+                } else {
+                    m_renderer->showOSD(OSDType::Info,
+                        "亮度 " + std::to_string(config.brightness).substr(0, 5) +
+                        " 对比 " + std::to_string(config.contrast).substr(0, 4) +
+                        " 饱和 " + std::to_string(config.saturation).substr(0, 4));
+                }
+            }
+            break;
+        }
         case 300: // AI 分析当前视频
             startAIAnalysis();
             break;

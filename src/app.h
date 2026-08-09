@@ -57,6 +57,11 @@ private:
     void setLoopPointB();
     void clearLoop();
 
+    // 书签
+    void addBookmark();
+    void clearBookmarks();
+    void jumpToBookmark(int index);
+
     // 菜单处理
     void handleMenu(int menuId);
     void showHelp();
@@ -118,6 +123,7 @@ private:
     // 状态
     std::atomic<bool> m_running{false};
     std::string m_currentFile;
+    std::vector<Bookmark> m_bookmarks;
     std::string m_currentSubtitle;
     int64_t m_duration = 0;
     int64_t m_position = 0;

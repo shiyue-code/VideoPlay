@@ -328,6 +328,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_T:
                         toggleAlwaysOnTop();
                         break;
+                    case SDLK_B:
+                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                            if (m_clearBookmarksCallback) m_clearBookmarksCallback();
+                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                            if (m_addBookmarkCallback) m_addBookmarkCallback();
+                        }
+                        break;
                     case SDLK_G:
                         if (event.key.mod & SDL_KMOD_SHIFT) {
                             if (m_audioSyncCallback) m_audioSyncCallback(-500);  // 音频提前 0.5s
@@ -464,6 +471,14 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                     m_tooltip = m_chapters[m_hoveredControlValue].title;
                     if (m_tooltip.empty()) {
                         m_tooltip = "Chapter " + std::to_string(m_hoveredControlValue + 1);
+                    }
+                }
+                break;
+            case ControlType::BookmarkMarker:
+                if (m_hoveredControlValue >= 0 && m_hoveredControlValue < (int)m_bookmarks.size()) {
+                    m_tooltip = m_bookmarks[m_hoveredControlValue].title;
+                    if (m_tooltip.empty()) {
+                        m_tooltip = "Bookmark " + std::to_string(m_hoveredControlValue + 1);
                     }
                 }
                 break;
@@ -870,6 +885,11 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                         ", seekParam=" + std::to_string(1000.0 + ratio * 1000.0));
                     m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
                 }
+            }
+            break;
+        case ControlType::BookmarkMarker:
+            if (m_bookmarkClickCallback && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_bookmarks.size()) {
+                m_bookmarkClickCallback(m_pressedControlValue);
             }
             break;
         case ControlType::VolumeButton:

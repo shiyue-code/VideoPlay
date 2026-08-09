@@ -95,6 +95,7 @@ bool VideoPlayerApp::initialize() {
     auto audioFilterConfig = Settings::instance().audioFilterConfig();
     m_player->setAudioFilterConfig(audioFilterConfig);
     m_renderer->setAudioFilterPreset(audioFilterConfig.preset);
+    m_player->setVideoFilterConfig(Settings::instance().videoFilterConfig());
     
     // 设置回调
     m_player->setPositionCallback([this](int64_t pos) {
@@ -207,6 +208,9 @@ bool VideoPlayerApp::initialize() {
             m_renderer->showOSD(OSDType::Info, "音频同步 " + direction + std::to_string(absolute) + "ms");
         }
     });
+    m_renderer->setAddBookmarkCallback([this]() { addBookmark(); });
+    m_renderer->setClearBookmarksCallback([this]() { clearBookmarks(); });
+    m_renderer->setBookmarkClickCallback([this](int index) { jumpToBookmark(index); });
     m_renderer->setABLoopCallback([this](char action) {
         switch (action) {
             case 'a': setLoopPointA(); break;
@@ -741,6 +745,9 @@ void VideoPlayerApp::openFile(const std::string& path) {
         if (m_renderer) {
             auto chapters = m_player->chapters();
             m_renderer->setChapters(chapters);
+            // 加载用户书签
+            m_bookmarks = Settings::instance().bookmarksForFile(path);
+            m_renderer->setBookmarks(m_bookmarks);
             // 更新音轨/字幕轨菜单
             m_renderer->setAudioTracks(m_player->audioTracks(), m_player->currentAudioTrack());
             m_renderer->setSubtitleTracks(m_player->subtitleTracks(), m_player->currentSubtitleTrack());

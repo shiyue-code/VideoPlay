@@ -74,6 +74,7 @@ enum class ControlType {
     NextButton,
     ProgressBar,
     ChapterMarker,
+    BookmarkMarker,
     VolumeButton,
     VolumeBar,
     SpeedButton,
@@ -127,7 +128,7 @@ struct Menu {
 
 // 菜单辅助函数（在 sdlrenderer_events/menus 中复用）
 inline bool isSubmenuParent(int id) {
-    return id == 58 || id == 59 || id == 69 || id == 89;
+    return id == 58 || id == 59 || id == 69 || id == 89 || id == 100;
 }
 
 inline int submenuItemCount(int parentId) {
@@ -136,6 +137,7 @@ inline int submenuItemCount(int parentId) {
         case 59: return 3;
         case 69: return 4;
         case 89: return 4;
+        case 100: return 6;
         default: return 0;
     }
 }
@@ -146,6 +148,7 @@ inline int submenuItemId(int parentId, int index) {
         case 59: return 60 + index;
         case 69: return 70 + index;
         case 89: return 93 + index;
+        case 100: return 101 + index;
         default: return 0;
     }
 }
@@ -155,12 +158,14 @@ inline const char* submenuItemLabel(int parentId, int index) {
     static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
     static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
     static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
+    static constexpr const char* videoFilterLabels[] = { "亮度 +", "亮度 -", "对比度 +", "对比度 -", "饱和度 +", "重置" };
 
     switch (parentId) {
         case 58: return abLoopLabels[index];
         case 59: return loopLabels[index];
         case 69: return aspectLabels[index];
         case 89: return audioFilterLabels[index];
+        case 100: return videoFilterLabels[index];
         default: return "";
     }
 }
@@ -242,6 +247,9 @@ public:
     void setSearchCallback(SearchCallback callback);
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
     void setAudioSyncCallback(AudioSyncCallback callback);
+    void setAddBookmarkCallback(std::function<void()> callback);
+    void setClearBookmarksCallback(std::function<void()> callback);
+    void setBookmarkClickCallback(std::function<void(int)> callback);
     void setABLoopCallback(ABLoopCallback callback);
     void setChapterSeekCallback(ChapterSeekCallback callback);
     void setAudioTrackCallback(AudioTrackCallback callback);
@@ -260,6 +268,9 @@ public:
 
     // 章节数据
     void setChapters(const std::vector<ChapterInfo>& chapters);
+
+    // 用户书签数据
+    void setBookmarks(const std::vector<Bookmark>& bookmarks);
 
     // 搜索热力图数据
     void setSearchHighlights(const std::vector<int64_t>& timestamps);
@@ -546,6 +557,7 @@ private:
     // 菜单
     std::vector<Menu> m_menus;
     std::vector<ChapterInfo> m_chapters;
+    std::vector<Bookmark> m_bookmarks;
     bool m_hasChapters = false;
     std::vector<int64_t> m_searchHighlights;
     int64_t m_lastDuration = 0;
@@ -641,6 +653,9 @@ private:
     SearchCallback m_searchCallback;
     SubtitleSyncCallback m_subtitleSyncCallback;
     AudioSyncCallback m_audioSyncCallback;
+    std::function<void()> m_addBookmarkCallback;
+    std::function<void()> m_clearBookmarksCallback;
+    std::function<void(int)> m_bookmarkClickCallback;
     ABLoopCallback m_abLoopCallback;
     ChapterSeekCallback m_chapterSeekCallback;
     AudioTrackCallback m_audioTrackCallback;

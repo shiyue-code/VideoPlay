@@ -396,6 +396,37 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
         }
     }
 
+    // 用户书签标记（进度条下方小方块）
+    if (duration > 0 && !m_bookmarks.empty()) {
+        const int bmarkW = 6;
+        const int bmarkH = 8;
+        for (size_t i = 0; i < m_bookmarks.size(); ++i) {
+            int64_t bookmarkTime = m_bookmarks[i].timeMs;
+            if (bookmarkTime < 0 || bookmarkTime > duration) continue;
+            float ratio = static_cast<float>(bookmarkTime) / static_cast<float>(duration);
+            int markerCenterX = margin + static_cast<int>(barWidth * ratio);
+            int markerX = markerCenterX - bmarkW / 2;
+            int markerY = barY + barHeight + 2;
+
+            bool hovered = (m_hoveredControl == ControlType::BookmarkMarker &&
+                            m_hoveredControlValue == static_cast<int>(i));
+
+            uint8_t r = hovered ? 255 : 255;
+            uint8_t g = hovered ? 200 : 170;
+            uint8_t b = hovered ? 80 : 60;
+            uint8_t alpha = hovered ? 255 : 200;
+
+            fillRoundRect(markerX, markerY, bmarkW, bmarkH, 2, r, g, b, alpha);
+
+            int hitX = markerCenterX - 8;
+            int hitY = markerY - 4;
+            int hitW = 16;
+            int hitH = bmarkH + 8;
+            m_controlRects.push_back({hitX, hitY, hitW, hitH,
+                                      ControlType::BookmarkMarker, static_cast<int>(i)});
+        }
+    }
+
     // 搜索热力图标记
     if (duration > 0 && !m_searchHighlights.empty()) {
         for (int64_t timestamp : m_searchHighlights) {

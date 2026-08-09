@@ -56,6 +56,8 @@ void SDLRenderer::initMenus() {
         {0, "", "", true},
         {89, "音频滤镜", "", false, true},
         {0, "", "", true},
+        {100, "视频基础参数", "", false, true},
+        {0, "", "", true},
         {97, "硬件解码", "", false, true},
         {0, "", "", true},
         {59, "循环", "", false, true},

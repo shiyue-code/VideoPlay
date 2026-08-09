@@ -681,6 +681,18 @@ void SDLRenderer::setAudioSyncCallback(AudioSyncCallback callback) {
     m_audioSyncCallback = callback;
 }
 
+void SDLRenderer::setAddBookmarkCallback(std::function<void()> callback) {
+    m_addBookmarkCallback = callback;
+}
+
+void SDLRenderer::setClearBookmarksCallback(std::function<void()> callback) {
+    m_clearBookmarksCallback = callback;
+}
+
+void SDLRenderer::setBookmarkClickCallback(std::function<void(int)> callback) {
+    m_bookmarkClickCallback = callback;
+}
+
 void SDLRenderer::setABLoopCallback(ABLoopCallback callback) {
     m_abLoopCallback = callback;
 }
@@ -751,6 +763,10 @@ void SDLRenderer::setChapters(const std::vector<ChapterInfo>& chapters) {
     m_chapters = chapters;
     m_hasChapters = !chapters.empty();
     m_menuManager->updateChapterMenuItems();
+}
+
+void SDLRenderer::setBookmarks(const std::vector<Bookmark>& bookmarks) {
+    m_bookmarks = bookmarks;
 }
 
 void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {

@@ -179,4 +179,39 @@ void VideoPlayerApp::clearLoop() {
     logger().info("AB loop cleared");
 }
 
+void VideoPlayerApp::addBookmark() {
+    if (m_currentFile.empty() || !m_player) return;
+    int64_t pos = m_player->position();
+    Bookmark b;
+    b.timeMs = pos;
+    b.title = "书签 " + formatTime(pos);
+    Settings::instance().addBookmark(m_currentFile, b);
+    Settings::instance().save();
+    m_bookmarks = Settings::instance().bookmarksForFile(m_currentFile);
+    if (m_renderer) {
+        m_renderer->setBookmarks(m_bookmarks);
+        m_renderer->showOSD(OSDType::Info, "添加书签 " + formatTime(pos));
+    }
+}
+
+void VideoPlayerApp::clearBookmarks() {
+    if (m_currentFile.empty()) return;
+    Settings::instance().clearBookmarksForFile(m_currentFile);
+    Settings::instance().save();
+    m_bookmarks.clear();
+    if (m_renderer) {
+        m_renderer->setBookmarks(m_bookmarks);
+        m_renderer->showOSD(OSDType::Info, "清空书签");
+    }
+}
+
+void VideoPlayerApp::jumpToBookmark(int index) {
+    if (!m_player || index < 0 || index >= (int)m_bookmarks.size()) return;
+    int64_t pos = m_bookmarks[index].timeMs;
+    m_player->seek(pos);
+    if (m_renderer) {
+        m_renderer->showOSD(OSDType::Info, "跳转至 " + m_bookmarks[index].title);
+    }
+}
+
 } // namespace VideoPlay
