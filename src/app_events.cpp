@@ -14,6 +14,14 @@
 namespace VideoPlay {
 
 namespace {
+
+static inline int menuItemOffset(int rawId, MenuId base, int count) {
+    int b = static_cast<int>(base);
+    int idx = rawId - b;
+    if (idx >= 0 && idx < count) return idx;
+    return -1;
+}
+
 Logger& logger() {
     static auto logger = Logger::get("app.events");
     return *logger;
@@ -26,10 +34,11 @@ Logger& logger() {
 
 void VideoPlayerApp::handleMenu(MenuId menuId) {
     int rawId = static_cast<int>(menuId);
-    // 最近文件菜单项 ID 范围 100-109
-    if (rawId >= 100 && rawId < 110) {
+    // 最近文件菜单项
+    int recentIdx = menuItemOffset(rawId, MenuId::RecentFileBase, kRecentFileCount);
+    if (recentIdx != -1) {
         auto recent = Settings::instance().recentFiles();
-        size_t idx = static_cast<size_t>(rawId - 100);
+        size_t idx = static_cast<size_t>(recentIdx);
         if (idx < recent.size()) {
             openFile(recent[idx]);
         }
@@ -225,10 +234,11 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             break;
     }
 
-    // 章节跳转菜单项 ID 范围 200-249
-    if (rawId >= 200 && rawId < 250) {
-        size_t idx = static_cast<size_t>(rawId - 200);
+    // 章节跳转菜单项
+    int chapterIdx = menuItemOffset(rawId, MenuId::ChapterBase, kChapterCount);
+    if (chapterIdx != -1) {
         auto chapters = m_player->chapters();
+        size_t idx = static_cast<size_t>(chapterIdx);
         if (idx < chapters.size()) {
             int64_t targetPos = chapters[idx].startTime;
             if (targetPos >= 0 && targetPos < m_duration) {
@@ -240,9 +250,9 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         return;
     }
 
-    // 音轨切换菜单项 ID 范围 400-449
-    if (rawId >= 400 && rawId < 450) {
-        int trackIndex = rawId - 400;
+    // 音轨切换菜单项
+    int trackIndex = menuItemOffset(rawId, MenuId::AudioTrackBase, kAudioTrackCount);
+    if (trackIndex != -1) {
         if (m_player && m_renderer) {
             if (m_player->setAudioTrack(trackIndex)) {
                 m_renderer->setAudioTracks(m_player->audioTracks(),
@@ -253,9 +263,10 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         return;
     }
 
-    // 字幕切换菜单项 ID 范围 450-499
-    if (rawId >= 450 && rawId < 500) {
-        int trackIndex = (rawId == 450) ? -1 : (rawId - 451);
+    // 字幕切换菜单项
+    int subtitleIdx = menuItemOffset(rawId, MenuId::SubtitleTrackBase, kSubtitleTrackCount);
+    if (subtitleIdx != -1) {
+        int trackIndex = (subtitleIdx == 0) ? -1 : (subtitleIdx - 1);
         if (m_player && m_renderer) {
             if (m_player->setSubtitleTrack(trackIndex)) {
                 m_renderer->clearSubtitleBitmap();

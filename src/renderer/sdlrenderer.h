@@ -105,6 +105,12 @@ enum class MenuId : int {
     SubtitleTrackBase = 450
 };
 
+// 各动态菜单项数量
+constexpr int kRecentFileCount = 10;
+constexpr int kChapterCount = 50;
+constexpr int kAudioTrackCount = 50;
+constexpr int kSubtitleTrackCount = 50;
+
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
 using FileOpenCallback = std::function<void()>;
