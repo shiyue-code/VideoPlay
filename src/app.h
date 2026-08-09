@@ -62,7 +62,7 @@ private:
     void clearBookmarks();
     void jumpToBookmark(int index);
 
-    // 菜单处理
+    // 菜单处理 (int)
     void handleMenu(int menuId);
     void showHelp();
     void showAbout();

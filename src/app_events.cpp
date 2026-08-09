@@ -174,22 +174,22 @@ void VideoPlayerApp::handleMenu(int menuId) {
             }
             break;
         }
-        case 101:
-        case 102:
-        case 103:
-        case 104:
-        case 105:
-        case 106: {
+        case 121:
+        case 122:
+        case 123:
+        case 124:
+        case 125:
+        case 126: {
             if (!m_player) break;
             auto config = m_player->videoFilterConfig();
             config.enabled = true;
             switch (menuId) {
-                case 101: config.brightness = std::clamp(config.brightness + 0.05f, -1.0f, 1.0f); break;
-                case 102: config.brightness = std::clamp(config.brightness - 0.05f, -1.0f, 1.0f); break;
-                case 103: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
-                case 104: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
-                case 105: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
-                case 106: config = VideoFilterConfig{}; break;  // 重置
+                case 121: config.brightness = std::clamp(config.brightness + 0.05f, -1.0f, 1.0f); break;
+                case 122: config.brightness = std::clamp(config.brightness - 0.05f, -1.0f, 1.0f); break;
+                case 123: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
+                case 124: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
+                case 125: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
+                case 126: config = VideoFilterConfig{}; break;  // 重置
             }
             Settings::instance().setVideoFilterConfig(config);
             Settings::instance().save();

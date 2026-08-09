@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <map>
 #include <unordered_map>
 #include <algorithm>
 
@@ -24,6 +25,85 @@ typedef struct TTF_Font TTF_Font;
 typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
+
+// 菜单项 ID（静态菜单；动态范围保留为 100-109 / 200-249 / 400-449 / 450-499）
+enum class MenuId : int {
+    // 文件菜单
+    OpenFile = 1,
+    OpenFolder = 2,
+    ImportSubtitle = 4,
+    Exit = 3,
+
+    // 播放菜单
+    PlayPause = 10,
+    Stop = 11,
+    Prev = 12,
+    Next = 13,
+    SpeedUp = 14,
+    SpeedDown = 15,
+    Fullscreen = 16,
+    Borderless = 17,
+    Playlist = 18,
+    PrevEpisodePlayMenu = 19,
+    NextEpisodePlayMenu = 22,
+    EpisodePanel = 32,
+
+    // 剧集菜单
+    PrevEpisode = 30,
+    NextEpisode = 31,
+
+    // 帮助
+    Help = 50,
+    About = 51,
+
+    // AB 循环 / 循环 / 画面比例（父菜单 & 子项）
+    ABLoop = 58,
+    ABLoopSetA = 90,
+    ABLoopSetB = 91,
+    ABLoopClear = 92,
+
+    Loop = 59,
+    LoopNone = 60,
+    LoopSingle = 61,
+    LoopPlaylist = 62,
+
+    Aspect = 69,
+    AspectOriginal = 70,
+    Aspect16_9 = 71,
+    Aspect4_3 = 72,
+    AspectFill = 73,
+
+    // 窗口 & 滤镜
+    AlwaysOnTop = 80,
+    AudioFilter = 89,
+    AudioFilterOff = 93,
+    AudioFilterVoice = 94,
+    AudioFilterBass = 95,
+    AudioFilterNight = 96,
+    HardwareDecoding = 97,
+
+    // 视频基础参数：从 120 开始，避免与最近文件 100-109 冲突
+    VideoFilter = 120,
+    VideoFilterBrightnessUp = 121,
+    VideoFilterBrightnessDown = 122,
+    VideoFilterContrastUp = 123,
+    VideoFilterContrastDown = 124,
+    VideoFilterSaturationUp = 125,
+    VideoFilterReset = 126,
+
+    // AI 菜单
+    AIAnalyze = 300,
+    AISummary = 301,
+    Search = 302,
+    ClearAICache = 303,
+    AISettings = 304,
+
+    // 动态范围起始值
+    RecentFileBase = 100,
+    ChapterBase = 200,
+    AudioTrackBase = 400,
+    SubtitleTrackBase = 450
+};
 
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
@@ -126,66 +206,75 @@ struct Menu {
     bool open = false;
 };
 
+// 子菜单注册表：新增子菜单时只需在这里增加一项
+struct SubmenuInfo {
+    std::vector<std::pair<MenuId, const char*>> items;
+};
+
+inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
+    static const std::map<MenuId, SubmenuInfo> registry = {
+        {MenuId::ABLoop, {{ {MenuId::ABLoopSetA, "设置 A 点"},
+                            {MenuId::ABLoopSetB, "设置 B 点"},
+                            {MenuId::ABLoopClear, "清除"} }}},
+        {MenuId::Loop,   {{ {MenuId::LoopNone, "不循环"},
+                            {MenuId::LoopSingle, "单曲循环"},
+                            {MenuId::LoopPlaylist, "列表循环"} }}},
+        {MenuId::Aspect, {{ {MenuId::AspectOriginal, "原始"},
+                            {MenuId::Aspect16_9, "16:9"},
+                            {MenuId::Aspect4_3, "4:3"},
+                            {MenuId::AspectFill, "铺满"} }}},
+        {MenuId::AudioFilter, {{ {MenuId::AudioFilterOff, "关闭"},
+                                 {MenuId::AudioFilterVoice, "语音增强"},
+                                 {MenuId::AudioFilterBass, "低音增强"},
+                                 {MenuId::AudioFilterNight, "夜间模式"} }}},
+        {MenuId::VideoFilter, {{ {MenuId::VideoFilterBrightnessUp, "亮度 +"},
+                                 {MenuId::VideoFilterBrightnessDown, "亮度 -"},
+                                 {MenuId::VideoFilterContrastUp, "对比度 +"},
+                                 {MenuId::VideoFilterContrastDown, "对比度 -"},
+                                 {MenuId::VideoFilterSaturationUp, "饱和度 +"},
+                                 {MenuId::VideoFilterReset, "重置"} }}}
+    };
+    return registry;
+}
+
 // 菜单辅助函数（在 sdlrenderer_events/menus 中复用）
 inline bool isSubmenuParent(int id) {
-    return id == 58 || id == 59 || id == 69 || id == 89 || id == 100;
+    return submenuRegistry().count(static_cast<MenuId>(id)) > 0;
 }
 
 inline int submenuItemCount(int parentId) {
-    switch (parentId) {
-        case 58: return 3;
-        case 59: return 3;
-        case 69: return 4;
-        case 89: return 4;
-        case 100: return 6;
-        default: return 0;
-    }
+    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
+    return it == submenuRegistry().end() ? 0 : static_cast<int>(it->second.items.size());
 }
 
 inline int submenuItemId(int parentId, int index) {
-    switch (parentId) {
-        case 58: return 90 + index;
-        case 59: return 60 + index;
-        case 69: return 70 + index;
-        case 89: return 93 + index;
-        case 100: return 101 + index;
-        default: return 0;
-    }
+    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
+    if (it == submenuRegistry().end() || index < 0 || index >= (int)it->second.items.size()) return 0;
+    return static_cast<int>(it->second.items[index].first);
 }
 
 inline const char* submenuItemLabel(int parentId, int index) {
-    static constexpr const char* abLoopLabels[] = { "设置 A 点", "设置 B 点", "清除" };
-    static constexpr const char* loopLabels[] = { "不循环", "单曲循环", "列表循环" };
-    static constexpr const char* aspectLabels[] = { "原始", "16:9", "4:3", "铺满" };
-    static constexpr const char* audioFilterLabels[] = { "关闭", "语音增强", "低音增强", "夜间模式" };
-    static constexpr const char* videoFilterLabels[] = { "亮度 +", "亮度 -", "对比度 +", "对比度 -", "饱和度 +", "重置" };
-
-    switch (parentId) {
-        case 58: return abLoopLabels[index];
-        case 59: return loopLabels[index];
-        case 69: return aspectLabels[index];
-        case 89: return audioFilterLabels[index];
-        case 100: return videoFilterLabels[index];
-        default: return "";
-    }
+    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
+    if (it == submenuRegistry().end() || index < 0 || index >= (int)it->second.items.size()) return "";
+    return it->second.items[index].second;
 }
 
 inline std::string submenuParentLabel(const MenuItem& item, int loopMode,
                                        AspectMode aspectMode,
                                        AudioFilterPreset audioFilterPreset) {
-    if (item.id == 59) {
-        int index = std::clamp(loopMode, 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
+    auto it = submenuRegistry().find(static_cast<MenuId>(item.id));
+    if (it == submenuRegistry().end()) return item.label;
+
+    int index = -1;
+    if (item.id == static_cast<int>(MenuId::Loop)) {
+        index = loopMode;
+    } else if (item.id == static_cast<int>(MenuId::Aspect)) {
+        index = static_cast<int>(aspectMode);
+    } else if (item.id == static_cast<int>(MenuId::AudioFilter)) {
+        index = static_cast<int>(audioFilterPreset);
     }
-    if (item.id == 69) {
-        int index = std::clamp(static_cast<int>(aspectMode), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    if (item.id == 89) {
-        int index = std::clamp(static_cast<int>(audioFilterPreset), 0, submenuItemCount(item.id) - 1);
-        return item.label + "（" + submenuItemLabel(item.id, index) + "）";
-    }
-    return item.label;
+    if (index < 0 || index >= (int)it->second.items.size()) return item.label;
+    return item.label + "（" + it->second.items[index].second + "）";
 }
 
 struct ChatMessage {
