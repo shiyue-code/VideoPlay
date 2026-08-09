@@ -32,7 +32,7 @@ Logger& logger() {
 
 constexpr UINT_PTR kSubclassId = 1;
 constexpr UINT_PTR kLiveRenderTimerId = 0x5650;  // 'VP'
-constexpr UINT kLiveRenderIntervalMs = 16;       // 约 60 FPS
+constexpr UINT kLiveRenderIntervalMs = 10;       // 定时器兜底间隔（USER_TIMER_MINIMUM）
 
 // 把非客户区消息的 hit-test 码转换为框架语义
 FrameHitTest fromHitTestCode(WPARAM wParam) {
@@ -179,6 +179,21 @@ LRESULT WindowFrameWin32::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 
         case WM_WINDOWPOSCHANGED:
         case WM_SIZE:
+        case WM_MOVE: {
+            // 先让 SDL 更新自己的窗口尺寸/位置缓存，再重绘，避免用到上一帧的旧尺寸
+            LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
+            if (m_inModalLoop) {
+                // 模态循环中主循环被阻塞，跟着窗口几何变化驱动重绘（比 WM_TIMER 及时得多）。
+                // 缩放环此时无关紧要（系统缩放循环已捕获鼠标），退出模态循环时统一同步，
+                // 避免每条鼠标消息都对另一个顶层窗口做 SetWindowPos 拖慢拖动手感。
+                requestLiveRender();
+            } else {
+                syncResizeRing();
+            }
+            handled = true;
+            return result;
+        }
+
         case WM_SHOWWINDOW:
         case WM_STYLECHANGED:
         case WM_DPICHANGED: {
@@ -188,23 +203,24 @@ LRESULT WindowFrameWin32::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         }
 
         case WM_ENTERSIZEMOVE: {
-            // 系统模态循环期间主循环被阻塞，用定时器驱动实时重绘
+            // 系统模态循环期间主循环被阻塞：
+            // 几何变化时立即重绘，鼠标静止时由定时器兜底
+            m_inModalLoop = true;
+            m_lastLiveRenderTick = 0;
             SetTimer(hwnd, kLiveRenderTimerId, kLiveRenderIntervalMs, nullptr);
             break;
         }
 
         case WM_EXITSIZEMOVE: {
+            m_inModalLoop = false;
             KillTimer(hwnd, kLiveRenderTimerId);
+            syncResizeRing();
             break;
         }
 
         case WM_TIMER: {
             if (wParam == kLiveRenderTimerId) {
-                if (m_liveRender && !m_inLiveRender) {
-                    m_inLiveRender = true;
-                    m_liveRender();
-                    m_inLiveRender = false;
-                }
+                requestLiveRender();
                 handled = true;
                 return 0;
             }
@@ -395,6 +411,22 @@ void WindowFrameWin32::syncResizeRing() {
                  rc.left - kOuterGrab, rc.top - kOuterGrab, w, h,
                  SWP_NOACTIVATE | SWP_NOZORDER |
                  (IsWindowVisible(m_ringHwnd) ? 0u : SWP_SHOWWINDOW));
+}
+
+void WindowFrameWin32::requestLiveRender() {
+    if (!m_liveRender || m_inLiveRender) return;
+
+    // 限流到约 60 FPS：鼠标移动消息可达 125Hz 以上，
+    // 每条都重绘会反过来拖慢模态循环里的输入处理
+    const DWORD now = GetTickCount();
+    if (m_lastLiveRenderTick != 0 && (now - m_lastLiveRenderTick) < kLiveRenderMinIntervalMs) {
+        return;
+    }
+    m_lastLiveRenderTick = now;
+
+    m_inLiveRender = true;
+    m_liveRender();
+    m_inLiveRender = false;
 }
 
 void WindowFrameWin32::notifyFrameMouse(FrameHitTest hit, FrameMouseAction action) {

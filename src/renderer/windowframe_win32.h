@@ -53,6 +53,10 @@ private:
     bool m_enabled = false;
     bool m_ncTracking = false;      // 是否已注册非客户区 mouse-leave 跟踪
     bool m_inLiveRender = false;    // 防止实时重绘回调重入
+    bool m_inModalLoop = false;     // 是否处于系统拖动/缩放模态循环
+    DWORD m_lastLiveRenderTick = 0; // 上次实时重绘时间（限流用）
+
+    static constexpr UINT kLiveRenderMinIntervalMs = 13;  // 实时重绘限流（约 60 FPS 上限）
 
     // 控件布局参数（与 SDLRenderer 保持一致）
     static constexpr int kMenuBarHeight = 32;
@@ -67,6 +71,7 @@ private:
     bool isFullscreenWindow() const;
 
     LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, bool& handled);
+    void requestLiveRender();
     void notifyFrameMouse(FrameHitTest hit, FrameMouseAction action);
     void trackNcMouseLeave(HWND hwnd);
 
