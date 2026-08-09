@@ -245,6 +245,9 @@ public:
     void setAudioTrackCallback(AudioTrackCallback callback);
     void setSubtitleTrackCallback(SubtitleTrackCallback callback);
 
+    // 系统拖动/缩放模态循环期间用于实时重绘整帧的回调（由 App 提供）
+    void setLiveRenderCallback(std::function<void()> callback);
+
     // 多轨道数据
     void setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
     void setSubtitleTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
@@ -351,6 +354,12 @@ private:
     ControlType getControlAt(int x, int y, int* outValue = nullptr);
     ResizeMode getResizeModeAt(int x, int y) const;
     void updateCursorForResize(ResizeMode mode);
+
+    // 无边框窗口框架协作
+    void setupWindowFrameCallbacks();
+    FrameHitTest captionHitTestAt(int x, int y);
+    void handleFrameMouse(FrameHitTest hit, FrameMouseAction action);
+    void renderLiveFrame();
 
     // 菜单处理
     void initMenus();
@@ -569,6 +578,10 @@ private:
 
     // 窗口框架管理器（无边框模式）
     std::unique_ptr<WindowFrame> m_windowFrame;
+
+    // 模态循环（原生拖动/缩放）期间的实时重绘
+    std::function<void()> m_liveRenderCallback;
+    bool m_inLiveRender = false;
 
     // 无边框 resize 状态
     bool m_resizingWindow = false;

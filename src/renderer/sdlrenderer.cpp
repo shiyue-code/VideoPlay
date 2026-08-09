@@ -174,6 +174,12 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 }
 
 void SDLRenderer::shutdown() {
+    // 必须在销毁窗口之前解除无边框框架（它会访问 SDL_Window / HWND）
+    if (m_windowFrame) {
+        m_windowFrame->disable();
+        m_windowFrame.reset();
+    }
+
     clearTextCache();
     clearIconTextures();
     closeFont();
@@ -213,11 +219,6 @@ void SDLRenderer::shutdown() {
     m_cursorSizeNWSE = nullptr;
     m_cursorSizeNESW = nullptr;
 
-    if (m_windowFrame) {
-        m_windowFrame->disable();
-        m_windowFrame.reset();
-    }
-
     logger().info("SDLRenderer shutdown");
 }
 
@@ -240,6 +241,11 @@ void SDLRenderer::toggleFullscreen() {
 
     m_fullscreen = !m_fullscreen;
     SDL_SetWindowFullscreen(m_window, m_fullscreen);
+
+    // 全屏切换后同步窗口框架（隐藏/恢复外侧缩放热区）
+    if (m_borderless && m_windowFrame) {
+        m_windowFrame->updateFrame();
+    }
     
     if (m_fullscreenCallback) {
         m_fullscreenCallback();
@@ -254,6 +260,7 @@ void SDLRenderer::toggleBorderless() {
 
     if (!m_windowFrame) {
         m_windowFrame = WindowFrame::create();
+        setupWindowFrameCallbacks();
     }
 
     if (m_borderless) {
@@ -269,6 +276,44 @@ void SDLRenderer::toggleBorderless() {
 
 bool SDLRenderer::isBorderless() const {
     return m_borderless;
+}
+
+void SDLRenderer::setLiveRenderCallback(std::function<void()> callback) {
+    m_liveRenderCallback = std::move(callback);
+}
+
+void SDLRenderer::setupWindowFrameCallbacks() {
+    if (!m_windowFrame) return;
+
+    // 标题栏命中判定：UI 布局只保存在渲染层，平台层通过回调查询
+    m_windowFrame->setCaptionHitTest([this](int x, int y) {
+        return captionHitTestAt(x, y);
+    });
+
+    // 非客户区鼠标事件：维持系统按钮/菜单栏的 hover 视觉状态并执行按钮动作
+    m_windowFrame->setFrameMouseHandler([this](FrameHitTest hit, FrameMouseAction action) {
+        handleFrameMouse(hit, action);
+    });
+
+    // 原生拖动/缩放期间主循环被系统模态循环阻塞，这里驱动实时重绘
+    m_windowFrame->setLiveRenderHandler([this]() {
+        renderLiveFrame();
+    });
+}
+
+void SDLRenderer::renderLiveFrame() {
+    if (m_inLiveRender || !m_liveRenderCallback || !m_window) return;
+
+    m_inLiveRender = true;
+    // 模态循环中 SDL 事件未被处理，需要直接同步窗口尺寸
+    int w = 0, h = 0;
+    SDL_GetWindowSize(m_window, &w, &h);
+    if (w > 0 && h > 0) {
+        m_windowWidth = w;
+        m_windowHeight = h;
+    }
+    m_liveRenderCallback();
+    m_inLiveRender = false;
 }
 
 void SDLRenderer::ensureTexture(int width, int height) {

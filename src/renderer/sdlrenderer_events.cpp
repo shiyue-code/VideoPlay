@@ -520,10 +520,10 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     }
     
     // 无边框模式：处理 resize 区域光标�?resize 拖动
-    if (m_borderless && m_windowFrame) {
+    if (m_borderless && m_windowFrame && !m_windowFrame->usesNativeResize()) {
         FrameHitTest hit = m_windowFrame->hitTest(x, y);
         // 如果不在控件上，更新光标�?resize 光标
-        if (m_hoveredControl == ControlType::None) {
+        if (m_hoveredControl == ControlType::None && !m_mouseDown) {
             switch (hit) {
                 case FrameHitTest::ResizeLeft:
                 case FrameHitTest::ResizeRight:
@@ -960,8 +960,89 @@ ControlType SDLRenderer::getControlAt(int x, int y, int* outValue) {
     return ControlType::None;
 }
 
+FrameHitTest SDLRenderer::captionHitTestAt(int x, int y) {
+    if (!m_borderless) return FrameHitTest::None;
+    if (y < 0 || y >= m_menuBarHeight) return FrameHitTest::None;
+
+    // 系统按钮（无边框模式下由 renderMenuBar 注册到 m_controlRects）
+    int value = 0;
+    ControlType control = getControlAt(x, y, &value);
+    switch (control) {
+        case ControlType::SysMinButton:   return FrameHitTest::MinButton;
+        case ControlType::SysMaxButton:   return FrameHitTest::MaxButton;
+        case ControlType::SysCloseButton: return FrameHitTest::CloseButton;
+        case ControlType::None:           break;
+        default:                          return FrameHitTest::None;  // 其他控件交给客户区
+    }
+
+    // 菜单展开期间整条菜单栏都交给客户区，保证 hover 切换与点击关闭正常
+    if (m_activeMenu >= 0 || m_menuAnimating) return FrameHitTest::None;
+
+    // 顶部菜单项区域（几何与 renderMenuBar 保持一致）
+    int menuX = kTopMenuX;
+    for (size_t i = 0; i < m_menus.size(); i++) {
+        if (!isTopMenuVisible(i)) continue;
+        int itemWidth = getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2;
+        if (x >= menuX && x <= menuX + itemWidth) return FrameHitTest::None;
+        menuX += itemWidth + kTopMenuGap;
+    }
+
+    // 剩下的空白区域可用于拖动窗口
+    return FrameHitTest::Caption;
+}
+
+void SDLRenderer::handleFrameMouse(FrameHitTest hit, FrameMouseAction action) {
+    ControlType control = ControlType::None;
+    switch (hit) {
+        case FrameHitTest::MinButton:   control = ControlType::SysMinButton;   break;
+        case FrameHitTest::MaxButton:   control = ControlType::SysMaxButton;   break;
+        case FrameHitTest::CloseButton: control = ControlType::SysCloseButton; break;
+        default: break;
+    }
+
+    switch (action) {
+        case FrameMouseAction::Move:
+            // 鼠标位于非客户区，SDL 收不到移动事件，这里手动维护 hover 状态
+            m_hoveredControl = control;
+            m_hoveredControlValue = 0;
+            m_menuBarHovered = true;
+            m_mouseX = -1;  // 避免误判菜单项 hover
+            m_mouseY = -1;
+            m_lastMouseMove = SDL_GetTicks();
+            break;
+
+        case FrameMouseAction::Leave:
+            m_hoveredControl = ControlType::None;
+            m_pressedControl = ControlType::None;
+            m_menuBarHovered = false;
+            m_mouseX = -1;
+            m_mouseY = -1;
+            break;
+
+        case FrameMouseAction::Click:
+            if (control == ControlType::SysMinButton) {
+                SDL_MinimizeWindow(m_window);
+            } else if (control == ControlType::SysMaxButton) {
+                if (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) {
+                    SDL_RestoreWindow(m_window);
+                } else {
+                    SDL_MaximizeWindow(m_window);
+                }
+            } else if (control == ControlType::SysCloseButton) {
+                SDL_Event quitEvent;
+                quitEvent.type = SDL_EVENT_QUIT;
+                SDL_PushEvent(&quitEvent);
+            }
+            break;
+    }
+}
+
 ResizeMode SDLRenderer::getResizeModeAt(int x, int y) const {
     if (!m_borderless || !m_windowFrame) {
+        return ResizeMode::None;
+    }
+    // 原生窗口框架自行处理缩放，不需要自绘 resize
+    if (m_windowFrame->usesNativeResize()) {
         return ResizeMode::None;
     }
     if (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) {

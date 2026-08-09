@@ -396,6 +396,10 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
         playFromPlaylist(0);
     }
 
+    // 无边框模式下原生拖动/缩放会进入系统模态循环并阻塞主循环，
+    // 这里提供实时重绘回调，保证拖动窗口时画面不卡住
+    m_renderer->setLiveRenderCallback([this]() { render(); });
+
     // 运行主循环
     runMainLoop();
 

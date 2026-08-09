@@ -226,6 +226,26 @@ main.cpp
 
 7. **Preload State**: 首次播放时 `FFmpegPlayer::play()` 不会立即启动音频，而是设置 `m_preloading = true`。主循环必须每帧调用 `checkPreloadComplete()` 来结束预缓冲状态。
 
+8. **Borderless (Win32)**: 无边框由 `WindowFrameWin32` 实现，采用"原生语义"方案：
+   - 通过 `SDL_SetWindowBordered(false)` 让 SDL 应用 `WS_POPUP|WS_CAPTION|WS_THICKFRAME` 样式并在
+     `WM_NCCALCSIZE` 中裁掉非客户区，从而保留 DWM 阴影、Win11 圆角、贴靠、最小化动画、最大化工作区。
+   - 拖动/缩放/双击最大化/抖动最小化/Snap Layouts 全部由系统 `DefWindowProc` 处理，代码只在
+     `WM_NCHITTEST` 返回 `HTCAPTION` / `HT*` 缩放码 / `HTMINBUTTON`、`HTMAXBUTTON`、`HTCLOSE`。
+     **不要**改回自绘拖动或 ShadowWindow 辅助窗口方案。
+   - UI 几何唯一来源是渲染层：平台层通过 `WindowFrame::setCaptionHitTest()` 回调调用
+     `SDLRenderer::captionHitTestAt()` 判断标题栏空白/系统按钮/普通控件。
+   - 系统按钮位于非客户区，SDL 收不到鼠标事件，其 hover 与点击由
+     `WindowFrame::setFrameMouseHandler()` → `SDLRenderer::handleFrameMouse()` 维护。
+   - 原生拖动/缩放会进入系统模态循环并阻塞主循环，`WM_ENTERSIZEMOVE` 中启动定时器，
+     经 `setLiveRenderHandler()` → `SDLRenderer::renderLiveFrame()` → `VideoPlayerApp::render()` 实时重绘。
+   - `WindowFrame::usesNativeResize()` 为 true 时，渲染层跳过自绘 resize/光标逻辑（Linux 实现仍为 false）。
+   - **外侧缩放环** (`VideoPlayResizeRing`)：SDL 对无边框窗口硬性假设"客户区 == 窗口矩形"
+     (`WIN_AdjustWindowRectWithStyle` 跳过 `AdjustWindowRectEx`)，因此**不能**在 `WM_NCCALCSIZE` 里
+     保留隐形边框（否则 SDL 记账尺寸与真实客户区差 16×8px，每次全屏切换/尺寸恢复都会累积缩小）。
+     窗口外侧 8px（阴影区）的缩放热区由一个 owned + `WS_EX_LAYERED`(alpha=1) + 中间挖空(`SetWindowRgn`)
+     的隐形弹出窗口提供，它把 `WM_LBUTTONDOWN` 转成 `PostMessage(主窗口, WM_NCLBUTTONDOWN, HT*)`，
+     缩放本身仍由系统完成。**注意**：该窗口绝不能加 `WS_EX_TRANSPARENT`（会导致鼠标穿透而收不到事件）。
+
 ## Memory Management
 - 使用标准 C++ 智能指针 (`std::unique_ptr`) 管理核心对象生命周期
 - 显式 `shutdown()` / `stop()` 清理 SDL 和 FFmpeg 资源
