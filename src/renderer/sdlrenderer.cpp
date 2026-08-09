@@ -174,6 +174,11 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 }
 
 void SDLRenderer::shutdown() {
+    // 关闭时先隐藏窗口，避免标题栏闪现
+    if (m_window) {
+        SDL_HideWindow(m_window);
+    }
+
     // 必须在销毁窗口之前解除无边框框架（它会访问 SDL_Window / HWND）
     if (m_windowFrame) {
         m_windowFrame->disable();
