@@ -330,6 +330,7 @@ void FFmpegPlayer::closeFile() {
     m_sourceType = SourceType::LocalFile;
     setNetworkState(NetworkState::Idle);
     m_position = 0;
+    m_audioSyncOffsetMs = 0;
     m_state = PlaybackState::Stopped;
     m_chapters.clear();
     m_audioTracks.clear();
@@ -1464,7 +1465,9 @@ void FFmpegPlayer::synchronizeVideo(double pts) {
     
     m_videoClock = pts;
     
-    double diff = m_videoClock - m_audioClock;
+    // 音频同步偏移：正值让音频延后（视频提前），负值让音频提前（视频延后）
+    double syncClock = m_audioClock + (m_audioSyncOffsetMs.load() / 1000.0);
+    double diff = m_videoClock - syncClock;
     
     if (std::abs(diff) < 10.0) {
         double speed = m_playbackSpeed.load();
@@ -1576,6 +1579,19 @@ void FFmpegPlayer::setAudioFilterConfig(const AudioFilterConfig& config) {
 AudioFilterConfig FFmpegPlayer::audioFilterConfig() const {
     std::lock_guard<std::mutex> lock(m_audioFilterMutex);
     return m_audioFilterConfig;
+}
+
+void FFmpegPlayer::setAudioSyncOffsetMs(int64_t offsetMs) {
+    m_audioSyncOffsetMs = offsetMs;
+    logger().info("Audio sync offset: " + std::to_string(offsetMs) + "ms");
+}
+
+void FFmpegPlayer::adjustAudioSync(int64_t deltaMs) {
+    setAudioSyncOffsetMs(m_audioSyncOffsetMs.load() + deltaMs);
+}
+
+int64_t FFmpegPlayer::audioSyncOffsetMs() const {
+    return m_audioSyncOffsetMs.load();
 }
 
 void FFmpegPlayer::setNetworkState(NetworkState state) {

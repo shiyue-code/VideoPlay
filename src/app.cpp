@@ -194,6 +194,17 @@ bool VideoPlayerApp::initialize() {
             int64_t offset = m_subtitleParser->offset();
             std::string sign = offset >= 0 ? "+" : "";
             logger().info("Subtitle offset: " + sign + std::to_string(offset) + "ms");
+            m_renderer->showOSD(OSDType::Info, "字幕同步 " + sign + std::to_string(offset) + "ms");
+        }
+    });
+    m_renderer->setAudioSyncCallback([this](int deltaMs) {
+        if (m_player) {
+            m_player->adjustAudioSync(deltaMs);
+            int64_t offset = m_player->audioSyncOffsetMs();
+            std::string direction = offset >= 0 ? "延后 " : "提前 ";
+            int64_t absolute = offset >= 0 ? offset : -offset;
+            logger().info("Audio sync offset: " + std::to_string(offset) + "ms");
+            m_renderer->showOSD(OSDType::Info, "音频同步 " + direction + std::to_string(absolute) + "ms");
         }
     });
     m_renderer->setABLoopCallback([this](char action) {
@@ -866,30 +877,51 @@ void VideoPlayerApp::openFolderDialog() {
 
 void VideoPlayerApp::loadSubtitle(const std::string& videoPath) {
     std::filesystem::path video = std::filesystem::u8path(videoPath);
-    std::filesystem::path srtPath = video.parent_path() / (video.stem().u8string() + ".srt");
-    std::filesystem::path assPath = video.parent_path() / (video.stem().u8string() + ".ass");
-    std::filesystem::path vttPath = video.parent_path() / (video.stem().u8string() + ".vtt");
+    const std::string stem = video.stem().u8string();
+    const std::filesystem::path dir = video.parent_path();
 
-    if (std::filesystem::exists(srtPath)) {
-        m_currentSubtitle = srtPath.u8string();
-    } else if (std::filesystem::exists(assPath)) {
-        m_currentSubtitle = assPath.u8string();
-    } else if (std::filesystem::exists(vttPath)) {
-        m_currentSubtitle = vttPath.u8string();
-    } else {
-        m_currentSubtitle.clear();
-        if (m_subtitleParser) {
-            m_subtitleParser->clear();
+    // 支持的扩展名，按常见程度排序
+    const std::vector<std::string> exts = {".srt", ".ass", ".vtt", ".ssa"};
+    // 语言标签，按优先级排序；空字符串表示无语言标签（如 foo.srt）
+    const std::vector<std::string> tags = {
+        "",      // 同名字幕（无额外语言标签）
+        "chs",   // 简体中文（常见命名）
+        "cht",   // 繁体中文（常见命名）
+        "zh",    // 中文通用
+        "zh-cn", // 简体中文 BCP-47
+        "zh-tw", // 繁体中文 BCP-47
+        "zh-hans",
+        "zh-hant",
+        "sc",    // Simplified Chinese
+        "tc",    // Traditional Chinese
+        "en",    // 英语
+        "jpn",   // 日语
+        "kor"    // 韩语
+    };
+
+    for (const auto& tag : tags) {
+        for (const auto& ext : exts) {
+            std::string filename = tag.empty() ? (stem + ext) : (stem + "." + tag + ext);
+            std::filesystem::path candidate = dir / std::filesystem::u8path(filename);
+            if (!std::filesystem::exists(candidate)) continue;
+
+            m_currentSubtitle = candidate.u8string();
+            logger().info("Loading subtitle: " + m_currentSubtitle);
+            if (m_subtitleParser) {
+                if (m_subtitleParser->loadFile(m_currentSubtitle)) {
+                    return;
+                }
+                logger().warning("Failed to parse subtitle: " + m_currentSubtitle);
+            } else {
+                return;
+            }
         }
-        return;
     }
 
-    logger().info("Loading subtitle: " + m_currentSubtitle);
+    // 没找到可用字幕
+    m_currentSubtitle.clear();
     if (m_subtitleParser) {
-        if (!m_subtitleParser->loadFile(m_currentSubtitle)) {
-            logger().warning("Failed to parse subtitle: " + m_currentSubtitle);
-            m_currentSubtitle.clear();
-        }
+        m_subtitleParser->clear();
     }
 }
 

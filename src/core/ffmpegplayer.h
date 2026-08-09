@@ -78,6 +78,11 @@ public:
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
 
+    // 音频同步偏移（毫秒）：正值=音频延后，负值=音频提前
+    void setAudioSyncOffsetMs(int64_t offsetMs);
+    void adjustAudioSync(int64_t deltaMs);
+    int64_t audioSyncOffsetMs() const;
+
     void setStateCallback(StateCallback callback);
     void setPositionCallback(PositionCallback callback);
     void setDurationCallback(DurationCallback callback);
@@ -219,6 +224,7 @@ private:
     double m_audioClock = 0.0;
     double m_videoClock = 0.0;
     double m_frameTimer = 0.0;
+    std::atomic<int64_t> m_audioSyncOffsetMs{0};  // 音频同步偏移：正值=音频延后
 
     // Video frame queue with PTS ordering
     std::deque<VideoFrame> m_videoFrameQueue;

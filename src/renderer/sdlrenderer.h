@@ -47,6 +47,7 @@ using EpisodeNextCallback = std::function<void()>;
 using LoopModeCallback = std::function<void(int)>;  // 0=None, 1=Single, 2=Playlist
 using SearchCallback = std::function<void(const std::string&)>;
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
+using AudioSyncCallback = std::function<void(int)>;   // deltaMs (positive = audio delay, negative = audio advance)
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
 using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
 using AudioTrackCallback = std::function<void(int)>;  // 音轨下标，-1=关闭
@@ -240,6 +241,7 @@ public:
     void setLoopModeCallback(LoopModeCallback callback);
     void setSearchCallback(SearchCallback callback);
     void setSubtitleSyncCallback(SubtitleSyncCallback callback);
+    void setAudioSyncCallback(AudioSyncCallback callback);
     void setABLoopCallback(ABLoopCallback callback);
     void setChapterSeekCallback(ChapterSeekCallback callback);
     void setAudioTrackCallback(AudioTrackCallback callback);
@@ -638,6 +640,7 @@ private:
     LoopModeCallback m_loopModeCallback;
     SearchCallback m_searchCallback;
     SubtitleSyncCallback m_subtitleSyncCallback;
+    AudioSyncCallback m_audioSyncCallback;
     ABLoopCallback m_abLoopCallback;
     ChapterSeekCallback m_chapterSeekCallback;
     AudioTrackCallback m_audioTrackCallback;

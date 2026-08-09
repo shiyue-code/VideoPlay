@@ -677,6 +677,10 @@ void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
     m_subtitleSyncCallback = callback;
 }
 
+void SDLRenderer::setAudioSyncCallback(AudioSyncCallback callback) {
+    m_audioSyncCallback = callback;
+}
+
 void SDLRenderer::setABLoopCallback(ABLoopCallback callback) {
     m_abLoopCallback = callback;
 }

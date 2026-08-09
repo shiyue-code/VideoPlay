@@ -329,10 +329,18 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         toggleAlwaysOnTop();
                         break;
                     case SDLK_G:
-                        if (m_subtitleSyncCallback) m_subtitleSyncCallback(-500); // 提前 0.5s
+                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                            if (m_audioSyncCallback) m_audioSyncCallback(-500);  // 音频提前 0.5s
+                        } else {
+                            if (m_subtitleSyncCallback) m_subtitleSyncCallback(-500); // 字幕提前 0.5s
+                        }
                         break;
                     case SDLK_H:
-                        if (m_subtitleSyncCallback) m_subtitleSyncCallback(500);  // 延后 0.5s
+                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                            if (m_audioSyncCallback) m_audioSyncCallback(500);   // 音频延后 0.5s
+                        } else {
+                            if (m_subtitleSyncCallback) m_subtitleSyncCallback(500);  // 字幕延后 0.5s
+                        }
                         break;
                     case SDLK_LEFTBRACKET:
                         if (m_abLoopCallback) m_abLoopCallback('a');
