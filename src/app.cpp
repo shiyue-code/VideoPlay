@@ -110,7 +110,9 @@ bool VideoPlayerApp::initialize() {
     }
     m_player->setAudioOutputDevice(outputDevice);
     m_renderer->setAudioOutputDeviceName(savedAudioDevice);
-    m_player->setVideoFilterConfig(Settings::instance().videoFilterConfig());
+    auto videoFilterConfig = Settings::instance().videoFilterConfig();
+    m_player->setVideoFilterConfig(videoFilterConfig);
+    m_renderer->setDeinterlaceMode(videoFilterConfig.deinterlace);
     
     // 设置回调
     m_player->setPositionCallback([this](int64_t pos) {

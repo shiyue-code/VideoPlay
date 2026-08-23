@@ -1016,6 +1016,10 @@ void SDLRenderer::setAudioFilterPreset(AudioFilterPreset preset) {
     m_audioFilterPreset = preset;
 }
 
+void SDLRenderer::setDeinterlaceMode(DeinterlaceMode mode) {
+    m_deinterlaceMode = mode;
+}
+
 void SDLRenderer::setNetworkState(NetworkState state) {
     m_networkState = state;
 }

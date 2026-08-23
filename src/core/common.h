@@ -214,6 +214,23 @@ enum class AudioFilterPreset {
     Night = 3
 };
 
+enum class DeinterlaceMode {
+    Off = 0,
+    Auto = 1,
+    Yadif = 2,
+    Bwdif = 3
+};
+
+inline const char* deinterlaceModeName(DeinterlaceMode mode) {
+    switch (mode) {
+        case DeinterlaceMode::Off:   return "关闭";
+        case DeinterlaceMode::Auto:  return "自动";
+        case DeinterlaceMode::Yadif: return "线性";
+        case DeinterlaceMode::Bwdif: return "Bob";
+    }
+    return "关闭";
+}
+
 struct VideoFilterConfig {
     bool enabled = false;
     float brightness = 0.0f;   // -1.0 ~ 1.0
@@ -221,11 +238,16 @@ struct VideoFilterConfig {
     float saturation = 1.0f;   //  0.0 ~ 3.0
     float hue = 0.0f;          // -180 ~ 180
     float gamma = 1.0f;        //  0.1 ~ 10.0
+    DeinterlaceMode deinterlace = DeinterlaceMode::Off;
+
+    bool eqIsIdentity() const {
+        return brightness == 0.0f && contrast == 1.0f &&
+               saturation == 1.0f && hue == 0.0f && gamma == 1.0f;
+    }
 
     bool isDefault() const {
-        return !enabled ||
-               (brightness == 0.0f && contrast == 1.0f &&
-                saturation == 1.0f && hue == 0.0f && gamma == 1.0f);
+        return deinterlace == DeinterlaceMode::Off &&
+               (!enabled || eqIsIdentity());
     }
 };
 

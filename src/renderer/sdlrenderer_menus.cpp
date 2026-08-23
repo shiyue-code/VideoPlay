@@ -59,6 +59,7 @@ void SDLRenderer::initMenus() {
         {98, "音频输出", "", false, true},
         {0, "", "", true},
         {120, "视频基础参数", "", false, true},
+        {141, "去隔行", "", false, true},
         {0, "", "", true},
         {97, "硬件解码", "", false, true},
         {0, "", "", true},
@@ -500,6 +501,10 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                     std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
                     displayLabel = item.label + "（" + current + "）";
                 }
+                if (item.id == static_cast<int>(MenuId::Deinterlace)) {
+                    displayLabel = item.label + std::string("（") +
+                                   deinterlaceModeName(m_deinterlaceMode) + "）";
+                }
                 if (item.id == static_cast<int>(MenuId::VideoTransform)) {
                     std::string summary = std::to_string(m_videoTransform.rotation) + "°";
                     if (m_videoTransform.flipHorizontal) summary += " 水平";
@@ -591,6 +596,14 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 checked = (entryId - 70) == static_cast<int>(m_aspectMode);
             } else if (entryId >= 93 && entryId <= 96) {
                 checked = (entryId - 93) == static_cast<int>(m_audioFilterPreset);
+            } else if (entryId == static_cast<int>(MenuId::DeinterlaceOff)) {
+                checked = (m_deinterlaceMode == DeinterlaceMode::Off);
+            } else if (entryId == static_cast<int>(MenuId::DeinterlaceAuto)) {
+                checked = (m_deinterlaceMode == DeinterlaceMode::Auto);
+            } else if (entryId == static_cast<int>(MenuId::DeinterlaceYadif)) {
+                checked = (m_deinterlaceMode == DeinterlaceMode::Yadif);
+            } else if (entryId == static_cast<int>(MenuId::DeinterlaceBwdif)) {
+                checked = (m_deinterlaceMode == DeinterlaceMode::Bwdif);
             } else if (entryId == static_cast<int>(MenuId::Rotate0)) {
                 checked = (m_videoTransform.rotation == 0);
             } else if (entryId == static_cast<int>(MenuId::Rotate90)) {

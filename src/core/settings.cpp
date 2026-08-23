@@ -449,7 +449,8 @@ void Settings::setVideoFilterConfig(const VideoFilterConfig& config) {
         {"contrast", config.contrast},
         {"saturation", config.saturation},
         {"hue", config.hue},
-        {"gamma", config.gamma}
+        {"gamma", config.gamma},
+        {"deinterlace", static_cast<int>(config.deinterlace)}
     };
 }
 
@@ -469,6 +470,11 @@ VideoFilterConfig Settings::videoFilterConfig() const {
     config.saturation = video.value("saturation", 1.0f);
     config.hue = video.value("hue", 0.0f);
     config.gamma = video.value("gamma", 1.0f);
+    int deint = video.value("deinterlace", 0);
+    if (deint < 0 || deint > 3) {
+        deint = 0;
+    }
+    config.deinterlace = static_cast<DeinterlaceMode>(deint);
 
     return config;
 }

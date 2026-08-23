@@ -217,6 +217,29 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
             break;
         }
+        case MenuId::DeinterlaceOff:
+        case MenuId::DeinterlaceAuto:
+        case MenuId::DeinterlaceYadif:
+        case MenuId::DeinterlaceBwdif: {
+            if (!m_player) break;
+            auto config = m_player->videoFilterConfig();
+            switch (menuId) {
+                case MenuId::DeinterlaceOff: config.deinterlace = DeinterlaceMode::Off; break;
+                case MenuId::DeinterlaceAuto: config.deinterlace = DeinterlaceMode::Auto; break;
+                case MenuId::DeinterlaceYadif: config.deinterlace = DeinterlaceMode::Yadif; break;
+                case MenuId::DeinterlaceBwdif: config.deinterlace = DeinterlaceMode::Bwdif; break;
+                default: break;
+            }
+            Settings::instance().setVideoFilterConfig(config);
+            Settings::instance().save();
+            m_player->setVideoFilterConfig(config);
+            if (m_renderer) {
+                m_renderer->setDeinterlaceMode(config.deinterlace);
+                m_renderer->showOSD(OSDType::Info,
+                    std::string("去隔行 ") + deinterlaceModeName(config.deinterlace));
+            }
+            break;
+        }
         case MenuId::HardwareDecoding: {
             bool enabled = !Settings::instance().hardwareDecodingEnabled();
             Settings::instance().setHardwareDecodingEnabled(enabled);
@@ -249,14 +272,19 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
                 case MenuId::VideoFilterContrastUp: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
                 case MenuId::VideoFilterContrastDown: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
                 case MenuId::VideoFilterSaturationUp: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
-                case MenuId::VideoFilterReset: config = VideoFilterConfig{}; break;  // 重置
+                case MenuId::VideoFilterReset: {
+                    auto deint = config.deinterlace;
+                    config = VideoFilterConfig{};
+                    config.deinterlace = deint;
+                    break;
+                }
                 default: break;
             }
             Settings::instance().setVideoFilterConfig(config);
             Settings::instance().save();
             m_player->setVideoFilterConfig(config);
             if (m_renderer) {
-                if (config.isDefault()) {
+                if (config.eqIsIdentity()) {
                     m_renderer->showOSD(OSDType::Info, "视频基础参数 已重置");
                 } else {
                     m_renderer->showOSD(OSDType::Info,

@@ -1665,18 +1665,48 @@ void FFmpegPlayer::cleanupVideoFilterGraph() {
 }
 
 std::string FFmpegPlayer::buildVideoFilterDescription() const {
-    if (!m_videoFilterConfig.enabled || m_videoFilterConfig.isDefault()) {
+    const bool needDeint = m_videoFilterConfig.deinterlace != DeinterlaceMode::Off;
+    const bool needEq = m_videoFilterConfig.enabled && !m_videoFilterConfig.eqIsIdentity();
+    if (!needDeint && !needEq) {
         return {};
     }
 
     std::ostringstream desc;
-    // 先统一到 yuv420p（eq/hue 的要求）
-    desc << "format=pix_fmts=yuv420p,";
-    desc << "eq=brightness=" << m_videoFilterConfig.brightness
-         << ":contrast=" << m_videoFilterConfig.contrast
-         << ":saturation=" << m_videoFilterConfig.saturation
-         << ":gamma=" << m_videoFilterConfig.gamma;
-    desc << ",hue=h=" << m_videoFilterConfig.hue;
+    desc << "format=pix_fmts=yuv420p";
+
+    if (needDeint) {
+        const bool hasBwdif = avfilter_get_by_name("bwdif") != nullptr;
+        switch (m_videoFilterConfig.deinterlace) {
+            case DeinterlaceMode::Auto:
+                if (hasBwdif) {
+                    desc << ",bwdif=mode=send_frame:parity=auto:deint=interlaced";
+                } else {
+                    desc << ",yadif=mode=0:parity=-1:deint=1";
+                }
+                break;
+            case DeinterlaceMode::Yadif:
+                desc << ",yadif=mode=0:parity=-1:deint=0";
+                break;
+            case DeinterlaceMode::Bwdif:
+                if (hasBwdif) {
+                    desc << ",bwdif=mode=send_frame:parity=auto:deint=all";
+                } else {
+                    desc << ",yadif=mode=0:parity=-1:deint=0";
+                }
+                break;
+            case DeinterlaceMode::Off:
+            default:
+                break;
+        }
+    }
+
+    if (needEq) {
+        desc << ",eq=brightness=" << m_videoFilterConfig.brightness
+             << ":contrast=" << m_videoFilterConfig.contrast
+             << ":saturation=" << m_videoFilterConfig.saturation
+             << ":gamma=" << m_videoFilterConfig.gamma;
+        desc << ",hue=h=" << m_videoFilterConfig.hue;
+    }
     return desc.str();
 }
 

@@ -100,7 +100,8 @@ VideoPlayerApp
 - 变速：重采样率与播放速度一起调
 - Seek：异步请求，解码线程处理
 - 预缓冲：`play()` 设 `m_preloading = true`，主循环每帧调 `checkPreloadComplete()`。视频队列 ≥1 帧且音频缓冲 ≥40ms 才启动音频；超时 1 秒强制开播
-- 画面参数走 FFmpeg `eq` / `hue` 滤镜；音频滤镜走 `avfilter`
+- 画面参数走 FFmpeg `eq` / `hue` 滤镜；去隔行走 `bwdif` / `yadif`（硬解帧先转到软件再滤）
+- 音频滤镜走 `avfilter`
 
 ### 渲染与交互
 

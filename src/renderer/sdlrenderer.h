@@ -108,6 +108,12 @@ enum class MenuId : int {
     Crop20 = 139,
     TransformReset = 140,
 
+    Deinterlace = 141,
+    DeinterlaceOff = 142,
+    DeinterlaceAuto = 143,
+    DeinterlaceYadif = 144,
+    DeinterlaceBwdif = 145,
+
     // AI 菜单
     AIAnalyze = 300,
     AISummary = 301,
@@ -267,7 +273,11 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
                                     {MenuId::CropOff, "裁剪关闭"},
                                     {MenuId::Crop10, "裁剪 10%"},
                                     {MenuId::Crop20, "裁剪 20%"},
-                                    {MenuId::TransformReset, "重置变换"} }}}
+                                    {MenuId::TransformReset, "重置变换"} }}},
+        {MenuId::Deinterlace, {{ {MenuId::DeinterlaceOff, "关闭"},
+                                 {MenuId::DeinterlaceAuto, "自动"},
+                                 {MenuId::DeinterlaceYadif, "线性"},
+                                 {MenuId::DeinterlaceBwdif, "Bob"} }}}
     };
     return registry;
 }
@@ -427,6 +437,7 @@ public:
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
     void setHardwareDecodingEnabled(bool enabled);
     void setAudioFilterPreset(AudioFilterPreset preset);
+    void setDeinterlaceMode(DeinterlaceMode mode);
     void refreshAudioOutputDevices();
     void setAudioOutputDeviceName(const std::string& name);
     const std::vector<AudioOutputDevice>& audioOutputDevices() const { return m_audioOutputDevices; }
@@ -662,6 +673,7 @@ private:
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     bool m_hardwareDecodingEnabled = true;
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
+    DeinterlaceMode m_deinterlaceMode = DeinterlaceMode::Off;
     std::vector<AudioOutputDevice> m_audioOutputDevices;
     std::string m_audioOutputDeviceName;
     NetworkState m_networkState = NetworkState::Idle;
