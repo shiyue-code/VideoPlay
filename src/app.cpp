@@ -289,6 +289,7 @@ bool VideoPlayerApp::initialize() {
     // 恢复画面比例设置
     auto aspectMode = Settings::instance().aspectMode();
     m_renderer->setAspectMode(aspectMode);
+    m_renderer->setVideoTransform(Settings::instance().videoTransform());
 
     // 恢复窗口置顶状态
     if (Settings::instance().alwaysOnTop()) {

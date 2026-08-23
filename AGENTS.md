@@ -107,6 +107,7 @@ VideoPlayerApp
 - 先画视频，再叠字幕（文本或 PGS 位图），再画 UI
 - 控件全是坐标命中，没有原生控件
 - 进度条只在鼠标释放时 seek，拖动只更新 `m_dragProgressRatio`
+- 画面旋转/翻转/中心裁剪在 `SDLRenderer::renderFrame` 用 `SDL_RenderTextureRotated` 完成，不要改成 FFmpeg `transpose`（硬解路径过不去）
 - 章节来自 `AVFormatContext::chapters`；进度条书签独立命中 `ControlType::ChapterMarker`
 - 绝对 seek 回调编码：`1000.0 + ratio * 1000.0`
 

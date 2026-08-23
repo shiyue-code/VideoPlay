@@ -374,41 +374,76 @@ void SDLRenderer::renderFrame(const VideoFrame& frame) {
         frame.width * 4  // BGRA stride
     );
 
-    // 计算目标宽高比
+    const int rotation = m_videoTransform.rotation;
+    const bool swapped = (rotation == 90 || rotation == 270);
+    const float crop = std::clamp(m_videoTransform.cropPercent, 0, 40) / 100.0f;
+
+    SDL_FRect srcRect;
+    srcRect.x = static_cast<float>(frame.width) * crop;
+    srcRect.y = static_cast<float>(frame.height) * crop;
+    srcRect.w = static_cast<float>(frame.width) * (1.0f - 2.0f * crop);
+    srcRect.h = static_cast<float>(frame.height) * (1.0f - 2.0f * crop);
+    if (srcRect.w < 1.0f) srcRect.w = 1.0f;
+    if (srcRect.h < 1.0f) srcRect.h = 1.0f;
+
+    const float contentW = swapped ? srcRect.h : srcRect.w;
+    const float contentH = swapped ? srcRect.w : srcRect.h;
+
     float targetAspect;
     switch (m_aspectMode) {
         case AspectMode::R16_9:      targetAspect = 16.0f / 9.0f; break;
         case AspectMode::R4_3:       targetAspect = 4.0f / 3.0f; break;
         case AspectMode::FillWindow: targetAspect = static_cast<float>(m_windowWidth) / m_windowHeight; break;
         case AspectMode::Original:
-        default:                     targetAspect = static_cast<float>(frame.width) / frame.height; break;
+        default:                     targetAspect = contentW / contentH; break;
     }
 
-    // 计算视频显示区域（保持目标宽高比，UI 悬浮在上层）
     float windowAspect = static_cast<float>(m_windowWidth) / m_windowHeight;
+    SDL_FRect display;
+    if (m_aspectMode == AspectMode::FillWindow) {
+        display.x = 0;
+        display.y = 0;
+        display.w = static_cast<float>(m_windowWidth);
+        display.h = static_cast<float>(m_windowHeight);
+    } else if (windowAspect > targetAspect) {
+        display.h = static_cast<float>(m_windowHeight);
+        display.w = display.h * targetAspect;
+        display.x = (m_windowWidth - display.w) / 2.0f;
+        display.y = 0;
+    } else {
+        display.w = static_cast<float>(m_windowWidth);
+        display.h = display.w / targetAspect;
+        display.x = 0;
+        display.y = (m_windowHeight - display.h) / 2.0f;
+    }
+
+    SDL_FlipMode flip = SDL_FLIP_NONE;
+    if (m_videoTransform.flipHorizontal) {
+        flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_HORIZONTAL);
+    }
+    if (m_videoTransform.flipVertical) {
+        flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_VERTICAL);
+    }
+
+    const bool useSrc = crop > 0.001f;
+    if (rotation == 0 && flip == SDL_FLIP_NONE) {
+        SDL_RenderTexture(m_renderer, m_videoTexture, useSrc ? &srcRect : nullptr, &display);
+        return;
+    }
 
     SDL_FRect dstRect;
-    if (m_aspectMode == AspectMode::FillWindow) {
-        dstRect.x = 0;
-        dstRect.y = 0;
-        dstRect.w = static_cast<float>(m_windowWidth);
-        dstRect.h = static_cast<float>(m_windowHeight);
-    } else if (windowAspect > targetAspect) {
-        // 窗口更宽，以高度为基准
-        dstRect.h = static_cast<float>(m_windowHeight);
-        dstRect.w = dstRect.h * targetAspect;
-        dstRect.x = (m_windowWidth - dstRect.w) / 2.0f;
-        dstRect.y = 0;
+    if (swapped) {
+        dstRect.w = display.h;
+        dstRect.h = display.w;
     } else {
-        // 窗口更高，以宽度为基准
-        dstRect.w = static_cast<float>(m_windowWidth);
-        dstRect.h = dstRect.w / targetAspect;
-        dstRect.x = 0;
-        dstRect.y = (m_windowHeight - dstRect.h) / 2.0f;
+        dstRect.w = display.w;
+        dstRect.h = display.h;
     }
-
-    // 渲染视频
-    SDL_RenderTexture(m_renderer, m_videoTexture, nullptr, &dstRect);
+    dstRect.x = display.x + (display.w - dstRect.w) / 2.0f;
+    dstRect.y = display.y + (display.h - dstRect.h) / 2.0f;
+    SDL_FPoint center{display.x + display.w / 2.0f, display.y + display.h / 2.0f};
+    SDL_RenderTextureRotated(m_renderer, m_videoTexture, useSrc ? &srcRect : nullptr,
+                             &dstRect, static_cast<double>(rotation), &center, flip);
 }
 
 void SDLRenderer::clear() {
@@ -471,6 +506,10 @@ void SDLRenderer::setLoopMode(int mode) {
 
 void SDLRenderer::setAspectMode(AspectMode mode) {
     m_aspectMode = mode;
+}
+
+void SDLRenderer::setVideoTransform(const VideoTransform& transform) {
+    m_videoTransform = transform;
 }
 
 AspectMode SDLRenderer::aspectMode() const {

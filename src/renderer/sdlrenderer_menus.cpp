@@ -65,6 +65,7 @@ void SDLRenderer::initMenus() {
         {59, "循环", "", false, true},
         {0, "", "", true},
         {69, "画面比例", "", false, true},
+        {130, "画面变换", "", false, true},
         {0, "", "", true},
         {80, "始终置顶", "T", false, true},
         {0, "", "", true},
@@ -499,6 +500,15 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                     std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
                     displayLabel = item.label + "（" + current + "）";
                 }
+                if (item.id == static_cast<int>(MenuId::VideoTransform)) {
+                    std::string summary = std::to_string(m_videoTransform.rotation) + "°";
+                    if (m_videoTransform.flipHorizontal) summary += " 水平";
+                    if (m_videoTransform.flipVertical) summary += " 垂直";
+                    if (m_videoTransform.cropPercent > 0) {
+                        summary += " 裁" + std::to_string(m_videoTransform.cropPercent) + "%";
+                    }
+                    displayLabel = item.label + "（" + summary + "）";
+                }
                 int checkX = x + leftPadding;
                 int labelX = checkX + checkColumnWidth;
                 int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
@@ -581,6 +591,24 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 checked = (entryId - 70) == static_cast<int>(m_aspectMode);
             } else if (entryId >= 93 && entryId <= 96) {
                 checked = (entryId - 93) == static_cast<int>(m_audioFilterPreset);
+            } else if (entryId == static_cast<int>(MenuId::Rotate0)) {
+                checked = (m_videoTransform.rotation == 0);
+            } else if (entryId == static_cast<int>(MenuId::Rotate90)) {
+                checked = (m_videoTransform.rotation == 90);
+            } else if (entryId == static_cast<int>(MenuId::Rotate180)) {
+                checked = (m_videoTransform.rotation == 180);
+            } else if (entryId == static_cast<int>(MenuId::Rotate270)) {
+                checked = (m_videoTransform.rotation == 270);
+            } else if (entryId == static_cast<int>(MenuId::FlipHorizontal)) {
+                checked = m_videoTransform.flipHorizontal;
+            } else if (entryId == static_cast<int>(MenuId::FlipVertical)) {
+                checked = m_videoTransform.flipVertical;
+            } else if (entryId == static_cast<int>(MenuId::CropOff)) {
+                checked = (m_videoTransform.cropPercent == 0);
+            } else if (entryId == static_cast<int>(MenuId::Crop10)) {
+                checked = (m_videoTransform.cropPercent == 10);
+            } else if (entryId == static_cast<int>(MenuId::Crop20)) {
+                checked = (m_videoTransform.cropPercent == 20);
             } else if (m_activeSubmenuParent == static_cast<int>(MenuId::AudioOutput)) {
                 if (index >= 0 && index < static_cast<int>(m_audioOutputDevices.size())) {
                     const auto& device = m_audioOutputDevices[static_cast<size_t>(index)];

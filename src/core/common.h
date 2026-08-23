@@ -229,6 +229,17 @@ struct VideoFilterConfig {
     }
 };
 
+struct VideoTransform {
+    int rotation = 0;          // 0 / 90 / 180 / 270
+    bool flipHorizontal = false;
+    bool flipVertical = false;
+    int cropPercent = 0;       // 0 / 10 / 20，中心裁剪
+
+    bool isDefault() const {
+        return rotation == 0 && !flipHorizontal && !flipVertical && cropPercent == 0;
+    }
+};
+
 struct EQBand {
     double frequency = 1000.0;
     double width = 1.0;

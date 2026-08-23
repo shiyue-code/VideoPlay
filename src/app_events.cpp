@@ -144,6 +144,46 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             Settings::instance().setAspectMode(AspectMode::FillWindow);
             if (m_renderer) m_renderer->setAspectMode(AspectMode::FillWindow);
             break;
+        case MenuId::Rotate0:
+        case MenuId::Rotate90:
+        case MenuId::Rotate180:
+        case MenuId::Rotate270:
+        case MenuId::FlipHorizontal:
+        case MenuId::FlipVertical:
+        case MenuId::CropOff:
+        case MenuId::Crop10:
+        case MenuId::Crop20:
+        case MenuId::TransformReset: {
+            if (!m_renderer) break;
+            VideoTransform transform = m_renderer->videoTransform();
+            switch (menuId) {
+                case MenuId::Rotate0: transform.rotation = 0; break;
+                case MenuId::Rotate90: transform.rotation = 90; break;
+                case MenuId::Rotate180: transform.rotation = 180; break;
+                case MenuId::Rotate270: transform.rotation = 270; break;
+                case MenuId::FlipHorizontal: transform.flipHorizontal = !transform.flipHorizontal; break;
+                case MenuId::FlipVertical: transform.flipVertical = !transform.flipVertical; break;
+                case MenuId::CropOff: transform.cropPercent = 0; break;
+                case MenuId::Crop10: transform.cropPercent = 10; break;
+                case MenuId::Crop20: transform.cropPercent = 20; break;
+                case MenuId::TransformReset: transform = VideoTransform{}; break;
+                default: break;
+            }
+            m_renderer->setVideoTransform(transform);
+            Settings::instance().setVideoTransform(transform);
+            Settings::instance().save();
+            std::string osd = "画面 " + std::to_string(transform.rotation) + "°";
+            if (transform.flipHorizontal) osd += " 水平翻转";
+            if (transform.flipVertical) osd += " 垂直翻转";
+            if (transform.cropPercent > 0) {
+                osd += " 裁剪" + std::to_string(transform.cropPercent) + "%";
+            }
+            if (transform.isDefault()) {
+                osd = "画面变换 已重置";
+            }
+            m_renderer->showOSD(OSDType::Info, osd);
+            break;
+        }
         case MenuId::AlwaysOnTop: // 始终置顶
             if (m_renderer) {
                 m_renderer->toggleAlwaysOnTop();

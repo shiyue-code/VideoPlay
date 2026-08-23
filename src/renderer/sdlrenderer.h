@@ -96,6 +96,18 @@ enum class MenuId : int {
     VideoFilterSaturationUp = 125,
     VideoFilterReset = 126,
 
+    VideoTransform = 130,
+    Rotate0 = 131,
+    Rotate90 = 132,
+    Rotate180 = 133,
+    Rotate270 = 134,
+    FlipHorizontal = 135,
+    FlipVertical = 136,
+    CropOff = 137,
+    Crop10 = 138,
+    Crop20 = 139,
+    TransformReset = 140,
+
     // AI 菜单
     AIAnalyze = 300,
     AISummary = 301,
@@ -245,7 +257,17 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
                                  {MenuId::VideoFilterContrastUp, "对比度 +"},
                                  {MenuId::VideoFilterContrastDown, "对比度 -"},
                                  {MenuId::VideoFilterSaturationUp, "饱和度 +"},
-                                 {MenuId::VideoFilterReset, "重置"} }}}
+                                 {MenuId::VideoFilterReset, "重置"} }}},
+        {MenuId::VideoTransform, {{ {MenuId::Rotate0, "旋转 0°"},
+                                    {MenuId::Rotate90, "旋转 90°"},
+                                    {MenuId::Rotate180, "旋转 180°"},
+                                    {MenuId::Rotate270, "旋转 270°"},
+                                    {MenuId::FlipHorizontal, "水平翻转"},
+                                    {MenuId::FlipVertical, "垂直翻转"},
+                                    {MenuId::CropOff, "裁剪关闭"},
+                                    {MenuId::Crop10, "裁剪 10%"},
+                                    {MenuId::Crop20, "裁剪 20%"},
+                                    {MenuId::TransformReset, "重置变换"} }}}
     };
     return registry;
 }
@@ -445,6 +467,8 @@ public:
 
     // 设置画面比例
     void setAspectMode(AspectMode mode);
+    void setVideoTransform(const VideoTransform& transform);
+    VideoTransform videoTransform() const { return m_videoTransform; }
     AspectMode aspectMode() const;
 
     // 窗口置顶
@@ -650,6 +674,7 @@ private:
     uint64_t m_aiAnalysisNoticeStartTime = 0;
     static constexpr uint64_t AI_ANALYSIS_NOTICE_DURATION_MS = 2600;
     AspectMode m_aspectMode = AspectMode::Original;
+    VideoTransform m_videoTransform;
     bool m_alwaysOnTop = false;
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;

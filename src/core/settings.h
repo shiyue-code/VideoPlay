@@ -107,6 +107,8 @@ public:
     AudioFilterConfig audioFilterConfig() const;
     void setVideoFilterConfig(const VideoFilterConfig& config);
     VideoFilterConfig videoFilterConfig() const;
+    void setVideoTransform(const VideoTransform& transform);
+    VideoTransform videoTransform() const;
 
     // 最近文件
     void addRecentFile(const std::string& path);

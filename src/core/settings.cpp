@@ -473,6 +473,39 @@ VideoFilterConfig Settings::videoFilterConfig() const {
     return config;
 }
 
+void Settings::setVideoTransform(const VideoTransform& transform) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["videoTransform"] = {
+        {"rotation", transform.rotation},
+        {"flipHorizontal", transform.flipHorizontal},
+        {"flipVertical", transform.flipVertical},
+        {"cropPercent", transform.cropPercent}
+    };
+}
+
+VideoTransform Settings::videoTransform() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    VideoTransform transform;
+    if (!m_config.contains("playback") ||
+        !m_config["playback"].contains("videoTransform")) {
+        return transform;
+    }
+    const auto& t = m_config["playback"]["videoTransform"];
+    transform.rotation = t.value("rotation", 0);
+    if (transform.rotation != 0 && transform.rotation != 90 &&
+        transform.rotation != 180 && transform.rotation != 270) {
+        transform.rotation = 0;
+    }
+    transform.flipHorizontal = t.value("flipHorizontal", false);
+    transform.flipVertical = t.value("flipVertical", false);
+    transform.cropPercent = t.value("cropPercent", 0);
+    if (transform.cropPercent != 0 && transform.cropPercent != 10 &&
+        transform.cropPercent != 20) {
+        transform.cropPercent = 0;
+    }
+    return transform;
+}
+
 // 最近文件
 void Settings::addRecentFile(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
