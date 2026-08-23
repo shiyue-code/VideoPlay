@@ -56,6 +56,7 @@ void SDLRenderer::initMenus() {
         {58, "AB 循环", "", false, true},
         {0, "", "", true},
         {89, "音频滤镜", "", false, true},
+        {98, "音频输出", "", false, true},
         {0, "", "", true},
         {120, "视频基础参数", "", false, true},
         {0, "", "", true},
@@ -469,7 +470,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                     m_activeSubmenuParent = item.id;
                     activeSubmenuY = itemY;
                 } else if (rowUnderMouseParent == 0 && m_activeSubmenuParent == 0) {
-                    int submenuHeight = submenuItemCount(item.id) * itemHeight + menuPadY * 2;
+                    int submenuHeight = menuSubmenuItemCount(item.id) * itemHeight + menuPadY * 2;
                     bool submenuHovered = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
                                            m_mouseY >= itemY && m_mouseY <= itemY + submenuHeight);
                     if (submenuHovered) {
@@ -494,6 +495,10 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
             // 渲染菜单项文字
             if (item.enabled) {
                 std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+                if (item.id == static_cast<int>(MenuId::AudioOutput)) {
+                    std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
+                    displayLabel = item.label + "（" + current + "）";
+                }
                 int checkX = x + leftPadding;
                 int labelX = checkX + checkColumnWidth;
                 int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
@@ -548,7 +553,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     }
 
     if (m_activeSubmenuParent != 0 && activeSubmenuY > 0) {
-        int itemCount = submenuItemCount(m_activeSubmenuParent);
+        int itemCount = menuSubmenuItemCount(m_activeSubmenuParent);
         int submenuHeight = itemCount * itemHeight + menuPadY * 2;
         fillRoundRect(activeSubmenuX + 2, activeSubmenuY + 5, submenuWidth, submenuHeight, 8,
                       0, 0, 0, scaledAlpha(95, alpha));
@@ -559,7 +564,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 
         int submenuItemY = activeSubmenuY + menuPadY;
         for (int index = 0; index < itemCount; ++index) {
-            int entryId = submenuItemId(m_activeSubmenuParent, index);
+            int entryId = menuSubmenuItemId(m_activeSubmenuParent, index);
             bool hovered = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
                            m_mouseY >= submenuItemY && m_mouseY <= submenuItemY + itemHeight);
             if (hovered) {
@@ -576,6 +581,15 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 checked = (entryId - 70) == static_cast<int>(m_aspectMode);
             } else if (entryId >= 93 && entryId <= 96) {
                 checked = (entryId - 93) == static_cast<int>(m_audioFilterPreset);
+            } else if (m_activeSubmenuParent == static_cast<int>(MenuId::AudioOutput)) {
+                if (index >= 0 && index < static_cast<int>(m_audioOutputDevices.size())) {
+                    const auto& device = m_audioOutputDevices[static_cast<size_t>(index)];
+                    if (device.isDefault) {
+                        checked = m_audioOutputDeviceName.empty();
+                    } else {
+                        checked = (device.name == m_audioOutputDeviceName);
+                    }
+                }
             }
             int checkX = activeSubmenuX + leftPadding;
             int labelX = checkX + checkColumnWidth;
@@ -584,7 +598,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 drawText("\xE2\x9C\x93", checkX, labelY,
                          COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
             }
-            drawText(submenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
+            drawText(menuSubmenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
                      COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
             submenuItemY += itemHeight;
         }

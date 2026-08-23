@@ -101,6 +101,8 @@ public:
     bool alwaysOnTop() const;
     void setHardwareDecodingEnabled(bool enabled);
     bool hardwareDecodingEnabled() const;
+    void setAudioOutputDeviceName(const std::string& name);
+    std::string audioOutputDeviceName() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
     void setVideoFilterConfig(const VideoFilterConfig& config);

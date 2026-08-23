@@ -183,6 +183,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             m_windowWidth = event.window.data1;
             m_windowHeight = event.window.data2;
+            applySmallWindowPanelGuard();
+            break;
+
+        case SDL_EVENT_AUDIO_DEVICE_ADDED:
+        case SDL_EVENT_AUDIO_DEVICE_REMOVED:
+            refreshAudioOutputDevices();
             break;
 
         case SDL_EVENT_KEY_DOWN:
@@ -536,7 +542,26 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     }
 
     
-    //  处理进度条拖动（仅更�?UI，不 seek�?
+    if (m_mouseDown && m_pressedControl == ControlType::PlaylistItem && m_playlistDragFrom >= 0) {
+        if (!m_playlistDragging && std::abs(y - m_playlistDragStartY) > 6) {
+            m_playlistDragging = true;
+        }
+        if (m_playlistDragging) {
+            int hitValue = 0;
+            ControlType hit = getControlAt(x, y, &hitValue);
+            if (hit == ControlType::PlaylistItem) {
+                m_playlistDragTo = hitValue;
+            } else if (m_playlistItemCount > 0) {
+                bool overPlaylist = m_showPlaylistPanel && x >= m_windowWidth - 284 && x <= m_windowWidth - 24
+                    && y >= m_menuBarHeight + 10 && y <= m_windowHeight - m_controlHeight - 34;
+                if (overPlaylist) {
+                    m_playlistDragTo = (y > m_playlistDragStartY) ? m_playlistItemCount - 1 : 0;
+                }
+            }
+        }
+    }
+
+    //  处理进度条拖动（仅更新 UI，不 seek）
     if (m_draggingProgress) {
         for (const auto& rect : m_controlRects) {
             if (rect.type == ControlType::ProgressBar) {
@@ -683,6 +708,10 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         logger().info("[Episode] Mouse down on item " + std::to_string(m_pressedControlValue));
     }
     if (m_pressedControl == ControlType::PlaylistItem) {
+        m_playlistDragFrom = m_pressedControlValue;
+        m_playlistDragTo = m_pressedControlValue;
+        m_playlistDragStartY = y;
+        m_playlistDragging = false;
         logger().info("[Playlist] Mouse down on item " + std::to_string(m_pressedControlValue));
     }
 
@@ -811,7 +840,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         }
 
         constexpr int submenuWidth = 180;
-        int submenuCount = submenuItemCount(m_activeSubmenuParent);
+        int submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
         int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
         if (m_activeSubmenuParent != 0 &&
             x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
@@ -821,7 +850,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             if (localY >= 0) {
                 int itemIndex = localY / itemHeight;
                 if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
-                    m_menuCallback(static_cast<MenuId>(submenuItemId(m_activeSubmenuParent, itemIndex)));
+                    m_menuCallback(static_cast<MenuId>(menuSubmenuItemId(m_activeSubmenuParent, itemIndex)));
                     m_menuManager->closeAllMenus();
                     m_pressedControl = ControlType::None;
                 }
@@ -947,12 +976,27 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
 }
 
 void SDLRenderer::handleMouseButtonUp(int x, int y) {
-    // 进度条释放时才执�?seek
+    // 进度条释放时才执行 seek
     if (m_draggingProgress && m_seekCallback) {
         m_seekCallback(m_dragProgressRatio * 1000 + 1000); // 传回绝对位置 (1000~2000)
     }
 
-    //  列表/面板项的单击操作在鼠标释放时触发（按下和释放需在同一个控件上�?
+    if (m_playlistDragging) {
+        if (m_playlistReorderCallback && m_playlistDragFrom >= 0 &&
+            m_playlistDragTo >= 0 && m_playlistDragFrom != m_playlistDragTo) {
+            m_playlistReorderCallback(static_cast<size_t>(m_playlistDragFrom),
+                                      static_cast<size_t>(m_playlistDragTo));
+        }
+        m_playlistDragging = false;
+        m_playlistDragFrom = -1;
+        m_playlistDragTo = -1;
+        m_draggingProgress = false;
+        m_draggingVolume = false;
+        m_pressedControl = ControlType::None;
+        return;
+    }
+
+    // 列表/面板项的单击操作在鼠标释放时触发（按下和释放需在同一个控件上）
     if (!m_draggingProgress && !m_draggingVolume && m_pressedControl != ControlType::None) {
         int releaseValue = 0;
         ControlType releaseControl = getControlAt(x, y, &releaseValue);
@@ -989,6 +1033,9 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
 
     m_draggingProgress = false;
     m_draggingVolume = false;
+    m_playlistDragging = false;
+    m_playlistDragFrom = -1;
+    m_playlistDragTo = -1;
     m_resizingWindow = false;
     m_resizeMode = ResizeMode::None;
     m_pressedControl = ControlType::None;
@@ -1156,7 +1203,7 @@ void SDLRenderer::handleMenuAutoDismiss(int x, int y)
             activeSubmenuY += item.separator ? separatorHeight : itemHeight;
         }
         constexpr int submenuWidth = 180;
-        int submenuCount = submenuItemCount(m_activeSubmenuParent);
+        int submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
         int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
         inSubmenu = (x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
                      y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight);

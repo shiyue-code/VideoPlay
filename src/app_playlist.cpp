@@ -5,6 +5,7 @@
 #include "utils/logger.h"
 #include "core/episodedetector.h"
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 
 namespace VideoPlay {
@@ -59,6 +60,32 @@ void VideoPlayerApp::removeFromPlaylist(size_t index) {
     if (m_renderer) {
         m_renderer->showOSD(OSDType::Info, "已从播放列表删除");
     }
+}
+
+void VideoPlayerApp::reorderPlaylist(size_t fromIndex, size_t toIndex) {
+    if (fromIndex >= m_playlist.size() || toIndex >= m_playlist.size() || fromIndex == toIndex) {
+        return;
+    }
+
+    std::string item = m_playlist[fromIndex];
+    m_playlist.erase(m_playlist.begin() + static_cast<std::ptrdiff_t>(fromIndex));
+    size_t insertIndex = toIndex;
+    if (insertIndex > m_playlist.size()) {
+        insertIndex = m_playlist.size();
+    }
+    m_playlist.insert(m_playlist.begin() + static_cast<std::ptrdiff_t>(insertIndex), item);
+
+    auto it = std::find(m_playlist.begin(), m_playlist.end(), m_currentFile);
+    if (it != m_playlist.end()) {
+        m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
+    } else if (m_currentIndex >= m_playlist.size()) {
+        m_currentIndex = m_playlist.empty() ? 0 : m_playlist.size() - 1;
+    }
+
+    m_progressCacheDirty = true;
+    persistPlaylist();
+    logger().info("Reordered playlist: " + std::to_string(fromIndex) + " -> " +
+                  std::to_string(insertIndex));
 }
 
 void VideoPlayerApp::clearPlaylist() {

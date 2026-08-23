@@ -85,6 +85,7 @@ private:
     void removeFromPlaylist(size_t index);
     void clearPlaylist();
     void persistPlaylist();
+    void reorderPlaylist(size_t fromIndex, size_t toIndex);
     void playNext();
     void playPrevious();
     void playFromPlaylist(size_t index);

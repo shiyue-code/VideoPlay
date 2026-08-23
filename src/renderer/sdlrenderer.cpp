@@ -155,6 +155,7 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
 
     // 初始化菜单
     m_menuManager->initMenus();
+    refreshAudioOutputDevices();
 
     // 加载 PNG 图标
     loadIconTextures();
@@ -668,6 +669,49 @@ void SDLRenderer::setPlaylistRemoveCallback(PlaylistItemCallback callback) {
 
 void SDLRenderer::setPlaylistClearCallback(std::function<void()> callback) {
     m_playlistClearCallback = std::move(callback);
+}
+
+void SDLRenderer::setPlaylistReorderCallback(std::function<void(size_t, size_t)> callback) {
+    m_playlistReorderCallback = std::move(callback);
+}
+
+void SDLRenderer::refreshAudioOutputDevices() {
+    m_audioOutputDevices = AudioPlayer::listPlaybackDevices();
+}
+
+void SDLRenderer::setAudioOutputDeviceName(const std::string& name) {
+    m_audioOutputDeviceName = name;
+}
+
+int SDLRenderer::menuSubmenuItemCount(int parentId) const {
+    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
+        return static_cast<int>(m_audioOutputDevices.size());
+    }
+    return submenuItemCount(parentId);
+}
+
+int SDLRenderer::menuSubmenuItemId(int parentId, int index) const {
+    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
+        return static_cast<int>(MenuId::AudioDeviceBase) + index;
+    }
+    return submenuItemId(parentId, index);
+}
+
+std::string SDLRenderer::menuSubmenuItemLabel(int parentId, int index) const {
+    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
+        if (index >= 0 && index < static_cast<int>(m_audioOutputDevices.size())) {
+            return m_audioOutputDevices[static_cast<size_t>(index)].name;
+        }
+        return {};
+    }
+    return submenuItemLabel(parentId, index);
+}
+
+void SDLRenderer::applySmallWindowPanelGuard() {
+    constexpr int kDualPanelMinWidth = 860;
+    if (m_windowWidth < kDualPanelMinWidth && m_showPlaylistPanel && m_showEpisodePanel) {
+        m_showEpisodePanel = false;
+    }
 }
 
 void SDLRenderer::setPreviewFrame(VideoFrame frame) {

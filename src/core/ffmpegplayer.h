@@ -75,6 +75,8 @@ public:
     bool isMuted() const;
     void setHardwareDecodingEnabled(bool enabled);
     bool hardwareDecodingEnabled() const;
+    void setAudioOutputDevice(SDL_AudioDeviceID deviceId);
+    SDL_AudioDeviceID audioOutputDevice() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
 
@@ -229,6 +231,7 @@ private:
     std::atomic<int> m_volume{100};
     std::atomic<bool> m_muted{false};
     std::atomic<bool> m_hardwareDecodingEnabled{true};
+    SDL_AudioDeviceID m_audioOutputDeviceId = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
     std::atomic<PlaybackState> m_state{PlaybackState::Stopped};
     std::atomic<NetworkState> m_networkState{NetworkState::Idle};
     SourceType m_sourceType = SourceType::LocalFile;

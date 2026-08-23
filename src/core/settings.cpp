@@ -150,6 +150,7 @@ void Settings::load() {
                 {"aspectMode", 0},
                 {"alwaysOnTop", false},
                 {"hardwareDecodingEnabled", true},
+                {"audioOutputDevice", ""},
                 {"audioFilter", {
                     {"enabled", false},
                     {"preset", 0},
@@ -367,6 +368,19 @@ bool Settings::hardwareDecodingEnabled() const {
         return m_config["playback"].value("hardwareDecodingEnabled", true);
     }
     return true;
+}
+
+void Settings::setAudioOutputDeviceName(const std::string& name) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["audioOutputDevice"] = name;
+}
+
+std::string Settings::audioOutputDeviceName() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playback")) {
+        return m_config["playback"].value("audioOutputDevice", std::string());
+    }
+    return {};
 }
 
 void Settings::setAudioFilterConfig(const AudioFilterConfig& config) {

@@ -149,8 +149,8 @@ Linux 仍是自绘拖动，`usesNativeResize()` 为 false。
 ## 已知约束
 
 1. `HttpClient` 只有 WinHTTP。非 Windows 编 AI 模块会失败。
-2. `AudioPlayer` 固定打开默认播放设备，不能切换输出。
-3. 播放列表可删除、清空并持久化；拖拽排序尚未实现。
+2. `AudioPlayer` 可通过播放菜单「音频输出」切换设备，按设备名写入配置。
+3. 播放列表可删除、清空、拖拽排序并持久化。窗口宽小于 860px 时若两栏同时开则关闭剧集面板。
 4. 进度条缩略图由 `FFmpegPlayer` 独立预览解码线程生成，不要从主视频队列 `getVideoFrame` 里抽帧。
 5. `AIConfig::autoAnalyze` 已写入配置，打开文件时不会自动分析。
 6. HTTPS 请求忽略证书错误（`SECURITY_FLAG_IGNORE_*`），不要在新代码里扩大这个范围。

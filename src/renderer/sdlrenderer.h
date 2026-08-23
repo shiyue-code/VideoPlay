@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/common.h"
+#include "core/audioplayer.h"
 #include "core/episodedetector.h"
 #include "renderer/windowframe.h"
 #include "renderer/menu_manager.h"
@@ -84,6 +85,7 @@ enum class MenuId : int {
     AudioFilterBass = 95,
     AudioFilterNight = 96,
     HardwareDecoding = 97,
+    AudioOutput = 98,
 
     // 视频基础参数：从 120 开始，避免与最近文件 100-109 冲突
     VideoFilter = 120,
@@ -105,7 +107,8 @@ enum class MenuId : int {
     RecentFileBase = 100,
     ChapterBase = 200,
     AudioTrackBase = 400,
-    SubtitleTrackBase = 450
+    SubtitleTrackBase = 450,
+    AudioDeviceBase = 500
 };
 
 // 各动态菜单项数量
@@ -113,6 +116,7 @@ constexpr int kRecentFileCount = 10;
 constexpr int kChapterCount = 50;
 constexpr int kAudioTrackCount = 50;
 constexpr int kSubtitleTrackCount = 50;
+constexpr int kAudioDeviceCount = 32;
 
 // UI 回调函数类型
 using FileDropCallback = std::function<void(const std::string&)>;
@@ -248,6 +252,9 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
 
 // 菜单辅助函数（在 sdlrenderer_events/menus 中复用）
 inline bool isSubmenuParent(int id) {
+    if (id == static_cast<int>(MenuId::AudioOutput)) {
+        return true;
+    }
     return submenuRegistry().count(static_cast<MenuId>(id)) > 0;
 }
 
@@ -340,6 +347,7 @@ public:
     void setPlaylistItemCallback(PlaylistItemCallback callback);
     void setPlaylistRemoveCallback(PlaylistItemCallback callback);
     void setPlaylistClearCallback(std::function<void()> callback);
+    void setPlaylistReorderCallback(std::function<void(size_t, size_t)> callback);
     void setEpisodeItemCallback(EpisodeItemCallback callback);
     void setEpisodePrevCallback(EpisodePrevCallback callback);
     void setEpisodeNextCallback(EpisodeNextCallback callback);
@@ -397,6 +405,9 @@ public:
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
     void setHardwareDecodingEnabled(bool enabled);
     void setAudioFilterPreset(AudioFilterPreset preset);
+    void refreshAudioOutputDevices();
+    void setAudioOutputDeviceName(const std::string& name);
+    const std::vector<AudioOutputDevice>& audioOutputDevices() const { return m_audioOutputDevices; }
     void setNetworkState(NetworkState state);
     void setAIAnalysisState(bool active, float progress, const std::string& status);
 
@@ -506,6 +517,10 @@ private:
                         bool isPlaying, double speed, bool isPreloading);
     void renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying);
     void renderProgressPreview();
+    int menuSubmenuItemCount(int parentId) const;
+    int menuSubmenuItemId(int parentId, int index) const;
+    std::string menuSubmenuItemLabel(int parentId, int index) const;
+    void applySmallWindowPanelGuard();
     void renderVolumeControl(int volume, bool isMuted, int controlY);
     void renderPlaybackControls(bool isPlaying, int controlY);
     void renderSpeedButton(double speed, int controlY);
@@ -605,6 +620,11 @@ private:
     bool m_showSearchPanel = false;
     bool m_showMediaInfoPanel = false;
     int m_playlistScrollOffset = 0;
+    bool m_playlistDragging = false;
+    int m_playlistDragFrom = -1;
+    int m_playlistDragTo = -1;
+    int m_playlistDragStartY = 0;
+    int m_playlistItemCount = 0;
     int m_episodeScrollOffset = 0;
     int m_searchScrollOffset = 0;
     std::string m_searchQuery;
@@ -618,6 +638,8 @@ private:
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     bool m_hardwareDecodingEnabled = true;
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
+    std::vector<AudioOutputDevice> m_audioOutputDevices;
+    std::string m_audioOutputDeviceName;
     NetworkState m_networkState = NetworkState::Idle;
     bool m_aiAnalysisActive = false;
     float m_aiAnalysisProgress = 0.0f;
@@ -763,6 +785,7 @@ private:
     PlaylistItemCallback m_playlistItemCallback;
     PlaylistItemCallback m_playlistRemoveCallback;
     std::function<void()> m_playlistClearCallback;
+    std::function<void(size_t, size_t)> m_playlistReorderCallback;
     Menu m_playbackContextMenu;
     int m_contextPlaylistIndex = -1;
     EpisodeItemCallback m_episodeItemCallback;

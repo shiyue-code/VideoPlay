@@ -168,6 +168,7 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
     }
 
     m_previewTargetPtsMs = -1;
+    applySmallWindowPanelGuard();
 
     if (m_showControls) {
         // 菜单栏随控制栏一起显隐
@@ -1086,6 +1087,8 @@ void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, 
     int titleY = panelY + 16;
     drawText("播放列表", panelX + 16, titleY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 13);
 
+    m_playlistItemCount = static_cast<int>(playlist.size());
+
     int itemStartY = titleY + 28;
     int itemH = 28;
     int maxVisible = (panelY + panelH - 16 - itemStartY) / itemH;
@@ -1117,16 +1120,30 @@ void SDLRenderer::renderPlaylistPanel(const std::vector<std::string>& playlist, 
         bool isCurrent = (i == currentIndex);
         bool hovered = (m_mouseX >= panelX + 12 && m_mouseX <= panelX + panelW - 12 &&
                         m_mouseY >= itemY && m_mouseY <= itemY + itemH);
+        bool draggingSource = m_playlistDragging && m_playlistDragFrom == static_cast<int>(i);
+        bool dropTarget = m_playlistDragging && m_playlistDragTo == static_cast<int>(i);
 
-        if (isCurrent) {
+        if (isCurrent && !m_playlistDragging) {
             fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
                                   COLOR_MENU_ACTIVE[0], COLOR_MENU_ACTIVE[1], COLOR_MENU_ACTIVE[2], 200);
             // 当前播放项左侧 3px 竖条指示器
             fillRoundRect(panelX + 12, itemY + 6, 3, itemH - 12, 2,
                           255, 255, 255, 220);
-        } else if (hovered) {
+        } else if (dropTarget) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  0, 170, 255, 80);
+        } else if (hovered && !m_playlistDragging) {
             fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
                                   COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 160);
+        } else if (draggingSource) {
+            fillRoundRect(panelX + 12, itemY, panelW - 24, itemH, 8,
+                                  COLOR_MENU_HOVER[0], COLOR_MENU_HOVER[1], COLOR_MENU_HOVER[2], 80);
+        }
+
+        if (dropTarget) {
+            int lineY = (m_playlistDragFrom >= 0 && m_playlistDragFrom < static_cast<int>(i))
+                ? itemY + itemH - 2 : itemY;
+            fillRect(panelX + 12, lineY, panelW - 24, 2, 0, 170, 255, 255);
         }
 
         // 记录控件位置用于点击检测

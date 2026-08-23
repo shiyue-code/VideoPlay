@@ -96,6 +96,20 @@ bool VideoPlayerApp::initialize() {
     auto audioFilterConfig = Settings::instance().audioFilterConfig();
     m_player->setAudioFilterConfig(audioFilterConfig);
     m_renderer->setAudioFilterPreset(audioFilterConfig.preset);
+
+    m_renderer->refreshAudioOutputDevices();
+    const std::string savedAudioDevice = Settings::instance().audioOutputDeviceName();
+    SDL_AudioDeviceID outputDevice = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    if (!savedAudioDevice.empty()) {
+        for (const auto& device : m_renderer->audioOutputDevices()) {
+            if (!device.isDefault && device.name == savedAudioDevice) {
+                outputDevice = device.id;
+                break;
+            }
+        }
+    }
+    m_player->setAudioOutputDevice(outputDevice);
+    m_renderer->setAudioOutputDeviceName(savedAudioDevice);
     m_player->setVideoFilterConfig(Settings::instance().videoFilterConfig());
     
     // 设置回调
@@ -179,6 +193,9 @@ bool VideoPlayerApp::initialize() {
     });
     m_renderer->setPlaylistClearCallback([this]() {
         clearPlaylist();
+    });
+    m_renderer->setPlaylistReorderCallback([this](size_t from, size_t to) {
+        reorderPlaylist(from, to);
     });
     m_renderer->setEpisodeItemCallback([this](size_t index) {
         playEpisode(index);

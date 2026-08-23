@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 #include <cstdint>
 #include <mutex>
@@ -20,12 +21,21 @@ struct AudioFormat {
     int bitsPerSample = 32;
 };
 
+struct AudioOutputDevice {
+    SDL_AudioDeviceID id = 0;
+    std::string name;
+    bool isDefault = false;
+};
+
 class AudioPlayer {
 public:
     AudioPlayer();
     ~AudioPlayer();
 
+    static std::vector<AudioOutputDevice> listPlaybackDevices();
+
     bool initialize(const AudioFormat& format);
+    bool initialize(const AudioFormat& format, SDL_AudioDeviceID deviceId);
     void shutdown();
 
     void play();
@@ -59,6 +69,7 @@ private:
 
     SDL_AudioStream* m_stream = nullptr;
     SDL_AudioDeviceID m_deviceId = 0;
+    SDL_AudioDeviceID m_preferredDeviceId = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
     bool m_initialized = false;
 
     std::atomic<bool> m_playing{false};

@@ -275,6 +275,24 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         return;
     }
 
+    // 音频输出设备
+    int deviceIdx = menuItemOffset(rawId, MenuId::AudioDeviceBase, kAudioDeviceCount);
+    if (deviceIdx != -1) {
+        if (m_player && m_renderer) {
+            const auto& devices = m_renderer->audioOutputDevices();
+            if (deviceIdx >= 0 && static_cast<size_t>(deviceIdx) < devices.size()) {
+                const auto& device = devices[static_cast<size_t>(deviceIdx)];
+                m_player->setAudioOutputDevice(device.id);
+                const std::string persistName = device.isDefault ? std::string() : device.name;
+                Settings::instance().setAudioOutputDeviceName(persistName);
+                Settings::instance().save();
+                m_renderer->setAudioOutputDeviceName(persistName);
+                m_renderer->showOSD(OSDType::Info, "音频输出 " + device.name);
+            }
+        }
+        return;
+    }
+
     // 字幕切换菜单项
     int subtitleIdx = menuItemOffset(rawId, MenuId::SubtitleTrackBase, kSubtitleTrackCount);
     if (subtitleIdx != -1) {

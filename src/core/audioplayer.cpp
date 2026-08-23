@@ -2,6 +2,7 @@
 #include "utils/logger.h"
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace VideoPlay {
 
@@ -20,12 +21,39 @@ AudioPlayer::~AudioPlayer() {
 }
 
 bool AudioPlayer::initialize(const AudioFormat& format) {
+    return initialize(format, m_preferredDeviceId);
+}
+
+std::vector<AudioOutputDevice> AudioPlayer::listPlaybackDevices() {
+    std::vector<AudioOutputDevice> devices;
+    devices.push_back({SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, "系统默认", true});
+
+    int count = 0;
+    SDL_AudioDeviceID* ids = SDL_GetAudioPlaybackDevices(&count);
+    if (!ids || count <= 0) {
+        return devices;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        const char* name = SDL_GetAudioDeviceName(ids[i]);
+        AudioOutputDevice device;
+        device.id = ids[i];
+        device.name = (name && name[0]) ? name : ("设备 " + std::to_string(i + 1));
+        device.isDefault = false;
+        devices.push_back(std::move(device));
+    }
+    SDL_free(ids);
+    return devices;
+}
+
+bool AudioPlayer::initialize(const AudioFormat& format, SDL_AudioDeviceID deviceId) {
     // 先销毁旧的 audio stream，避免在持有 m_mutex 时调用 shutdown() 造成递归上锁
     shutdown();
 
     std::lock_guard<std::mutex> lock(m_mutex);
 
     m_format = format;
+    m_preferredDeviceId = deviceId != 0 ? deviceId : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
 
     SDL_AudioSpec spec;
     SDL_zero(spec);
@@ -33,7 +61,17 @@ bool AudioPlayer::initialize(const AudioFormat& format) {
     spec.channels = format.channels;
     spec.freq = format.sampleRate;
 
-    m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    auto openStream = [&](SDL_AudioDeviceID id) -> SDL_AudioStream* {
+        return SDL_OpenAudioDeviceStream(id, &spec, nullptr, nullptr);
+    };
+
+    m_stream = openStream(m_preferredDeviceId);
+    if (!m_stream && m_preferredDeviceId != SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK) {
+        logger().warning("Failed to open audio device, falling back to default: " +
+                         std::string(SDL_GetError()));
+        m_preferredDeviceId = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+        m_stream = openStream(m_preferredDeviceId);
+    }
     if (!m_stream) {
         logger().error("Failed to initialize audio stream: " + std::string(SDL_GetError()));
         return false;
@@ -44,12 +82,12 @@ bool AudioPlayer::initialize(const AudioFormat& format) {
     m_basePlayedMs = 0.0;
     m_timerRunning = false;
 
-    // Apply initial volume/mute state to stream gain
     applyStreamGain();
 
     logger().info("Audio stream initialized: " +
-                           std::to_string(format.sampleRate) + "Hz, " +
-                           std::to_string(format.channels) + " channels");
+                  std::to_string(format.sampleRate) + "Hz, " +
+                  std::to_string(format.channels) + " channels, device=" +
+                  std::to_string(m_deviceId));
     return true;
 }
 

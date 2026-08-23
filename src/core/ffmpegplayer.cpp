@@ -456,7 +456,7 @@ bool FFmpegPlayer::initializeAudioContext() {
     m_audioCtx.format.bitsPerSample = 32;
     
     m_audioPlayer = std::make_unique<AudioPlayer>();
-    if (!m_audioPlayer->initialize(m_audioCtx.format)) {
+    if (!m_audioPlayer->initialize(m_audioCtx.format, m_audioOutputDeviceId)) {
         logger().error("Failed to initialize audio player");
         m_audioPlayer.reset();
         return false;
@@ -1579,6 +1579,38 @@ void FFmpegPlayer::setHardwareDecodingEnabled(bool enabled) {
 
 bool FFmpegPlayer::hardwareDecodingEnabled() const {
     return m_hardwareDecodingEnabled.load();
+}
+
+void FFmpegPlayer::setAudioOutputDevice(SDL_AudioDeviceID deviceId) {
+    m_audioOutputDeviceId = deviceId != 0 ? deviceId : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    if (!m_audioPlayer) {
+        return;
+    }
+
+    const bool wasPlaying = m_audioPlayer->isPlaying() && !m_audioPlayer->isPaused();
+    const bool wasPaused = m_audioPlayer->isPaused();
+    const int volume = m_audioPlayer->volume();
+    const bool muted = m_audioPlayer->isMuted();
+    const double speed = m_audioPlayer->playbackSpeed();
+    const AudioFormat format = m_audioCtx.format;
+
+    if (!m_audioPlayer->initialize(format, m_audioOutputDeviceId)) {
+        logger().error("Failed to switch audio output device");
+        return;
+    }
+    m_audioPlayer->setVolume(volume);
+    m_audioPlayer->setMuted(muted);
+    m_audioPlayer->setPlaybackSpeed(speed);
+    if (wasPlaying) {
+        m_audioPlayer->play();
+    } else if (wasPaused) {
+        m_audioPlayer->play();
+        m_audioPlayer->pause();
+    }
+}
+
+SDL_AudioDeviceID FFmpegPlayer::audioOutputDevice() const {
+    return m_audioOutputDeviceId;
 }
 
 void FFmpegPlayer::setAudioFilterConfig(const AudioFilterConfig& config) {
