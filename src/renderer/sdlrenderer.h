@@ -46,6 +46,9 @@ enum class MenuId : int {
     Playlist = 18,
     PrevEpisodePlayMenu = 19,
     NextEpisodePlayMenu = 22,
+    PlaylistRemove = 23,
+    PlaylistClear = 24,
+    PlaylistPlayItem = 25,
     EpisodePanel = 32,
 
     // 剧集菜单
@@ -335,6 +338,8 @@ public:
     void setFullscreenCallback(FullscreenCallback callback);
     void setMenuCallback(MenuCallback callback);
     void setPlaylistItemCallback(PlaylistItemCallback callback);
+    void setPlaylistRemoveCallback(PlaylistItemCallback callback);
+    void setPlaylistClearCallback(std::function<void()> callback);
     void setEpisodeItemCallback(EpisodeItemCallback callback);
     void setEpisodePrevCallback(EpisodePrevCallback callback);
     void setEpisodeNextCallback(EpisodeNextCallback callback);
@@ -369,6 +374,11 @@ public:
 
     // 搜索热力图数据
     void setSearchHighlights(const std::vector<int64_t>& timestamps);
+
+    // 进度条缩略图
+    int64_t previewTargetPtsMs() const { return m_previewTargetPtsMs; }
+    void setPreviewFrame(VideoFrame frame);
+    void clearPreview();
 
     // 剧集数据
     void setEpisodeData(const std::vector<EpisodeInfo>* episodes, size_t currentIndex,
@@ -495,6 +505,7 @@ private:
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
                         bool isPlaying, double speed, bool isPreloading);
     void renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying);
+    void renderProgressPreview();
     void renderVolumeControl(int volume, bool isMuted, int controlY);
     void renderPlaybackControls(bool isPlaying, int controlY);
     void renderSpeedButton(double speed, int controlY);
@@ -626,6 +637,14 @@ private:
     int m_episodeSeasonNumber = 0;
     bool m_draggingProgress = false;
     float m_dragProgressRatio = 0.0f;
+    int64_t m_previewTargetPtsMs = -1;
+    int m_previewAnchorX = 0;
+    int m_previewBarY = 0;
+    SDL_Texture* m_previewTexture = nullptr;
+    int m_previewTexW = 0;
+    int m_previewTexH = 0;
+    int64_t m_previewShownPts = -1;
+    uint64_t m_previewHoverStart = 0;
     bool m_draggingVolume = false;
     int m_windowWidth = 1280;
     int m_windowHeight = 720;
@@ -742,6 +761,10 @@ private:
     FullscreenCallback m_fullscreenCallback;
     MenuCallback m_menuCallback;
     PlaylistItemCallback m_playlistItemCallback;
+    PlaylistItemCallback m_playlistRemoveCallback;
+    std::function<void()> m_playlistClearCallback;
+    Menu m_playbackContextMenu;
+    int m_contextPlaylistIndex = -1;
     EpisodeItemCallback m_episodeItemCallback;
     EpisodePrevCallback m_episodePrevCallback;
     EpisodeNextCallback m_episodeNextCallback;

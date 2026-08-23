@@ -358,6 +358,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_BACKSLASH:
                         if (m_abLoopCallback) m_abLoopCallback('c');
                         break;
+                    case SDLK_DELETE:
+                        if (m_hoveredControl == ControlType::PlaylistItem &&
+                            m_playlistRemoveCallback && m_hoveredControlValue >= 0) {
+                            m_playlistRemoveCallback(static_cast<size_t>(m_hoveredControlValue));
+                        }
+                        break;
                 }
             }
             break;
@@ -464,7 +470,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 m_tooltip = "下一集";
                 break;
             case ControlType::ProgressBar:
-                m_tooltip = "拖动跳转";
+                m_tooltip.clear();
                 break;
             case ControlType::ChapterMarker:
                 if (m_hoveredControlValue >= 0 && m_hoveredControlValue < (int)m_chapters.size()) {

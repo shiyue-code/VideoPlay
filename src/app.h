@@ -82,6 +82,9 @@ private:
 
     // 播放列表
     void addToPlaylist(const std::string& path);
+    void removeFromPlaylist(size_t index);
+    void clearPlaylist();
+    void persistPlaylist();
     void playNext();
     void playPrevious();
     void playFromPlaylist(size_t index);

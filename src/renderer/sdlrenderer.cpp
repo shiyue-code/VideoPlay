@@ -193,6 +193,10 @@ void SDLRenderer::shutdown() {
         SDL_DestroyTexture(m_videoTexture);
         m_videoTexture = nullptr;
     }
+    if (m_previewTexture) {
+        SDL_DestroyTexture(m_previewTexture);
+        m_previewTexture = nullptr;
+    }
 
     if (m_renderer) {
         SDL_DestroyRenderer(m_renderer);
@@ -656,6 +660,52 @@ void SDLRenderer::setMenuCallback(MenuCallback callback) {
 
 void SDLRenderer::setPlaylistItemCallback(PlaylistItemCallback callback) {
     m_playlistItemCallback = callback;
+}
+
+void SDLRenderer::setPlaylistRemoveCallback(PlaylistItemCallback callback) {
+    m_playlistRemoveCallback = std::move(callback);
+}
+
+void SDLRenderer::setPlaylistClearCallback(std::function<void()> callback) {
+    m_playlistClearCallback = std::move(callback);
+}
+
+void SDLRenderer::setPreviewFrame(VideoFrame frame) {
+    if (!m_renderer || frame.data.empty() || frame.width <= 0 || frame.height <= 0) {
+        return;
+    }
+
+    if (!m_previewTexture || m_previewTexW != frame.width || m_previewTexH != frame.height) {
+        if (m_previewTexture) {
+            SDL_DestroyTexture(m_previewTexture);
+            m_previewTexture = nullptr;
+        }
+        m_previewTexture = SDL_CreateTexture(
+            m_renderer,
+            SDL_PIXELFORMAT_ARGB8888,
+            SDL_TEXTUREACCESS_STREAMING,
+            frame.width,
+            frame.height);
+        m_previewTexW = frame.width;
+        m_previewTexH = frame.height;
+    }
+    if (!m_previewTexture) {
+        return;
+    }
+    SDL_UpdateTexture(m_previewTexture, nullptr, frame.data.data(), frame.width * 4);
+    m_previewShownPts = frame.pts;
+}
+
+void SDLRenderer::clearPreview() {
+    m_previewTargetPtsMs = -1;
+    m_previewShownPts = -1;
+    m_previewHoverStart = 0;
+    if (m_previewTexture) {
+        SDL_DestroyTexture(m_previewTexture);
+        m_previewTexture = nullptr;
+        m_previewTexW = 0;
+        m_previewTexH = 0;
+    }
 }
 
 void SDLRenderer::setEpisodeItemCallback(EpisodeItemCallback callback) {

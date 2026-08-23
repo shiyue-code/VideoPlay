@@ -106,6 +106,10 @@ public:
 
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
+    // 进度条缩略图：独立解码，不占用主解码队列
+    void requestPreview(int64_t ptsMs);
+    bool takePreviewFrame(VideoFrame& frame);
+
     std::vector<ChapterInfo> chapters() const;
     void setChapters(const std::vector<ChapterInfo>& chapters);
     MediaInfo mediaInfo() const;
@@ -249,6 +253,28 @@ private:
     static constexpr int kPreloadAudioMs = 40;
     static constexpr int kPreloadTimeoutMs = 1000;
     void pushVideoFrame(VideoFrame&& frame);
+
+    static constexpr int kPreviewWidth = 120;
+    static constexpr int kPreviewHeight = 68;
+    void startPreviewDecoder();
+    void stopPreviewDecoder();
+    void previewLoop();
+    bool openPreviewContext();
+    void closePreviewContext();
+    bool decodePreviewFrame(int64_t ptsMs, VideoFrame& out);
+
+    std::thread m_previewThread;
+    std::mutex m_previewMutex;
+    std::condition_variable m_previewCv;
+    std::atomic<bool> m_previewAbort{false};
+    std::string m_previewPath;
+    AVFormatContext* m_previewFmt = nullptr;
+    AVCodecContext* m_previewCodec = nullptr;
+    int m_previewStreamIndex = -1;
+    int64_t m_previewRequestPts = -1;
+    bool m_previewHasRequest = false;
+    VideoFrame m_previewFrame;
+    bool m_previewReady = false;
 
     std::string buildVideoFilterDescription() const;
     bool ensureVideoFilterGraph(AVFrame* frame);

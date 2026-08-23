@@ -140,6 +140,11 @@ public:
     SessionInfo lastSession() const;
     void clearLastSession();
 
+    // 播放列表持久化
+    void setPlaylist(const std::vector<std::string>& files, size_t currentIndex);
+    std::vector<std::string> playlist() const;
+    size_t playlistIndex() const;
+
     // AI 配置
     void setAIConfig(const AIConfig& config);
     AIConfig aiConfig() const;

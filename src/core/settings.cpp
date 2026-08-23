@@ -709,6 +709,39 @@ void Settings::clearLastSession() {
     };
 }
 
+void Settings::setPlaylist(const std::vector<std::string>& files, size_t currentIndex) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_config["playlist"] = {
+            {"files", files},
+            {"index", currentIndex}
+        };
+    }
+    save();
+}
+
+std::vector<std::string> Settings::playlist() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::string> files;
+    if (m_config.contains("playlist") && m_config["playlist"].contains("files") &&
+        m_config["playlist"]["files"].is_array()) {
+        for (const auto& item : m_config["playlist"]["files"]) {
+            if (item.is_string()) {
+                files.push_back(item.get<std::string>());
+            }
+        }
+    }
+    return files;
+}
+
+size_t Settings::playlistIndex() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_config.contains("playlist")) {
+        return m_config["playlist"].value("index", size_t(0));
+    }
+    return 0;
+}
+
 // AI 配置
 void Settings::setAIConfig(const AIConfig& config) {
     std::string provider = normalizeAIProvider(config.provider);

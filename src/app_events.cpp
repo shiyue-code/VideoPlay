@@ -73,6 +73,16 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         case MenuId::Playlist: // 播放列表
             m_renderer->togglePlaylistPanel();
             break;
+        case MenuId::PlaylistRemove:
+            if (m_renderer) {
+                // 由列表右键菜单的回调处理；此处给播放菜单兜底
+            }
+            break;
+        case MenuId::PlaylistClear:
+            clearPlaylist();
+            break;
+        case MenuId::PlaylistPlayItem:
+            break;
         case MenuId::PrevEpisodePlayMenu: // 上一集（播放菜单就近入口）
             playPreviousEpisode();
             break;
@@ -231,6 +241,8 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             break;
         case MenuId::AISettings: // AI 设置
             showAISettings();
+            break;
+        default:
             break;
     }
 

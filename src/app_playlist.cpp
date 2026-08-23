@@ -4,6 +4,7 @@
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "core/episodedetector.h"
+#include <algorithm>
 #include <filesystem>
 
 namespace VideoPlay {
@@ -24,6 +25,50 @@ void VideoPlayerApp::addToPlaylist(const std::string& path) {
         m_playlist.push_back(path);
         m_progressCacheDirty = true;
         logger().info("Added to playlist: " + path);
+        persistPlaylist();
+    }
+}
+
+void VideoPlayerApp::persistPlaylist() {
+    Settings::instance().setPlaylist(m_playlist, m_currentIndex);
+}
+
+void VideoPlayerApp::removeFromPlaylist(size_t index) {
+    if (index >= m_playlist.size()) {
+        return;
+    }
+
+    const std::string removed = m_playlist[index];
+    const bool removingCurrent = (!m_currentFile.empty() && removed == m_currentFile);
+
+    m_playlist.erase(m_playlist.begin() + static_cast<std::ptrdiff_t>(index));
+    if (m_currentIndex > index) {
+        m_currentIndex--;
+    } else if (!m_playlist.empty() && m_currentIndex >= m_playlist.size()) {
+        m_currentIndex = m_playlist.size() - 1;
+    }
+
+    m_progressCacheDirty = true;
+    persistPlaylist();
+    logger().info("Removed from playlist: " + removed);
+
+    if (removingCurrent && !m_playlist.empty()) {
+        playFromPlaylist(m_currentIndex);
+    }
+
+    if (m_renderer) {
+        m_renderer->showOSD(OSDType::Info, "已从播放列表删除");
+    }
+}
+
+void VideoPlayerApp::clearPlaylist() {
+    m_playlist.clear();
+    m_currentIndex = 0;
+    m_progressCacheDirty = true;
+    persistPlaylist();
+    logger().info("Playlist cleared");
+    if (m_renderer) {
+        m_renderer->showOSD(OSDType::Info, "播放列表已清空");
     }
 }
 
@@ -76,6 +121,7 @@ void VideoPlayerApp::playFromPlaylist(size_t index) {
     m_currentIndex = index;
     m_progressCacheDirty = true;
     m_isManualOperation = true;
+    persistPlaylist();
     openFile(m_playlist[index]);
 }
 

@@ -167,6 +167,8 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
         m_showControls = false;
     }
 
+    m_previewTargetPtsMs = -1;
+
     if (m_showControls) {
         // 菜单栏随控制栏一起显隐
         m_menuManager->renderMenuBar();
@@ -228,6 +230,9 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
             renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
         }
     }
+
+    // 进度条缩略图（在 tooltip 之上）
+    renderProgressPreview();
 
     // 渲染 Tooltip
     renderTooltip();
@@ -466,9 +471,28 @@ void SDLRenderer::renderProgressBar(int64_t position, int64_t duration, int cont
         }
     }
 
-    // 记录控件位置
-    m_controlRects.push_back({margin, barY, barWidth, barHeight,
+    // 记录控件位置（扩大纵向热区，方便悬停出缩略图）
+    m_controlRects.push_back({margin, barY - 12, barWidth, barHeight + 24,
                               ControlType::ProgressBar, 0});
+
+    if ((hovered || pressed) && duration > 0 && !isLiveNetwork && !isCompletelyStopped) {
+        float previewRatio = pressed
+            ? m_dragProgressRatio
+            : std::max(0.0f, std::min(1.0f,
+                static_cast<float>(m_mouseX - margin) / static_cast<float>(barWidth)));
+        int64_t pts = static_cast<int64_t>(previewRatio * static_cast<double>(duration));
+        pts = (pts / 500) * 500;
+        if (m_previewTargetPtsMs != pts) {
+            if (m_previewHoverStart == 0) {
+                m_previewHoverStart = SDL_GetTicks();
+            }
+        }
+        m_previewTargetPtsMs = pts;
+        m_previewAnchorX = margin + static_cast<int>(barWidth * previewRatio);
+        m_previewBarY = barY;
+    } else if (!hovered && !pressed) {
+        m_previewHoverStart = 0;
+    }
 }
 
 void SDLRenderer::renderPlaybackControls(bool isPlaying, int controlY) {
@@ -1350,6 +1374,52 @@ void SDLRenderer::renderEpisodePanel() {
             m_controlRects.push_back({nextBtnX, nextBtnY, btnW, btnH, ControlType::EpisodeNext, 0});
         }
     }
+}
+
+void SDLRenderer::renderProgressPreview() {
+    if (m_previewTargetPtsMs < 0 || m_previewHoverStart == 0) {
+        return;
+    }
+    if (SDL_GetTicks() - m_previewHoverStart < 80) {
+        return;
+    }
+
+    const int imgW = m_previewTexW > 0 ? m_previewTexW : 120;
+    const int imgH = m_previewTexH > 0 ? m_previewTexH : 68;
+    const int pad = 6;
+    const int fontSize = 11;
+    std::string timeText = formatTime(m_previewTargetPtsMs);
+    int timeW = getTextWidth(timeText, fontSize);
+    int timeH = getFontHeight(fontSize);
+    int boxW = std::max(imgW, timeW) + pad * 2;
+    int boxH = imgH + timeH + pad * 3;
+
+    int tx = m_previewAnchorX - boxW / 2;
+    int ty = m_previewBarY - boxH - 12;
+    if (tx < 6) tx = 6;
+    if (tx + boxW > m_windowWidth - 6) tx = m_windowWidth - 6 - boxW;
+    if (ty < m_menuBarHeight + 6) ty = m_previewBarY + 18;
+
+    fillRoundRect(tx, ty, boxW, boxH, 8, 120, 120, 130, 255);
+    fillRoundRect(tx + 1, ty + 1, boxW - 2, boxH - 2, 7, 28, 30, 36, 250);
+
+    int imgX = tx + (boxW - imgW) / 2;
+    int imgY = ty + pad;
+    if (m_previewTexture) {
+        SDL_FRect dst{
+            static_cast<float>(imgX),
+            static_cast<float>(imgY),
+            static_cast<float>(imgW),
+            static_cast<float>(imgH)
+        };
+        SDL_RenderTexture(m_renderer, m_previewTexture, nullptr, &dst);
+    } else {
+        fillRoundRect(imgX, imgY, imgW, imgH, 4, 20, 22, 28, 255);
+    }
+
+    int textX = tx + (boxW - timeW) / 2;
+    int textY = imgY + imgH + pad / 2;
+    drawText(timeText, textX, textY, 255, 255, 255, fontSize);
 }
 
 void SDLRenderer::renderTooltip() {

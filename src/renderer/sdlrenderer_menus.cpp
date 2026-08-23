@@ -48,6 +48,7 @@ void SDLRenderer::initMenus() {
         {22, "下一集", "Ctrl+Shift+Right", false, true},
         {0, "", "", true},
         {18, "播放列表", "Ctrl+L", false, true},
+        {24, "清空播放列表", "", false, true},
         {0, "", "", true},
         {14, "增加速度", "", false, true},
         {15, "降低速度", "", false, true},
@@ -130,7 +131,8 @@ void SDLRenderer::initMenus() {
 
     // 初始化右键上下文菜单
     m_contextMenu.label = "";
-    m_contextMenu.items = {
+    m_playbackContextMenu.label = "";
+    m_playbackContextMenu.items = {
         {10, "播放/暂停", "Space", false, true},
         {11, "停止", "S", false, true},
         {0, "", "", true},
@@ -157,6 +159,7 @@ void SDLRenderer::initMenus() {
         {16, "全屏", "F", false, true},
         {80, "始终置顶", "T", false, true}
     };
+    m_contextMenu = m_playbackContextMenu;
 }
 
 bool SDLRenderer::handleMenuClick(int x, int y) {
@@ -589,10 +592,25 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 }
 
 void SDLRenderer::showContextMenu(int x, int y) {
+    int hitValue = 0;
+    ControlType hit = getControlAt(x, y, &hitValue);
+    if (hit == ControlType::PlaylistItem) {
+        m_contextPlaylistIndex = hitValue;
+        m_contextMenu.label = "";
+        m_contextMenu.items = {
+            {25, "播放此项", "", false, true},
+            {23, "从列表删除", "Delete", false, true},
+            {0, "", "", true},
+            {24, "清空播放列表", "", false, true}
+        };
+    } else {
+        m_contextPlaylistIndex = -1;
+        m_contextMenu = m_playbackContextMenu;
+    }
+
     m_contextMenuX = x;
     m_contextMenuY = y;
     m_showContextMenu = true;
-    // 关闭顶部菜单栏
     closeAllMenus(false);
 }
 
@@ -702,8 +720,17 @@ bool SDLRenderer::handleContextMenuClick(int x, int y) {
         if (x >= renderX && x <= renderX + menuWidth &&
             y >= itemY && y <= itemY + itemHeight && item.enabled) {
             hideContextMenu();
-            if (m_menuCallback) {
-                m_menuCallback(static_cast<MenuId>(item.id));
+            MenuId id = static_cast<MenuId>(item.id);
+            if (id == MenuId::PlaylistRemove && m_playlistRemoveCallback &&
+                m_contextPlaylistIndex >= 0) {
+                m_playlistRemoveCallback(static_cast<size_t>(m_contextPlaylistIndex));
+            } else if (id == MenuId::PlaylistClear && m_playlistClearCallback) {
+                m_playlistClearCallback();
+            } else if (id == MenuId::PlaylistPlayItem && m_playlistItemCallback &&
+                       m_contextPlaylistIndex >= 0) {
+                m_playlistItemCallback(static_cast<size_t>(m_contextPlaylistIndex));
+            } else if (m_menuCallback) {
+                m_menuCallback(id);
             }
             return true;
         }

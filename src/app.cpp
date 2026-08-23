@@ -172,7 +172,13 @@ bool VideoPlayerApp::initialize() {
         // 全屏切换由渲染器处理
     });
     m_renderer->setPlaylistItemCallback([this](size_t index) {
-        playFromPlaylist(static_cast<int>(index));
+        playFromPlaylist(index);
+    });
+    m_renderer->setPlaylistRemoveCallback([this](size_t index) {
+        removeFromPlaylist(index);
+    });
+    m_renderer->setPlaylistClearCallback([this]() {
+        clearPlaylist();
     });
     m_renderer->setEpisodeItemCallback([this](size_t index) {
         playEpisode(index);
@@ -346,6 +352,7 @@ void VideoPlayerApp::shutdown() {
     if (!m_currentFile.empty() && m_position > 0) {
         Settings::instance().setLastPosition(m_currentFile, m_position);
     }
+    persistPlaylist();
     Settings::instance().clearLastSession();
 
     if (m_player) {
@@ -366,16 +373,37 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
 
     m_running = true;
 
-    // 如果没有命令行参数，尝试恢复上次意外停止的会话
+    // 如果没有命令行参数，恢复播放列表；崩溃时再套用 lastSession 进度
     if (argc <= 1) {
+        auto savedPlaylist = Settings::instance().playlist();
+        size_t savedIndex = Settings::instance().playlistIndex();
+        for (const auto& path : savedPlaylist) {
+            if (isNetworkUrl(path) || std::filesystem::exists(std::filesystem::u8path(path))) {
+                m_playlist.push_back(path);
+            }
+        }
+        if (!m_playlist.empty()) {
+            if (savedIndex >= m_playlist.size()) {
+                savedIndex = 0;
+            }
+            m_currentIndex = savedIndex;
+            m_progressCacheDirty = true;
+            logger().info("Restored playlist: " + std::to_string(m_playlist.size()) + " items");
+        }
+
         auto session = Settings::instance().lastSession();
         if (session.hasValidSession && !session.filePath.empty() &&
             (isNetworkUrl(session.filePath) || std::filesystem::exists(std::filesystem::u8path(session.filePath)))) {
             logger().info("Restoring last session: " + session.filePath);
-            // 重建单文件播放列表
-            m_playlist.push_back(session.filePath);
-            m_currentIndex = 0;
+            auto it = std::find(m_playlist.begin(), m_playlist.end(), session.filePath);
+            if (it == m_playlist.end()) {
+                m_playlist.push_back(session.filePath);
+                m_currentIndex = m_playlist.size() - 1;
+            } else {
+                m_currentIndex = static_cast<size_t>(std::distance(m_playlist.begin(), it));
+            }
             m_progressCacheDirty = true;
+            persistPlaylist();
             if (m_player->loadFile(session.filePath)) {
                 m_currentFile = session.filePath;
                 m_renderer->setWindowTitle(
@@ -388,7 +416,6 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
                     detectSeries(session.filePath);
                 }
                 play();
-                // 恢复播放位置（如果记忆位置开启且未接近结尾）
                 if (Settings::instance().rememberPosition() &&
                     session.duration > 0 && session.position > 0 &&
                     session.position < session.duration - 5000) {
@@ -497,6 +524,18 @@ void VideoPlayerApp::render() {
     if (m_player && m_player->isPreloading()) {
         if (m_player->checkPreloadComplete()) {
             m_isPlaying = true;
+        }
+    }
+
+    // 进度条缩略图：把悬停位置交给独立解码线程，再取回结果
+    if (m_player && m_renderer) {
+        int64_t previewPts = m_renderer->previewTargetPtsMs();
+        if (previewPts >= 0) {
+            m_player->requestPreview(previewPts);
+            VideoFrame preview;
+            if (m_player->takePreviewFrame(preview)) {
+                m_renderer->setPreviewFrame(std::move(preview));
+            }
         }
     }
 
@@ -696,6 +735,9 @@ void VideoPlayerApp::openFile(const std::string& path) {
 
     // 停止当前播放
     stop();
+    if (m_renderer) {
+        m_renderer->clearPreview();
+    }
 
     {
         std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
