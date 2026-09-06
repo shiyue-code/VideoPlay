@@ -1,4 +1,4 @@
-﻿#include "renderer/sdlrenderer.h"
+#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "core/episodedetector.h"
 #include "core/settings.h"
@@ -1018,6 +1018,14 @@ void SDLRenderer::setAudioFilterPreset(AudioFilterPreset preset) {
 
 void SDLRenderer::setDeinterlaceMode(DeinterlaceMode mode) {
     m_deinterlaceMode = mode;
+}
+
+void SDLRenderer::setHdrToneMapMode(HdrToneMapMode mode) {
+    m_hdrToneMapMode = mode;
+}
+
+void SDLRenderer::setHdrToneMapAlgorithm(HdrToneMapAlgorithm algo) {
+    m_hdrToneMapAlgorithm = algo;
 }
 
 void SDLRenderer::setNetworkState(NetworkState state) {

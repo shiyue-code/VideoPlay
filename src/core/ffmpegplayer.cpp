@@ -1,4 +1,4 @@
-﻿#include "core/ffmpegplayer.h"
+#include "core/ffmpegplayer.h"
 #include "core/audioplayer.h"
 #include "utils/logger.h"
 
@@ -216,6 +216,23 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
                 m_mediaInfo.fps = rationalToDouble(stream->r_frame_rate);
             }
             m_mediaInfo.videoBitrate = codecPar->bit_rate;
+
+            AVColorTransferCharacteristic trc = codecPar->color_trc;
+            AVColorPrimaries pri = codecPar->color_primaries;
+            AVColorSpace spc = codecPar->color_space;
+            const char* trcName = av_color_transfer_name(trc);
+            const char* priName = av_color_primaries_name(pri);
+            const char* spcName = av_color_space_name(spc);
+
+            m_mediaInfo.colorTransfer = (trcName && trc != AVCOL_TRC_UNSPECIFIED) ? trcName : "BT.709";
+            m_mediaInfo.colorPrimaries = (priName && pri != AVCOL_PRI_UNSPECIFIED) ? priName : "BT.709";
+            m_mediaInfo.colorSpace = (spcName && spc != AVCOL_SPC_UNSPECIFIED) ? spcName : "BT.709";
+
+            bool isHdr = (trc == AVCOL_TRC_SMPTE2084 || trc == AVCOL_TRC_ARIB_STD_B67);
+            if (!isHdr && pri == AVCOL_PRI_BT2020 && (spc == AVCOL_SPC_BT2020_NCL || spc == AVCOL_SPC_BT2020_CL)) {
+                isHdr = true;
+            }
+            m_mediaInfo.isHdr = isHdr;
 
             m_videoCtx.stream = stream;
             m_videoCtx.codecContext = avcodec_alloc_context3(codec);
@@ -1264,20 +1281,20 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     }
     
     // Determine color space (BT.601 vs BT.709)
-    AVCodecContext* codecCtx = m_videoCtx.codecContext;
-    if (codecCtx && codecCtx->colorspace != AVCOL_SPC_UNSPECIFIED) {
-        if (codecCtx->colorspace == AVCOL_SPC_BT709) {
-            colorSpace = SWS_CS_ITU709;
-        } else if (codecCtx->colorspace == AVCOL_SPC_BT470BG || 
-                   codecCtx->colorspace == AVCOL_SPC_SMPTE170M) {
-            colorSpace = SWS_CS_ITU601;
-        }
-    } else if (sourceFrame->colorspace != AVCOL_SPC_UNSPECIFIED) {
-        if (sourceFrame->colorspace == AVCOL_SPC_BT709) {
-            colorSpace = SWS_CS_ITU709;
-        } else if (sourceFrame->colorspace == AVCOL_SPC_BT470BG || 
-                   sourceFrame->colorspace == AVCOL_SPC_SMPTE170M) {
-            colorSpace = SWS_CS_ITU601;
+    if (sourceFrame->colorspace == AVCOL_SPC_BT709) {
+        colorSpace = SWS_CS_ITU709;
+    } else if (sourceFrame->colorspace == AVCOL_SPC_BT470BG || 
+               sourceFrame->colorspace == AVCOL_SPC_SMPTE170M) {
+        colorSpace = SWS_CS_ITU601;
+    } else {
+        AVCodecContext* codecCtx = m_videoCtx.codecContext;
+        if (codecCtx && codecCtx->colorspace != AVCOL_SPC_UNSPECIFIED) {
+            if (codecCtx->colorspace == AVCOL_SPC_BT709) {
+                colorSpace = SWS_CS_ITU709;
+            } else if (codecCtx->colorspace == AVCOL_SPC_BT470BG || 
+                       codecCtx->colorspace == AVCOL_SPC_SMPTE170M) {
+                colorSpace = SWS_CS_ITU601;
+            }
         }
     }
     
@@ -1664,15 +1681,91 @@ void FFmpegPlayer::cleanupVideoFilterGraph() {
     m_videoFilterDescription.clear();
 }
 
-std::string FFmpegPlayer::buildVideoFilterDescription() const {
+bool FFmpegPlayer::isHdrFrame(const AVFrame* frame) const {
+    if (!frame) return false;
+
+    AVColorTransferCharacteristic trc = frame->color_trc;
+    if (trc == AVCOL_TRC_UNSPECIFIED && m_videoCtx.codecContext) {
+        trc = m_videoCtx.codecContext->color_trc;
+    }
+    if (trc == AVCOL_TRC_UNSPECIFIED && m_videoCtx.stream && m_videoCtx.stream->codecpar) {
+        trc = m_videoCtx.stream->codecpar->color_trc;
+    }
+
+    if (trc == AVCOL_TRC_SMPTE2084 || trc == AVCOL_TRC_ARIB_STD_B67) {
+        return true;
+    }
+
+    AVColorPrimaries pri = frame->color_primaries;
+    if (pri == AVCOL_PRI_UNSPECIFIED && m_videoCtx.codecContext) {
+        pri = m_videoCtx.codecContext->color_primaries;
+    }
+    if (pri == AVCOL_PRI_UNSPECIFIED && m_videoCtx.stream && m_videoCtx.stream->codecpar) {
+        pri = m_videoCtx.stream->codecpar->color_primaries;
+    }
+
+    if (av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA) ||
+        av_frame_get_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL)) {
+        return true;
+    }
+
+    if (pri == AVCOL_PRI_BT2020) {
+        AVPixelFormat fmt = static_cast<AVPixelFormat>(frame->format);
+        const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(fmt);
+        if (desc && desc->comp[0].depth >= 10) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::string FFmpegPlayer::buildVideoFilterDescription(const AVFrame* frame) const {
     const bool needDeint = m_videoFilterConfig.deinterlace != DeinterlaceMode::Off;
     const bool needEq = m_videoFilterConfig.enabled && !m_videoFilterConfig.eqIsIdentity();
-    if (!needDeint && !needEq) {
+
+    bool needToneMap = false;
+    if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) {
+        needToneMap = true;
+    } else if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) {
+        needToneMap = isHdrFrame(frame);
+    }
+
+    if (!needDeint && !needEq && !needToneMap) {
         return {};
     }
 
     std::ostringstream desc;
-    desc << "format=pix_fmts=yuv420p";
+    if (needToneMap) {
+        AVColorTransferCharacteristic trc = frame ? frame->color_trc : AVCOL_TRC_UNSPECIFIED;
+        if (trc == AVCOL_TRC_UNSPECIFIED && m_videoCtx.codecContext) {
+            trc = m_videoCtx.codecContext->color_trc;
+        }
+        if (trc == AVCOL_TRC_UNSPECIFIED && m_videoCtx.stream && m_videoCtx.stream->codecpar) {
+            trc = m_videoCtx.stream->codecpar->color_trc;
+        }
+
+        std::string trcStr = (trc == AVCOL_TRC_ARIB_STD_B67) ? "arib-std-b67" : "smpte2084";
+        std::string primariesStr = "bt2020";
+        std::string colorspaceStr = "bt2020nc";
+
+        std::string algoStr = "hable";
+        switch (m_videoFilterConfig.hdrAlgorithm) {
+            case HdrToneMapAlgorithm::Mobius:   algoStr = "mobius"; break;
+            case HdrToneMapAlgorithm::Reinhard: algoStr = "reinhard"; break;
+            case HdrToneMapAlgorithm::Hable:
+            default:                            algoStr = "hable"; break;
+        }
+
+        desc << "setparams=color_primaries=" << primariesStr
+             << ":color_trc=" << trcStr
+             << ":colorspace=" << colorspaceStr;
+        desc << ",zscale=transfer=linear:npl=100,format=gbrpf32le";
+        desc << ",tonemap=tonemap=" << algoStr << ":desat=0";
+        desc << ",zscale=transfer=bt709:matrix=bt709:primaries=bt709:range=limited,format=yuv420p";
+    } else {
+        desc << "format=pix_fmts=yuv420p";
+    }
 
     if (needDeint) {
         const bool hasBwdif = avfilter_get_by_name("bwdif") != nullptr;
@@ -1714,7 +1807,7 @@ bool FFmpegPlayer::ensureVideoFilterGraph(AVFrame* frame) {
     if (!frame) return false;
 
     std::lock_guard<std::mutex> lock(m_videoFilterMutex);
-    std::string description = buildVideoFilterDescription();
+    std::string description = buildVideoFilterDescription(frame);
 
     int width = frame->width;
     int height = frame->height;
@@ -1753,15 +1846,6 @@ bool FFmpegPlayer::ensureVideoFilterGraph(AVFrame* frame) {
         return false;
     }
 
-    AVFilterContext* src = nullptr;
-    AVFilterContext* sink = nullptr;
-    int ret = avfilter_graph_create_filter(&src, bufferSrc, "in", nullptr, nullptr, graph);
-    if (ret < 0) {
-        logger().warning("Failed to create video filter source");
-        avfilter_graph_free(&graph);
-        return false;
-    }
-
     std::ostringstream args;
     args << "video_size=" << width << "x" << height
          << ":pix_fmt=" << static_cast<int>(format)
@@ -1770,9 +1854,13 @@ bool FFmpegPlayer::ensureVideoFilterGraph(AVFrame* frame) {
          << ":pixel_aspect=" << (frame->sample_aspect_ratio.num ? frame->sample_aspect_ratio.num : 1)
          << "/" << (frame->sample_aspect_ratio.den ? frame->sample_aspect_ratio.den : 1);
 
-    ret = avfilter_init_str(src, args.str().c_str());
+    AVFilterContext* src = nullptr;
+    AVFilterContext* sink = nullptr;
+    int ret = avfilter_graph_create_filter(&src, bufferSrc, "in", args.str().c_str(), nullptr, graph);
     if (ret < 0) {
-        logger().warning("Failed to init video filter source: " + args.str());
+        char errBuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+        av_make_error_string(errBuf, sizeof(errBuf), ret);
+        logger().warning(std::string("Failed to create video filter source: ") + errBuf + " args=" + args.str());
         avfilter_graph_free(&graph);
         return false;
     }
@@ -1835,7 +1923,7 @@ AVFrame* FFmpegPlayer::processVideoFilter(AVFrame* frame) {
         return frame;
     }
 
-    int ret = av_buffersrc_add_frame(m_videoFilterSrc, frame);
+    int ret = av_buffersrc_add_frame_flags(m_videoFilterSrc, frame, AV_BUFFERSRC_FLAG_KEEP_REF);
     if (ret < 0) {
         logger().warning("Failed to add frame to video filter");
         return frame;
@@ -1855,8 +1943,26 @@ AVFrame* FFmpegPlayer::processVideoFilter(AVFrame* frame) {
         return frame;
     }
 
-    // 保留原始 pts 等元数据
+    // 保留原始 pts 等时钟与元数据，但保留滤镜产物的色彩属性
+    auto outTrc = filtered->color_trc;
+    auto outPri = filtered->color_primaries;
+    auto outSpc = filtered->colorspace;
+    auto outRange = filtered->color_range;
     av_frame_copy_props(filtered, frame);
+    if (outTrc != AVCOL_TRC_UNSPECIFIED) filtered->color_trc = outTrc;
+    if (outPri != AVCOL_PRI_UNSPECIFIED) filtered->color_primaries = outPri;
+    if (outSpc != AVCOL_SPC_UNSPECIFIED) filtered->colorspace = outSpc;
+    if (outRange != AVCOL_RANGE_UNSPECIFIED) filtered->color_range = outRange;
+
+    // HDR 色调映射后的产物已转换为 BT.709 Limited Range，显式标记以确保 sws_scale 正确扩展黑位（16->0），避免画面发白
+    bool isToneMapped = (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) ||
+                        (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto && isHdrFrame(frame));
+    if (isToneMapped) {
+        filtered->color_trc = AVCOL_TRC_BT709;
+        filtered->color_primaries = AVCOL_PRI_BT709;
+        filtered->colorspace = AVCOL_SPC_BT709;
+        filtered->color_range = AVCOL_RANGE_MPEG;
+    }
     return filtered;
 }
 

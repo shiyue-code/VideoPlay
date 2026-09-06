@@ -114,6 +114,15 @@ enum class MenuId : int {
     DeinterlaceYadif = 144,
     DeinterlaceBwdif = 145,
 
+    // HDR 色调映射
+    HdrToneMap = 146,
+    HdrToneMapAuto = 147,
+    HdrToneMapOn = 148,
+    HdrToneMapOff = 149,
+    HdrAlgoHable = 150,
+    HdrAlgoMobius = 151,
+    HdrAlgoReinhard = 152,
+
     // AI 菜单
     AIAnalyze = 300,
     AISummary = 301,
@@ -277,7 +286,13 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
         {MenuId::Deinterlace, {{ {MenuId::DeinterlaceOff, "关闭"},
                                  {MenuId::DeinterlaceAuto, "自动"},
                                  {MenuId::DeinterlaceYadif, "线性"},
-                                 {MenuId::DeinterlaceBwdif, "Bob"} }}}
+                                 {MenuId::DeinterlaceBwdif, "Bob"} }}},
+        {MenuId::HdrToneMap, {{ {MenuId::HdrToneMapAuto, "自动 (推荐)"},
+                                {MenuId::HdrToneMapOn, "始终开启"},
+                                {MenuId::HdrToneMapOff, "关闭"},
+                                {MenuId::HdrAlgoHable, "算法: Hable"},
+                                {MenuId::HdrAlgoMobius, "算法: Mobius"},
+                                {MenuId::HdrAlgoReinhard, "算法: Reinhard"} }}}
     };
     return registry;
 }
@@ -438,6 +453,8 @@ public:
     void setHardwareDecodingEnabled(bool enabled);
     void setAudioFilterPreset(AudioFilterPreset preset);
     void setDeinterlaceMode(DeinterlaceMode mode);
+    void setHdrToneMapMode(HdrToneMapMode mode);
+    void setHdrToneMapAlgorithm(HdrToneMapAlgorithm algo);
     void refreshAudioOutputDevices();
     void setAudioOutputDeviceName(const std::string& name);
     const std::vector<AudioOutputDevice>& audioOutputDevices() const { return m_audioOutputDevices; }
@@ -674,6 +691,8 @@ private:
     bool m_hardwareDecodingEnabled = true;
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
     DeinterlaceMode m_deinterlaceMode = DeinterlaceMode::Off;
+    HdrToneMapMode m_hdrToneMapMode = HdrToneMapMode::Auto;
+    HdrToneMapAlgorithm m_hdrToneMapAlgorithm = HdrToneMapAlgorithm::Hable;
     std::vector<AudioOutputDevice> m_audioOutputDevices;
     std::string m_audioOutputDeviceName;
     NetworkState m_networkState = NetworkState::Idle;

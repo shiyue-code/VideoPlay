@@ -48,3 +48,25 @@ TEST(PlaybackController, AudioFilterPresets)
     EXPECT_TRUE(night.dynamicNormalizerEnabled);
     EXPECT_LT(night.preampDb, 0.0);
 }
+
+TEST(PlaybackController, HdrToneMappingDefaults)
+{
+    VideoFilterConfig config;
+    EXPECT_TRUE(config.isDefault());
+    EXPECT_EQ(config.hdrToneMap, HdrToneMapMode::Auto);
+    EXPECT_EQ(config.hdrAlgorithm, HdrToneMapAlgorithm::Hable);
+    EXPECT_STREQ(hdrToneMapModeName(HdrToneMapMode::Auto), "自动");
+    EXPECT_STREQ(hdrToneMapModeName(HdrToneMapMode::On), "开启");
+    EXPECT_STREQ(hdrToneMapModeName(HdrToneMapMode::Off), "关闭");
+    EXPECT_STREQ(hdrToneMapAlgorithmName(HdrToneMapAlgorithm::Hable), "Hable");
+    EXPECT_STREQ(hdrToneMapAlgorithmName(HdrToneMapAlgorithm::Mobius), "Mobius");
+    EXPECT_STREQ(hdrToneMapAlgorithmName(HdrToneMapAlgorithm::Reinhard), "Reinhard");
+
+    config.hdrToneMap = HdrToneMapMode::On;
+    EXPECT_FALSE(config.isDefault());
+
+    config.hdrToneMap = HdrToneMapMode::Auto;
+    config.hdrAlgorithm = HdrToneMapAlgorithm::Mobius;
+    EXPECT_FALSE(config.isDefault());
+}
+

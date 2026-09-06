@@ -1014,6 +1014,18 @@ void SDLRenderer::renderMediaInfoPanel() {
             hardwareStatus = "已启用 " + m_mediaInfo.hardwareDevice;
         }
         rows.push_back({"硬件解码", hardwareStatus});
+
+        if (m_mediaInfo.isHdr) {
+            std::string hdrInfo = "HDR (" + m_mediaInfo.colorPrimaries + " / " + m_mediaInfo.colorTransfer + ")";
+            rows.push_back({"动态范围", hdrInfo});
+            std::string toneMapStr = "启用 (" + std::string(hdrToneMapAlgorithmName(m_hdrToneMapAlgorithm)) + ")";
+            if (m_hdrToneMapMode == HdrToneMapMode::Off) {
+                toneMapStr = "已关闭";
+            }
+            rows.push_back({"色调映射", toneMapStr});
+        } else {
+            rows.push_back({"动态范围", "SDR (" + m_mediaInfo.colorPrimaries + " / " + m_mediaInfo.colorTransfer + ")"});
+        }
     }
 
     if (m_mediaInfo.hasAudio) {

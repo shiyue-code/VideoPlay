@@ -60,6 +60,7 @@ void SDLRenderer::initMenus() {
         {0, "", "", true},
         {120, "视频基础参数", "", false, true},
         {141, "去隔行", "", false, true},
+        {146, "HDR 色调映射", "", false, true},
         {0, "", "", true},
         {97, "硬件解码", "", false, true},
         {0, "", "", true},
@@ -505,6 +506,11 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                     displayLabel = item.label + std::string("（") +
                                    deinterlaceModeName(m_deinterlaceMode) + "）";
                 }
+                if (item.id == static_cast<int>(MenuId::HdrToneMap)) {
+                    displayLabel = item.label + std::string("（") +
+                                   hdrToneMapModeName(m_hdrToneMapMode) + " - " +
+                                   hdrToneMapAlgorithmName(m_hdrToneMapAlgorithm) + "）";
+                }
                 if (item.id == static_cast<int>(MenuId::VideoTransform)) {
                     std::string summary = std::to_string(m_videoTransform.rotation) + "°";
                     if (m_videoTransform.flipHorizontal) summary += " 水平";
@@ -604,6 +610,18 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 checked = (m_deinterlaceMode == DeinterlaceMode::Yadif);
             } else if (entryId == static_cast<int>(MenuId::DeinterlaceBwdif)) {
                 checked = (m_deinterlaceMode == DeinterlaceMode::Bwdif);
+            } else if (entryId == static_cast<int>(MenuId::HdrToneMapAuto)) {
+                checked = (m_hdrToneMapMode == HdrToneMapMode::Auto);
+            } else if (entryId == static_cast<int>(MenuId::HdrToneMapOn)) {
+                checked = (m_hdrToneMapMode == HdrToneMapMode::On);
+            } else if (entryId == static_cast<int>(MenuId::HdrToneMapOff)) {
+                checked = (m_hdrToneMapMode == HdrToneMapMode::Off);
+            } else if (entryId == static_cast<int>(MenuId::HdrAlgoHable)) {
+                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Hable);
+            } else if (entryId == static_cast<int>(MenuId::HdrAlgoMobius)) {
+                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Mobius);
+            } else if (entryId == static_cast<int>(MenuId::HdrAlgoReinhard)) {
+                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Reinhard);
             } else if (entryId == static_cast<int>(MenuId::Rotate0)) {
                 checked = (m_videoTransform.rotation == 0);
             } else if (entryId == static_cast<int>(MenuId::Rotate90)) {

@@ -199,6 +199,10 @@ struct MediaInfo {
     bool hardwareDecoderEnabled = true;
     bool hardwareDecoder = false;
     std::string hardwareDevice;
+    bool isHdr = false;
+    std::string colorTransfer;
+    std::string colorPrimaries;
+    std::string colorSpace;
 
     bool hasAudio = false;
     std::string audioCodec;
@@ -231,6 +235,36 @@ inline const char* deinterlaceModeName(DeinterlaceMode mode) {
     return "关闭";
 }
 
+enum class HdrToneMapMode {
+    Auto = 0,
+    On = 1,
+    Off = 2
+};
+
+inline const char* hdrToneMapModeName(HdrToneMapMode mode) {
+    switch (mode) {
+        case HdrToneMapMode::Auto: return "自动";
+        case HdrToneMapMode::On:   return "开启";
+        case HdrToneMapMode::Off:  return "关闭";
+    }
+    return "自动";
+}
+
+enum class HdrToneMapAlgorithm {
+    Hable = 0,
+    Mobius = 1,
+    Reinhard = 2
+};
+
+inline const char* hdrToneMapAlgorithmName(HdrToneMapAlgorithm algo) {
+    switch (algo) {
+        case HdrToneMapAlgorithm::Hable:    return "Hable";
+        case HdrToneMapAlgorithm::Mobius:   return "Mobius";
+        case HdrToneMapAlgorithm::Reinhard: return "Reinhard";
+    }
+    return "Hable";
+}
+
 struct VideoFilterConfig {
     bool enabled = false;
     float brightness = 0.0f;   // -1.0 ~ 1.0
@@ -239,6 +273,8 @@ struct VideoFilterConfig {
     float hue = 0.0f;          // -180 ~ 180
     float gamma = 1.0f;        //  0.1 ~ 10.0
     DeinterlaceMode deinterlace = DeinterlaceMode::Off;
+    HdrToneMapMode hdrToneMap = HdrToneMapMode::Auto;
+    HdrToneMapAlgorithm hdrAlgorithm = HdrToneMapAlgorithm::Hable;
 
     bool eqIsIdentity() const {
         return brightness == 0.0f && contrast == 1.0f &&
@@ -247,6 +283,8 @@ struct VideoFilterConfig {
 
     bool isDefault() const {
         return deinterlace == DeinterlaceMode::Off &&
+               hdrToneMap == HdrToneMapMode::Auto &&
+               hdrAlgorithm == HdrToneMapAlgorithm::Hable &&
                (!enabled || eqIsIdentity());
     }
 };

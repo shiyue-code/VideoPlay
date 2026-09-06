@@ -309,6 +309,19 @@ if(WIN32 AND TARGET SDL3_ttf::SDL3_ttf)
     )
 endif()
 
+# Windows: 复制 MSVC 运行时 DLL
+if(WIN32 AND MSVC)
+    include(InstallRequiredSystemLibraries)
+    if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMENT "Copying MSVC runtime DLLs"
+        )
+    endif()
+endif()
+
 # Windows: 复制字体文件
 if(WIN32 AND SDL3_TTF_FOUND)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

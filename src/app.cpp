@@ -113,6 +113,8 @@ bool VideoPlayerApp::initialize() {
     auto videoFilterConfig = Settings::instance().videoFilterConfig();
     m_player->setVideoFilterConfig(videoFilterConfig);
     m_renderer->setDeinterlaceMode(videoFilterConfig.deinterlace);
+    m_renderer->setHdrToneMapMode(videoFilterConfig.hdrToneMap);
+    m_renderer->setHdrToneMapAlgorithm(videoFilterConfig.hdrAlgorithm);
     
     // 设置回调
     m_player->setPositionCallback([this](int64_t pos) {

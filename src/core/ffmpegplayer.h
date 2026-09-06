@@ -279,7 +279,8 @@ private:
     VideoFrame m_previewFrame;
     bool m_previewReady = false;
 
-    std::string buildVideoFilterDescription() const;
+    bool isHdrFrame(const AVFrame* frame) const;
+    std::string buildVideoFilterDescription(const AVFrame* frame) const;
     bool ensureVideoFilterGraph(AVFrame* frame);
     void cleanupVideoFilterGraph();
     AVFrame* processVideoFilter(AVFrame* frame);

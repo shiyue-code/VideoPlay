@@ -1,4 +1,4 @@
-﻿#include "app.h"
+#include "app.h"
 #include "core/settings.h"
 #include "utils/logger.h"
 #include <iostream>

@@ -41,7 +41,7 @@
 | 亮度/对比度/饱和度/色调/伽马 | P0 | 已完成 | FFmpeg `eq` / `hue` |
 | 去隔行 | P1 | 已完成 | 播放菜单，自动/Yadif/Bwdif，接在 eq 滤镜链前 |
 | 旋转/镜像/裁剪 | P1 | 已完成 | SDL 渲染层变换，播放菜单「画面变换」 |
-| HDR Tone Mapping | P1 | 未开始 | SDR 显示器播 HDR |
+| HDR Tone Mapping | P1 | 已完成 | 播放菜单，自动/开启/关闭，Hable/Mobius/Reinhard，基于 FFmpeg `zscale` + `tonemap` |
 | 降噪/锐化 | P2 | 未开始 | |
 | 色域切换 | P2 | 未开始 | |
 | 外挂 Pixel Shader | P3 | 已取消 | 架构改动过大 |

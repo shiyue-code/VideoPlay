@@ -1,4 +1,4 @@
-﻿#include "core/settings.h"
+#include "core/settings.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
 #include <algorithm>
@@ -450,7 +450,9 @@ void Settings::setVideoFilterConfig(const VideoFilterConfig& config) {
         {"saturation", config.saturation},
         {"hue", config.hue},
         {"gamma", config.gamma},
-        {"deinterlace", static_cast<int>(config.deinterlace)}
+        {"deinterlace", static_cast<int>(config.deinterlace)},
+        {"hdrToneMap", static_cast<int>(config.hdrToneMap)},
+        {"hdrAlgorithm", static_cast<int>(config.hdrAlgorithm)}
     };
 }
 
@@ -475,6 +477,18 @@ VideoFilterConfig Settings::videoFilterConfig() const {
         deint = 0;
     }
     config.deinterlace = static_cast<DeinterlaceMode>(deint);
+
+    int hdrMode = video.value("hdrToneMap", static_cast<int>(HdrToneMapMode::Auto));
+    if (hdrMode < 0 || hdrMode > 2) {
+        hdrMode = static_cast<int>(HdrToneMapMode::Auto);
+    }
+    config.hdrToneMap = static_cast<HdrToneMapMode>(hdrMode);
+
+    int hdrAlgo = video.value("hdrAlgorithm", static_cast<int>(HdrToneMapAlgorithm::Hable));
+    if (hdrAlgo < 0 || hdrAlgo > 2) {
+        hdrAlgo = static_cast<int>(HdrToneMapAlgorithm::Hable);
+    }
+    config.hdrAlgorithm = static_cast<HdrToneMapAlgorithm>(hdrAlgo);
 
     return config;
 }

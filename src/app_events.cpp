@@ -1,4 +1,4 @@
-﻿#include "app.h"
+#include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
@@ -240,6 +240,52 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
             break;
         }
+        case MenuId::HdrToneMapAuto:
+        case MenuId::HdrToneMapOn:
+        case MenuId::HdrToneMapOff:
+        case MenuId::HdrAlgoHable:
+        case MenuId::HdrAlgoMobius:
+        case MenuId::HdrAlgoReinhard: {
+            if (!m_player) break;
+            auto config = m_player->videoFilterConfig();
+            std::string osdMsg;
+            switch (menuId) {
+                case MenuId::HdrToneMapAuto:
+                    config.hdrToneMap = HdrToneMapMode::Auto;
+                    osdMsg = "HDR 色调映射: 自动";
+                    break;
+                case MenuId::HdrToneMapOn:
+                    config.hdrToneMap = HdrToneMapMode::On;
+                    osdMsg = "HDR 色调映射: 开启";
+                    break;
+                case MenuId::HdrToneMapOff:
+                    config.hdrToneMap = HdrToneMapMode::Off;
+                    osdMsg = "HDR 色调映射: 关闭";
+                    break;
+                case MenuId::HdrAlgoHable:
+                    config.hdrAlgorithm = HdrToneMapAlgorithm::Hable;
+                    osdMsg = "HDR 映射算法: Hable";
+                    break;
+                case MenuId::HdrAlgoMobius:
+                    config.hdrAlgorithm = HdrToneMapAlgorithm::Mobius;
+                    osdMsg = "HDR 映射算法: Mobius";
+                    break;
+                case MenuId::HdrAlgoReinhard:
+                    config.hdrAlgorithm = HdrToneMapAlgorithm::Reinhard;
+                    osdMsg = "HDR 映射算法: Reinhard";
+                    break;
+                default: break;
+            }
+            Settings::instance().setVideoFilterConfig(config);
+            Settings::instance().save();
+            m_player->setVideoFilterConfig(config);
+            if (m_renderer) {
+                m_renderer->setHdrToneMapMode(config.hdrToneMap);
+                m_renderer->setHdrToneMapAlgorithm(config.hdrAlgorithm);
+                m_renderer->showOSD(OSDType::Info, osdMsg);
+            }
+            break;
+        }
         case MenuId::HardwareDecoding: {
             bool enabled = !Settings::instance().hardwareDecodingEnabled();
             Settings::instance().setHardwareDecodingEnabled(enabled);
@@ -274,8 +320,12 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
                 case MenuId::VideoFilterSaturationUp: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
                 case MenuId::VideoFilterReset: {
                     auto deint = config.deinterlace;
+                    auto hdrMode = config.hdrToneMap;
+                    auto hdrAlgo = config.hdrAlgorithm;
                     config = VideoFilterConfig{};
                     config.deinterlace = deint;
+                    config.hdrToneMap = hdrMode;
+                    config.hdrAlgorithm = hdrAlgo;
                     break;
                 }
                 default: break;
@@ -421,7 +471,6 @@ void VideoPlayerApp::showHelp() {
         "↑ / ↓         - 音量增加/减少\n"
         "M             - 静音切换\n"
         ".             - 切换播放速度\n"
-        "[ / ]         - 降低/增加速度\n"
         "F             - 全屏切换\n"
         "N             - 下一个（优先下一集）\n"
         "P             - 上一个（优先上一集）\n"
