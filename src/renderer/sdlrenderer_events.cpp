@@ -1,4 +1,4 @@
-﻿#include "renderer/sdlrenderer.h"
+#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
@@ -300,10 +300,36 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     }
                     case SDLK_UP:
-                        if (m_volumeCallback) m_volumeCallback(5);
+                        if ((event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
+                            adjustContrast(0.1f);
+                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                            adjustBrightness(0.05f);
+                        } else if (m_volumeCallback) {
+                            m_volumeCallback(5);
+                        }
                         break;
                     case SDLK_DOWN:
-                        if (m_volumeCallback) m_volumeCallback(-5);
+                        if ((event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
+                            adjustContrast(-0.1f);
+                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                            adjustBrightness(-0.05f);
+                        } else if (m_volumeCallback) {
+                            m_volumeCallback(-5);
+                        }
+                        break;
+                    case SDLK_0:
+                    case SDLK_KP_0:
+                        if (event.key.mod & SDL_KMOD_CTRL) {
+                            resetVideoFilter();
+                        }
+                        break;
+                    case SDLK_C:
+                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                            toggleVideoControlPanel();
+                        }
+                        break;
+                    case SDLK_F6:
+                        toggleVideoControlPanel();
                         break;
                     case SDLK_N:
                         if (m_nextCallback) m_nextCallback();
@@ -410,6 +436,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             break;
 
         case SDL_EVENT_MOUSE_WHEEL: {
+            SDL_Keymod mod = SDL_GetModState();
+            if (mod & SDL_KMOD_SHIFT || m_activeSubmenuParent == static_cast<int>(MenuId::VideoFilter)) {
+                // Shift+滚轮 或 展开画面参数子菜单时：无级调节亮度
+                adjustBrightness(event.wheel.y > 0.0f ? 0.05f : -0.05f);
+                break;
+            }
             int mx = static_cast<int>(event.wheel.mouse_x);
             int my = static_cast<int>(event.wheel.mouse_y);
             bool overPlaylist = m_showPlaylistPanel && mx >= m_windowWidth - 284 && mx <= m_windowWidth - 24
@@ -465,6 +497,18 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 break;
             case ControlType::VolumeBar:
                 m_tooltip = "拖动调节音量";
+                break;
+            case ControlType::VideoPanelToggle:
+                m_tooltip = "画面调节  C";
+                break;
+            case ControlType::VideoPanelClose:
+                m_tooltip = "关闭面板";
+                break;
+            case ControlType::VideoPanelReset:
+                m_tooltip = "恢复默认  Ctrl+0";
+                break;
+            case ControlType::VideoPanelHdrToggle:
+                m_tooltip = "切换 HDR 色调映射";
                 break;
             case ControlType::PlaylistButton:
                 m_tooltip = "播放列表  Ctrl+L";
@@ -528,6 +572,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 if (m_activeMenu != i) {
                     m_activeMenu = i;
                     m_activeSubmenuParent = 0;
+                    m_activeSubmenuLevel3Parent = 0;
                     m_pendingMenu = i;
                     m_menuAnimStartTime = SDL_GetTicks();
                     m_menuAnimating = true;
@@ -579,6 +624,44 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 float ratio = static_cast<float>(x - rect.x) / rect.w;
                 ratio = std::max(0.0f, std::min(1.0f, ratio));
                 m_volumeCallback(static_cast<int>(ratio * 100) + 1000);
+                break;
+            }
+        }
+    }
+
+    // 处理画面参数滑块拖动
+    if (m_draggingBrightness) {
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::VideoPanelBrightnessBar) {
+                float ratio = static_cast<float>(x - rect.x) / rect.w;
+                ratio = std::clamp(ratio, 0.0f, 1.0f);
+                m_videoFilterConfig.brightness = -1.0f + ratio * 2.0f;
+                m_videoFilterConfig.enabled = true;
+                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                break;
+            }
+        }
+    }
+    if (m_draggingContrast) {
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::VideoPanelContrastBar) {
+                float ratio = static_cast<float>(x - rect.x) / rect.w;
+                ratio = std::clamp(ratio, 0.0f, 1.0f);
+                m_videoFilterConfig.contrast = ratio * 2.0f;
+                m_videoFilterConfig.enabled = true;
+                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                break;
+            }
+        }
+    }
+    if (m_draggingSaturation) {
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::VideoPanelSaturationBar) {
+                float ratio = static_cast<float>(x - rect.x) / rect.w;
+                ratio = std::clamp(ratio, 0.0f, 1.0f);
+                m_videoFilterConfig.saturation = ratio * 3.0f;
+                m_videoFilterConfig.enabled = true;
+                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
                 break;
             }
         }
@@ -778,14 +861,18 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         const Menu& activeMenu = m_menus[m_activeMenu];
         int labelMaxW = 0;
         int shortcutMaxW = 0;
+        bool hasSubmenu = false;
         for (const auto& item : activeMenu.items) {
             if (!item.separator && item.enabled) {
-                std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+                std::string displayLabel = getMenuItemDisplayLabel(item);
                 int lw = getTextWidth(displayLabel, 14);
                 if (lw > labelMaxW) labelMaxW = lw;
                 if (!item.shortcut.empty()) {
                     int sw = getTextWidth(item.shortcut, 12);
                     if (sw > shortcutMaxW) shortcutMaxW = sw;
+                }
+                if (isSubmenuParent(item.id)) {
+                    hasSubmenu = true;
                 }
             }
         }
@@ -794,6 +881,12 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         constexpr int menuPadY = 5;
         int menuWidth = 16 + 22 + labelMaxW + 18;
         if (shortcutMaxW > 0) menuWidth += 30 + shortcutMaxW;
+        if (hasSubmenu) {
+            int arrowExtra = getTextWidth(">", 12) + 20;
+            if (menuWidth < 16 + 22 + labelMaxW + arrowExtra + 18) {
+                menuWidth = 16 + 22 + labelMaxW + arrowExtra + 18;
+            }
+        }
         if (menuWidth < 192) menuWidth = 192;
         int menuHeight = menuPadY * 2;
         for (const auto& item : activeMenu.items) {
@@ -823,7 +916,10 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             rowY += rowHeight;
         }
         if (clickedMainMenuRow) {
-            m_activeSubmenuParent = clickedSubmenuParent;
+            if (m_activeSubmenuParent != clickedSubmenuParent) {
+                m_activeSubmenuParent = clickedSubmenuParent;
+                m_activeSubmenuLevel3Parent = 0;
+            }
             if (m_activeSubmenuParent != 0) {
                 activeSubmenuY = m_menuBarHeight + menuPadY;
                 for (const auto& item : activeMenu.items) {
@@ -837,11 +933,51 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         } else if (x >= menuX && x <= menuX + menuWidth &&
                    y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
             m_activeSubmenuParent = 0;
+            m_activeSubmenuLevel3Parent = 0;
         }
 
-        constexpr int submenuWidth = 180;
+        const int submenuWidth = getSubmenuWidth(m_activeSubmenuParent);
         int submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
         int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
+
+        // 优先检测三级子菜单点击
+        if (m_activeSubmenuLevel3Parent != 0 && m_activeSubmenuParent != 0) {
+            int sub3Count = menuSubmenuItemCount(m_activeSubmenuLevel3Parent);
+            const int sub3Width = getSubmenuWidth(m_activeSubmenuLevel3Parent);
+            int sub3Height = sub3Count * itemHeight + menuPadY * 2;
+            int sub3X = activeSubmenuX + submenuWidth - 4;
+            if (sub3X + sub3Width > m_windowWidth) {
+                sub3X = activeSubmenuX - sub3Width + 4;
+            }
+            int sub3Y = activeSubmenuY + menuPadY;
+            for (int i = 0; i < submenuCount; ++i) {
+                if (menuSubmenuItemId(m_activeSubmenuParent, i) == m_activeSubmenuLevel3Parent) {
+                    break;
+                }
+                sub3Y += itemHeight;
+            }
+            if (sub3Y + sub3Height > m_windowHeight) {
+                sub3Y = std::max(0, m_windowHeight - sub3Height - 8);
+            }
+
+            if (x >= sub3X && x <= sub3X + sub3Width &&
+                y >= sub3Y && y <= sub3Y + sub3Height) {
+                inMenu = true;
+                int localY = y - sub3Y - menuPadY;
+                if (localY >= 0) {
+                    int itemIndex = localY / itemHeight;
+                    if (itemIndex >= 0 && itemIndex < sub3Count && m_menuCallback) {
+                        MenuId clickedId = static_cast<MenuId>(menuSubmenuItemId(m_activeSubmenuLevel3Parent, itemIndex));
+                        m_menuCallback(clickedId);
+                        m_menuManager->closeAllMenus();
+                        m_pressedControl = ControlType::None;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 检测二级子菜单点击
         if (m_activeSubmenuParent != 0 &&
             x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
             y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight) {
@@ -850,9 +986,21 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             if (localY >= 0) {
                 int itemIndex = localY / itemHeight;
                 if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
-                    m_menuCallback(static_cast<MenuId>(menuSubmenuItemId(m_activeSubmenuParent, itemIndex)));
-                    m_menuManager->closeAllMenus();
-                    m_pressedControl = ControlType::None;
+                    int clickedRawId = menuSubmenuItemId(m_activeSubmenuParent, itemIndex);
+                    if (isSubmenuParent(clickedRawId)) {
+                        m_activeSubmenuLevel3Parent = clickedRawId;
+                    } else {
+                        MenuId clickedId = static_cast<MenuId>(clickedRawId);
+                        m_menuCallback(clickedId);
+                        // 针对画面参数的步进调节项，不关闭菜单，方便连续点击；面板和重置选项则正常关闭菜单
+                        bool keepMenuOpen = (m_activeSubmenuParent == static_cast<int>(MenuId::VideoFilter) &&
+                                             clickedId != MenuId::VideoFilterReset &&
+                                             clickedId != MenuId::VideoFilterPanel);
+                        if (!keepMenuOpen) {
+                            m_menuManager->closeAllMenus();
+                        }
+                        m_pressedControl = ControlType::None;
+                    }
                 }
             }
         }
@@ -959,6 +1107,72 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         case ControlType::PlaylistButton:
             togglePlaylistPanel();
             break;
+        case ControlType::VideoPanelToggle:
+            toggleVideoControlPanel();
+            break;
+        case ControlType::VideoPanelClose:
+            m_showVideoControlPanel = false;
+            break;
+        case ControlType::VideoPanelReset:
+            resetVideoFilter();
+            break;
+        case ControlType::VideoPanelHdrToggle: {
+            if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) {
+                m_videoFilterConfig.hdrToneMap = HdrToneMapMode::On;
+            } else if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) {
+                m_videoFilterConfig.hdrToneMap = HdrToneMapMode::Off;
+            } else {
+                m_videoFilterConfig.hdrToneMap = HdrToneMapMode::Auto;
+            }
+            if (m_videoFilterConfigCallback) {
+                m_videoFilterConfigCallback(m_videoFilterConfig);
+            }
+            std::string msg = "HDR 色调映射: ";
+            if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) msg += "自动";
+            else if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) msg += "强制开启";
+            else msg += "关闭";
+            showOSD(OSDType::Info, msg);
+            break;
+        }
+        case ControlType::VideoPanelBrightnessBar:
+            m_draggingBrightness = true;
+            for (const auto& rect : m_controlRects) {
+                if (rect.type == ControlType::VideoPanelBrightnessBar) {
+                    float ratio = static_cast<float>(x - rect.x) / rect.w;
+                    ratio = std::clamp(ratio, 0.0f, 1.0f);
+                    m_videoFilterConfig.brightness = -1.0f + ratio * 2.0f;
+                    m_videoFilterConfig.enabled = true;
+                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    break;
+                }
+            }
+            break;
+        case ControlType::VideoPanelContrastBar:
+            m_draggingContrast = true;
+            for (const auto& rect : m_controlRects) {
+                if (rect.type == ControlType::VideoPanelContrastBar) {
+                    float ratio = static_cast<float>(x - rect.x) / rect.w;
+                    ratio = std::clamp(ratio, 0.0f, 1.0f);
+                    m_videoFilterConfig.contrast = ratio * 2.0f;
+                    m_videoFilterConfig.enabled = true;
+                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    break;
+                }
+            }
+            break;
+        case ControlType::VideoPanelSaturationBar:
+            m_draggingSaturation = true;
+            for (const auto& rect : m_controlRects) {
+                if (rect.type == ControlType::VideoPanelSaturationBar) {
+                    float ratio = static_cast<float>(x - rect.x) / rect.w;
+                    ratio = std::clamp(ratio, 0.0f, 1.0f);
+                    m_videoFilterConfig.saturation = ratio * 3.0f;
+                    m_videoFilterConfig.enabled = true;
+                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    break;
+                }
+            }
+            break;
         case ControlType::SearchPanelToggle:
             toggleSearchPanel();
             break;
@@ -1033,6 +1247,9 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
 
     m_draggingProgress = false;
     m_draggingVolume = false;
+    m_draggingBrightness = false;
+    m_draggingContrast = false;
+    m_draggingSaturation = false;
     m_playlistDragging = false;
     m_playlistDragFrom = -1;
     m_playlistDragTo = -1;
@@ -1169,14 +1386,18 @@ void SDLRenderer::handleMenuAutoDismiss(int x, int y)
     const Menu& activeMenu = m_menus[m_activeMenu];
     int labelMaxW = 0;
     int shortcutMaxW = 0;
+    bool hasSubmenu = false;
     for (const auto& item : activeMenu.items) {
         if (!item.separator && item.enabled) {
-            std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+            std::string displayLabel = getMenuItemDisplayLabel(item);
             int lw = getTextWidth(displayLabel, 14);
             if (lw > labelMaxW) labelMaxW = lw;
             if (!item.shortcut.empty()) {
                 int sw = getTextWidth(item.shortcut, 12);
                 if (sw > shortcutMaxW) shortcutMaxW = sw;
+            }
+            if (isSubmenuParent(item.id)) {
+                hasSubmenu = true;
             }
         }
     }
@@ -1185,6 +1406,12 @@ void SDLRenderer::handleMenuAutoDismiss(int x, int y)
     constexpr int menuPadY = 5;
     int menuWidth = 16 + 22 + labelMaxW + 18;
     if (shortcutMaxW > 0) menuWidth += 30 + shortcutMaxW;
+    if (hasSubmenu) {
+        int arrowExtra = getTextWidth(">", 12) + 20;
+        if (menuWidth < 16 + 22 + labelMaxW + arrowExtra + 18) {
+            menuWidth = 16 + 22 + labelMaxW + arrowExtra + 18;
+        }
+    }
     if (menuWidth < 192) menuWidth = 192;
     int menuHeight = menuPadY * 2;
     for (const auto& item : activeMenu.items) {
@@ -1197,19 +1424,60 @@ void SDLRenderer::handleMenuAutoDismiss(int x, int y)
     bool inSubmenu = false;
     int activeSubmenuX = menuX + menuWidth - 4;
     int activeSubmenuY = m_menuBarHeight + menuPadY;
+    int submenuCount = 0;
+    int submenuWidth = 0;
     if (m_activeSubmenuParent != 0) {
         for (const auto& item : activeMenu.items) {
             if (item.id == m_activeSubmenuParent) break;
             activeSubmenuY += item.separator ? separatorHeight : itemHeight;
         }
-        constexpr int submenuWidth = 180;
-        int submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
+        submenuWidth = getSubmenuWidth(m_activeSubmenuParent);
+        submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
         int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
         inSubmenu = (x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
                      y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight);
     }
 
-    if (inSubmenu) return;
+    bool inSubmenu3 = false;
+    if (m_activeSubmenuLevel3Parent != 0 && m_activeSubmenuParent != 0) {
+        int sub3Count = menuSubmenuItemCount(m_activeSubmenuLevel3Parent);
+        const int sub3Width = getSubmenuWidth(m_activeSubmenuLevel3Parent);
+        int sub3Height = sub3Count * itemHeight + menuPadY * 2;
+        int sub3X = activeSubmenuX + submenuWidth - 4;
+        if (sub3X + sub3Width > m_windowWidth) {
+            sub3X = activeSubmenuX - sub3Width + 4;
+        }
+        int sub3Y = activeSubmenuY + menuPadY;
+        for (int i = 0; i < submenuCount; ++i) {
+            if (menuSubmenuItemId(m_activeSubmenuParent, i) == m_activeSubmenuLevel3Parent) {
+                break;
+            }
+            sub3Y += itemHeight;
+        }
+        if (sub3Y + sub3Height > m_windowHeight) {
+            sub3Y = std::max(0, m_windowHeight - sub3Height - 8);
+        }
+        inSubmenu3 = (x >= sub3X && x <= sub3X + sub3Width &&
+                      y >= sub3Y && y <= sub3Y + sub3Height);
+    }
+
+    if (inSubmenu3) return;
+
+    if (inSubmenu) {
+        int localY = y - activeSubmenuY - menuPadY;
+        if (localY >= 0) {
+            int itemIdx = localY / itemHeight;
+            if (itemIdx >= 0 && itemIdx < submenuCount) {
+                int itemId = menuSubmenuItemId(m_activeSubmenuParent, itemIdx);
+                if (isSubmenuParent(itemId)) {
+                    m_activeSubmenuLevel3Parent = itemId;
+                } else {
+                    m_activeSubmenuLevel3Parent = 0;
+                }
+            }
+        }
+        return;
+    }
 
     if (inMainMenu) {
         int rowY = m_menuBarHeight + menuPadY;
@@ -1224,7 +1492,10 @@ void SDLRenderer::handleMenuAutoDismiss(int x, int y)
             }
             rowY += rowHeight;
         }
-        m_activeSubmenuParent = newParent;
+        if (m_activeSubmenuParent != newParent) {
+            m_activeSubmenuParent = newParent;
+            m_activeSubmenuLevel3Parent = 0;
+        }
     } else {
         m_menuManager->closeAllMenus();
     }

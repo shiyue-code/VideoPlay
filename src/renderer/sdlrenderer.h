@@ -55,6 +55,8 @@ enum class MenuId : int {
     // 剧集菜单
     PrevEpisode = 30,
     NextEpisode = 31,
+    EpisodePrev = 30,
+    EpisodeNext = 31,
 
     // 帮助
     Help = 50,
@@ -79,6 +81,7 @@ enum class MenuId : int {
 
     // 窗口 & 滤镜
     AlwaysOnTop = 80,
+    Screenshot = 88,
     AudioFilter = 89,
     AudioFilterOff = 93,
     AudioFilterVoice = 94,
@@ -95,6 +98,8 @@ enum class MenuId : int {
     VideoFilterContrastDown = 124,
     VideoFilterSaturationUp = 125,
     VideoFilterReset = 126,
+    VideoFilterPanel = 127,
+    VideoFilterSaturationDown = 128,
 
     VideoTransform = 130,
     Rotate0 = 131,
@@ -122,6 +127,7 @@ enum class MenuId : int {
     HdrAlgoHable = 150,
     HdrAlgoMobius = 151,
     HdrAlgoReinhard = 152,
+    HdrAlgorithmMenu = 153,
 
     // AI 菜单
     AIAnalyze = 300,
@@ -172,6 +178,7 @@ using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=
 using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
 using AudioTrackCallback = std::function<void(int)>;  // 音轨下标，-1=关闭
 using SubtitleTrackCallback = std::function<void(int)>;  // 字幕轨下标，-1=关闭内封
+using VideoFilterConfigCallback = std::function<void(const VideoFilterConfig&)>;
 
 enum class OSDType {
     Message,
@@ -214,7 +221,14 @@ enum class ControlType {
     SearchInput,
     SearchTimestamp,
     SearchMessageCopy,
-    PanelBackground
+    PanelBackground,
+    VideoPanelToggle,
+    VideoPanelClose,
+    VideoPanelBrightnessBar,
+    VideoPanelContrastBar,
+    VideoPanelSaturationBar,
+    VideoPanelReset,
+    VideoPanelHdrToggle
 };
 
 // 无边框窗口 resize 模式
@@ -267,12 +281,14 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
                                  {MenuId::AudioFilterVoice, "语音增强"},
                                  {MenuId::AudioFilterBass, "低音增强"},
                                  {MenuId::AudioFilterNight, "夜间模式"} }}},
-        {MenuId::VideoFilter, {{ {MenuId::VideoFilterBrightnessUp, "亮度 +"},
-                                 {MenuId::VideoFilterBrightnessDown, "亮度 -"},
-                                 {MenuId::VideoFilterContrastUp, "对比度 +"},
-                                 {MenuId::VideoFilterContrastDown, "对比度 -"},
-                                 {MenuId::VideoFilterSaturationUp, "饱和度 +"},
-                                 {MenuId::VideoFilterReset, "重置"} }}},
+        {MenuId::VideoFilter, {{ {MenuId::VideoFilterPanel, "画面调节滑块面板..."},
+                                 {MenuId::VideoFilterBrightnessUp, "亮度 +5%"},
+                                 {MenuId::VideoFilterBrightnessDown, "亮度 -5%"},
+                                 {MenuId::VideoFilterContrastUp, "对比度 +10%"},
+                                 {MenuId::VideoFilterContrastDown, "对比度 -10%"},
+                                 {MenuId::VideoFilterSaturationUp, "饱和度 +10%"},
+                                 {MenuId::VideoFilterSaturationDown, "饱和度 -10%"},
+                                 {MenuId::VideoFilterReset, "重置默认参数"} }}},
         {MenuId::VideoTransform, {{ {MenuId::Rotate0, "旋转 0°"},
                                     {MenuId::Rotate90, "旋转 90°"},
                                     {MenuId::Rotate180, "旋转 180°"},
@@ -284,15 +300,16 @@ inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
                                     {MenuId::Crop20, "裁剪 20%"},
                                     {MenuId::TransformReset, "重置变换"} }}},
         {MenuId::Deinterlace, {{ {MenuId::DeinterlaceOff, "关闭"},
-                                 {MenuId::DeinterlaceAuto, "自动"},
-                                 {MenuId::DeinterlaceYadif, "线性"},
-                                 {MenuId::DeinterlaceBwdif, "Bob"} }}},
+                                  {MenuId::DeinterlaceAuto, "自动"},
+                                  {MenuId::DeinterlaceYadif, "线性"},
+                                  {MenuId::DeinterlaceBwdif, "Bob"} }}},
         {MenuId::HdrToneMap, {{ {MenuId::HdrToneMapAuto, "自动 (推荐)"},
                                 {MenuId::HdrToneMapOn, "始终开启"},
                                 {MenuId::HdrToneMapOff, "关闭"},
-                                {MenuId::HdrAlgoHable, "算法: Hable"},
-                                {MenuId::HdrAlgoMobius, "算法: Mobius"},
-                                {MenuId::HdrAlgoReinhard, "算法: Reinhard"} }}}
+                                {MenuId::HdrAlgorithmMenu, "调色算法"} }}},
+        {MenuId::HdrAlgorithmMenu, {{ {MenuId::HdrAlgoHable, "Hable (推荐)"},
+                                      {MenuId::HdrAlgoMobius, "Mobius"},
+                                      {MenuId::HdrAlgoReinhard, "Reinhard"} }}}
     };
     return registry;
 }
@@ -322,9 +339,17 @@ inline const char* submenuItemLabel(int parentId, int index) {
     return it->second.items[index].second;
 }
 
+inline std::string formatVideoFilterSummary(const VideoFilterConfig& cfg) {
+    if (cfg.eqIsIdentity()) {
+        return "";
+    }
+    return "已调节";
+}
+
 inline std::string submenuParentLabel(const MenuItem& item, int loopMode,
                                        AspectMode aspectMode,
-                                       AudioFilterPreset audioFilterPreset) {
+                                       AudioFilterPreset audioFilterPreset,
+                                       const VideoFilterConfig& filterConfig = {}) {
     auto it = submenuRegistry().find(static_cast<MenuId>(item.id));
     if (it == submenuRegistry().end()) return item.label;
 
@@ -335,6 +360,11 @@ inline std::string submenuParentLabel(const MenuItem& item, int loopMode,
         index = static_cast<int>(aspectMode);
     } else if (item.id == static_cast<int>(MenuId::AudioFilter)) {
         index = static_cast<int>(audioFilterPreset);
+    } else if (item.id == static_cast<int>(MenuId::VideoFilter)) {
+        if (!filterConfig.eqIsIdentity()) {
+            return item.label + "（已调节）";
+        }
+        return item.label;
     }
     if (index < 0 || index >= (int)it->second.items.size()) return item.label;
     return item.label + "（" + it->second.items[index].second + "）";
@@ -409,6 +439,15 @@ public:
     void setChapterSeekCallback(ChapterSeekCallback callback);
     void setAudioTrackCallback(AudioTrackCallback callback);
     void setSubtitleTrackCallback(SubtitleTrackCallback callback);
+    void setVideoFilterConfigCallback(VideoFilterConfigCallback callback);
+    void setVideoFilterConfig(const VideoFilterConfig& config);
+    const VideoFilterConfig& videoFilterConfig() const { return m_videoFilterConfig; }
+    void toggleVideoControlPanel();
+    bool isVideoControlPanelOpen() const { return m_showVideoControlPanel; }
+    void adjustBrightness(float delta);
+    void adjustContrast(float delta);
+    void adjustSaturation(float delta);
+    void resetVideoFilter();
 
     // 系统拖动/缩放模态循环期间用于实时重绘整帧的回调（由 App 提供）
     void setLiveRenderCallback(std::function<void()> callback);
@@ -559,6 +598,7 @@ private:
     void hideContextMenu();
     void renderContextMenu();
     bool handleContextMenuClick(int x, int y);
+    SDL_Rect getContextMenuRect();
     Menu m_contextMenu;
     bool m_showContextMenu = false;
     int m_contextMenuX = 0;
@@ -572,6 +612,9 @@ private:
     int menuSubmenuItemCount(int parentId) const;
     int menuSubmenuItemId(int parentId, int index) const;
     std::string menuSubmenuItemLabel(int parentId, int index) const;
+    std::string menuSubmenuItemShortcut(int parentId, int index) const;
+    int getSubmenuWidth(int parentId);
+    std::string getMenuItemDisplayLabel(const MenuItem& item) const;
     void applySmallWindowPanelGuard();
     void renderVolumeControl(int volume, bool isMuted, int controlY);
     void renderPlaybackControls(bool isPlaying, int controlY);
@@ -584,6 +627,8 @@ private:
     void renderTooltip();
     void renderOSD();
     void renderMediaInfoPanel();
+    void renderVideoControlPanel();
+    Menu* findMenu(const std::string& label);
     void renderNetworkState();
     void renderAIAnalysisOverlay();
     void renderLoadingAnimation();
@@ -724,6 +769,12 @@ private:
     int64_t m_previewShownPts = -1;
     uint64_t m_previewHoverStart = 0;
     bool m_draggingVolume = false;
+    bool m_showVideoControlPanel = false;
+    bool m_draggingBrightness = false;
+    bool m_draggingContrast = false;
+    bool m_draggingSaturation = false;
+    VideoFilterConfig m_videoFilterConfig;
+    VideoFilterConfigCallback m_videoFilterConfigCallback;
     int m_windowWidth = 1280;
     int m_windowHeight = 720;
 
@@ -758,6 +809,7 @@ private:
     int m_lastBarW = 0;
     int m_activeMenu = -1;
     int m_activeSubmenuParent = 0;
+    int m_activeSubmenuLevel3Parent = 0;
     bool m_menuBarHovered = false;
 
     // 菜单动画

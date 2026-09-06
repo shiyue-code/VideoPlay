@@ -112,6 +112,7 @@ bool VideoPlayerApp::initialize() {
     m_renderer->setAudioOutputDeviceName(savedAudioDevice);
     auto videoFilterConfig = Settings::instance().videoFilterConfig();
     m_player->setVideoFilterConfig(videoFilterConfig);
+    m_renderer->setVideoFilterConfig(videoFilterConfig);
     m_renderer->setDeinterlaceMode(videoFilterConfig.deinterlace);
     m_renderer->setHdrToneMapMode(videoFilterConfig.hdrToneMap);
     m_renderer->setHdrToneMapAlgorithm(videoFilterConfig.hdrAlgorithm);
@@ -244,6 +245,18 @@ bool VideoPlayerApp::initialize() {
             case 'a': setLoopPointA(); break;
             case 'b': setLoopPointB(); break;
             case 'c': clearLoop(); break;
+        }
+    });
+    m_renderer->setVideoFilterConfigCallback([this](const VideoFilterConfig& config) {
+        Settings::instance().setVideoFilterConfig(config);
+        Settings::instance().save();
+        if (m_player) {
+            m_player->setVideoFilterConfig(config);
+        }
+        if (m_renderer) {
+            m_renderer->setDeinterlaceMode(config.deinterlace);
+            m_renderer->setHdrToneMapMode(config.hdrToneMap);
+            m_renderer->setHdrToneMapAlgorithm(config.hdrAlgorithm);
         }
     });
     m_renderer->setMenuCallback([this](MenuId menuId) {

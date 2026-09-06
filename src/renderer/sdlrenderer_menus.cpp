@@ -38,42 +38,48 @@ void SDLRenderer::initMenus() {
     Menu playMenu;
     playMenu.label = "播放";
     playMenu.items = {
-        {10, "播放/暂停", "Space", false, true},
-        {11, "停止", "S", false, true},
+        {static_cast<int>(MenuId::PlayPause), "播放/暂停", "Space", false, true},
+        {static_cast<int>(MenuId::Stop), "停止", "S", false, true},
         {0, "", "", true},
-        {12, "上一个", "P", false, true},
-        {13, "下一个", "N", false, true},
+        {static_cast<int>(MenuId::Prev), "上一个", "P", false, true},
+        {static_cast<int>(MenuId::Next), "下一个", "N", false, true},
         {0, "", "", true},
-        {19, "上一集", "Ctrl+Shift+Left", false, true},
-        {22, "下一集", "Ctrl+Shift+Right", false, true},
+        {static_cast<int>(MenuId::PrevEpisode), "上一集", "Ctrl+Shift+Left", false, true},
+        {static_cast<int>(MenuId::NextEpisode), "下一集", "Ctrl+Shift+Right", false, true},
         {0, "", "", true},
-        {18, "播放列表", "Ctrl+L", false, true},
-        {24, "清空播放列表", "", false, true},
+        {static_cast<int>(MenuId::Playlist), "播放列表", "Ctrl+L", false, true},
+        {static_cast<int>(MenuId::PlaylistClear), "清空播放列表", "", false, true},
         {0, "", "", true},
-        {14, "增加速度", "", false, true},
-        {15, "降低速度", "", false, true},
+        {static_cast<int>(MenuId::SpeedUp), "增加速度", "", false, true},
+        {static_cast<int>(MenuId::SpeedDown), "降低速度", "", false, true},
         {0, "", "", true},
-        {58, "AB 循环", "", false, true},
+        {static_cast<int>(MenuId::ABLoop), "AB 循环", "", false, true},
+        {static_cast<int>(MenuId::Loop), "循环模式", "", false, true},
         {0, "", "", true},
-        {89, "音频滤镜", "", false, true},
-        {98, "音频输出", "", false, true},
-        {0, "", "", true},
-        {120, "视频基础参数", "", false, true},
-        {141, "去隔行", "", false, true},
-        {146, "HDR 色调映射", "", false, true},
-        {0, "", "", true},
-        {97, "硬件解码", "", false, true},
-        {0, "", "", true},
-        {59, "循环", "", false, true},
-        {0, "", "", true},
-        {69, "画面比例", "", false, true},
-        {130, "画面变换", "", false, true},
-        {0, "", "", true},
-        {80, "始终置顶", "T", false, true},
-        {0, "", "", true},
-        {16, "全屏", "F", false, true}
+        {static_cast<int>(MenuId::AudioFilter), "音频滤镜", "", false, true},
+        {static_cast<int>(MenuId::AudioOutput), "音频输出", "", false, true}
     };
     m_menus.push_back(playMenu);
+
+    // 画面菜单（独立顶层菜单）
+    Menu videoMenu;
+    videoMenu.label = "画面";
+    videoMenu.items = {
+        {static_cast<int>(MenuId::VideoFilterPanel), "画面调节面板...", "C", false, true},
+        {0, "", "", true},
+        {static_cast<int>(MenuId::Aspect), "画面比例", "", false, true},
+        {static_cast<int>(MenuId::VideoTransform), "画面变换", "", false, true},
+        {static_cast<int>(MenuId::VideoFilter), "画面参数", "", false, true},
+        {static_cast<int>(MenuId::HdrToneMap), "HDR 色调映射", "", false, true},
+        {static_cast<int>(MenuId::Deinterlace), "去隔行", "", false, true},
+        {0, "", "", true},
+        {static_cast<int>(MenuId::HardwareDecoding), "硬件解码", "", false, true},
+        {0, "", "", true},
+        {static_cast<int>(MenuId::Screenshot), "截图", "F12", false, true},
+        {static_cast<int>(MenuId::AlwaysOnTop), "始终置顶", "T", false, true},
+        {static_cast<int>(MenuId::Fullscreen), "全屏", "F", false, true}
+    };
+    m_menus.push_back(videoMenu);
 
     // 音轨菜单（动态填充）
     Menu audioMenu;
@@ -137,31 +143,26 @@ void SDLRenderer::initMenus() {
     m_contextMenu.label = "";
     m_playbackContextMenu.label = "";
     m_playbackContextMenu.items = {
-        {10, "播放/暂停", "Space", false, true},
-        {11, "停止", "S", false, true},
+        {static_cast<int>(MenuId::PlayPause), "播放/暂停", "Space", false, true},
+        {static_cast<int>(MenuId::Stop), "停止", "S", false, true},
         {0, "", "", true},
-        {1, "打开文件...", "Ctrl+O", false, true},
-        {4, "导入字幕...", "", false, true},
+        {static_cast<int>(MenuId::OpenFile), "打开文件...", "Ctrl+O", false, true},
+        {static_cast<int>(MenuId::ImportSubtitle), "导入字幕...", "", false, true},
         {0, "", "", true},
-        {14, "增加速度", "", false, true},
-        {15, "降低速度", "", false, true},
+        {static_cast<int>(MenuId::VideoFilterPanel), "画面调节面板...", "C", false, true},
+        {static_cast<int>(MenuId::Aspect), "画面比例", "", false, true},
+        {static_cast<int>(MenuId::HdrToneMap), "HDR 色调映射", "", false, true},
         {0, "", "", true},
-        {90, "AB循环: 设置A点", "[", false, true},
-        {91, "AB循环: 设置B点", "]", false, true},
-        {92, "AB循环: 清除", "\\", false, true},
+        {static_cast<int>(MenuId::SpeedUp), "增加速度", "", false, true},
+        {static_cast<int>(MenuId::SpeedDown), "降低速度", "", false, true},
+        {static_cast<int>(MenuId::Playlist), "播放列表", "Ctrl+L", false, true},
         {0, "", "", true},
-        {93, "音频滤镜: 关闭", "", false, true},
-        {94, "音频滤镜: 语音增强", "", false, true},
-        {95, "音频滤镜: 低音增强", "", false, true},
-        {96, "音频滤镜: 夜间模式", "", false, true},
+        {static_cast<int>(MenuId::AIAnalyze), "AI 分析当前视频", "", false, true},
+        {static_cast<int>(MenuId::Search), "搜索内容", "Ctrl+F", false, true},
         {0, "", "", true},
-        {97, "硬件解码", "", false, true},
-        {0, "", "", true},
-        {300, "AI 分析当前视频", "", false, true},
-        {302, "搜索内容", "Ctrl+F", false, true},
-        {0, "", "", true},
-        {16, "全屏", "F", false, true},
-        {80, "始终置顶", "T", false, true}
+        {static_cast<int>(MenuId::Screenshot), "截图", "F12", false, true},
+        {static_cast<int>(MenuId::AlwaysOnTop), "始终置顶", "T", false, true},
+        {static_cast<int>(MenuId::Fullscreen), "全屏", "F", false, true}
     };
     m_contextMenu = m_playbackContextMenu;
 }
@@ -199,6 +200,7 @@ void SDLRenderer::closeAllMenus(bool animate) {
     if (!animate) {
         m_activeMenu = -1;
         m_activeSubmenuParent = 0;
+        m_activeSubmenuLevel3Parent = 0;
         m_pendingMenu = -1;
         m_menuAnimAlpha = 0.0f;
         m_menuAnimating = false;
@@ -249,6 +251,7 @@ void SDLRenderer::updateMenuAnimation() {
             m_menuAnimAlpha = 0.0f;
             m_activeMenu = -1;
             m_activeSubmenuParent = 0;
+            m_activeSubmenuLevel3Parent = 0;
         }
     }
 }
@@ -388,14 +391,18 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     const int menuPadY = 5;
 
     // 预先计算所需宽度
+    bool hasSubmenu = false;
     for (const auto& item : menu.items) {
         if (!item.separator && item.enabled) {
-            std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
+            std::string displayLabel = getMenuItemDisplayLabel(item);
             int lw = getTextWidth(displayLabel, labelFontSize);
             if (lw > labelMaxW) labelMaxW = lw;
             if (!item.shortcut.empty()) {
                 int sw = getTextWidth(item.shortcut, shortcutFontSize);
                 if (sw > shortcutMaxW) shortcutMaxW = sw;
+            }
+            if (isSubmenuParent(item.id)) {
+                hasSubmenu = true;
             }
         }
     }
@@ -403,6 +410,12 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     int menuWidth = leftPadding + checkColumnWidth + labelMaxW + rightPadding;
     if (shortcutMaxW > 0) {
         menuWidth += shortcutGap + shortcutMaxW;
+    }
+    if (hasSubmenu) {
+        int arrowExtra = getTextWidth(">", shortcutFontSize) + 20;
+        if (menuWidth < leftPadding + checkColumnWidth + labelMaxW + arrowExtra + rightPadding) {
+            menuWidth = leftPadding + checkColumnWidth + labelMaxW + arrowExtra + rightPadding;
+        }
     }
     // 最小宽度保证
     if (menuWidth < 192) menuWidth = 192;
@@ -414,7 +427,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     int menuHeight = contentHeight + menuPadY * 2;
     int renderY = y - 6 + static_cast<int>(6.0f * std::clamp(alpha, 0.0f, 1.0f));
     uint8_t baseAlpha = scaledAlpha(244, alpha);
-    const int submenuWidth = 180;
+    const int submenuWidth = getSubmenuWidth(m_activeSubmenuParent);
     int activeSubmenuX = x + menuWidth - 4;
     int activeSubmenuY = 0;
     int rowUnderMouseParent = 0;
@@ -438,9 +451,13 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
     }
 
     if (rowUnderMouseParent != 0) {
-        m_activeSubmenuParent = rowUnderMouseParent;
+        if (m_activeSubmenuParent != rowUnderMouseParent) {
+            m_activeSubmenuParent = rowUnderMouseParent;
+            m_activeSubmenuLevel3Parent = 0;
+        }
     } else if (mouseInMainMenu) {
         m_activeSubmenuParent = 0;
+        m_activeSubmenuLevel3Parent = 0;
     }
 
     // 菜单阴影和背景
@@ -497,29 +514,7 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
 
             // 渲染菜单项文字
             if (item.enabled) {
-                std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset);
-                if (item.id == static_cast<int>(MenuId::AudioOutput)) {
-                    std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
-                    displayLabel = item.label + "（" + current + "）";
-                }
-                if (item.id == static_cast<int>(MenuId::Deinterlace)) {
-                    displayLabel = item.label + std::string("（") +
-                                   deinterlaceModeName(m_deinterlaceMode) + "）";
-                }
-                if (item.id == static_cast<int>(MenuId::HdrToneMap)) {
-                    displayLabel = item.label + std::string("（") +
-                                   hdrToneMapModeName(m_hdrToneMapMode) + " - " +
-                                   hdrToneMapAlgorithmName(m_hdrToneMapAlgorithm) + "）";
-                }
-                if (item.id == static_cast<int>(MenuId::VideoTransform)) {
-                    std::string summary = std::to_string(m_videoTransform.rotation) + "°";
-                    if (m_videoTransform.flipHorizontal) summary += " 水平";
-                    if (m_videoTransform.flipVertical) summary += " 垂直";
-                    if (m_videoTransform.cropPercent > 0) {
-                        summary += " 裁" + std::to_string(m_videoTransform.cropPercent) + "%";
-                    }
-                    displayLabel = item.label + "（" + summary + "）";
-                }
+                std::string displayLabel = getMenuItemDisplayLabel(item);
                 int checkX = x + leftPadding;
                 int labelX = checkX + checkColumnWidth;
                 int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
@@ -583,16 +578,56 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
         drawRect(activeSubmenuX + 1, activeSubmenuY + 1, submenuWidth - 2, submenuHeight - 2,
                  255, 255, 255, scaledAlpha(26, alpha));
 
+        int activeSubmenuLevel3Y = 0;
+        int rowUnderMouseLevel3Parent = 0;
+        bool mouseInSubmenu2 = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
+                                m_mouseY >= activeSubmenuY && m_mouseY <= activeSubmenuY + submenuHeight);
+
+        // 预先扫描二级子菜单中鼠标悬停的三级菜单父项
+        int scanSub2Y = activeSubmenuY + menuPadY;
+        for (int i = 0; i < itemCount; ++i) {
+            int entryId = menuSubmenuItemId(m_activeSubmenuParent, i);
+            if (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
+                m_mouseY >= scanSub2Y && m_mouseY <= scanSub2Y + itemHeight) {
+                if (isSubmenuParent(entryId)) {
+                    rowUnderMouseLevel3Parent = entryId;
+                }
+                break;
+            }
+            scanSub2Y += itemHeight;
+        }
+
+        if (rowUnderMouseLevel3Parent != 0) {
+            m_activeSubmenuLevel3Parent = rowUnderMouseLevel3Parent;
+        } else if (mouseInSubmenu2) {
+            m_activeSubmenuLevel3Parent = 0;
+        }
+
         int submenuItemY = activeSubmenuY + menuPadY;
         for (int index = 0; index < itemCount; ++index) {
             int entryId = menuSubmenuItemId(m_activeSubmenuParent, index);
+            bool isSubParent = isSubmenuParent(entryId);
+            if (isSubParent && entryId == m_activeSubmenuLevel3Parent) {
+                activeSubmenuLevel3Y = submenuItemY;
+            }
+
             bool hovered = (m_mouseX >= activeSubmenuX && m_mouseX <= activeSubmenuX + submenuWidth &&
                            m_mouseY >= submenuItemY && m_mouseY <= submenuItemY + itemHeight);
+            if (isSubParent && entryId == m_activeSubmenuLevel3Parent) {
+                hovered = true;
+            }
+
             if (hovered) {
                 fillRoundRect(activeSubmenuX + 5, submenuItemY + 1, submenuWidth - 10, itemHeight - 2, 5,
                               48, 96, 132, scaledAlpha(215, alpha));
                 fillRect(activeSubmenuX + 8, submenuItemY + 6, 2, itemHeight - 12,
                          COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], scaledAlpha(230, alpha));
+            }
+
+            // 调色算法入口前绘制精致分割线
+            if (entryId == static_cast<int>(MenuId::HdrAlgorithmMenu)) {
+                fillRect(activeSubmenuX + 12, submenuItemY - 1,
+                         submenuWidth - 24, 1, 255, 255, 255, scaledAlpha(35, alpha));
             }
 
             bool checked = false;
@@ -616,12 +651,6 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 checked = (m_hdrToneMapMode == HdrToneMapMode::On);
             } else if (entryId == static_cast<int>(MenuId::HdrToneMapOff)) {
                 checked = (m_hdrToneMapMode == HdrToneMapMode::Off);
-            } else if (entryId == static_cast<int>(MenuId::HdrAlgoHable)) {
-                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Hable);
-            } else if (entryId == static_cast<int>(MenuId::HdrAlgoMobius)) {
-                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Mobius);
-            } else if (entryId == static_cast<int>(MenuId::HdrAlgoReinhard)) {
-                checked = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Reinhard);
             } else if (entryId == static_cast<int>(MenuId::Rotate0)) {
                 checked = (m_videoTransform.rotation == 0);
             } else if (entryId == static_cast<int>(MenuId::Rotate90)) {
@@ -657,9 +686,106 @@ void SDLRenderer::renderMenu(const Menu& menu, int x, int y, float alpha) {
                 drawText("\xE2\x9C\x93", checkX, labelY,
                          COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
             }
-            drawText(menuSubmenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
-                     COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
+            bool isFilterSummaryRow = (m_activeSubmenuParent == static_cast<int>(MenuId::VideoFilter) && index == 0);
+            if (isFilterSummaryRow) {
+                drawText(menuSubmenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
+                         COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
+            } else {
+                drawText(menuSubmenuItemLabel(m_activeSubmenuParent, index), labelX, labelY,
+                         COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
+            }
+
+            if (isSubParent) {
+                int arrowX = activeSubmenuX + submenuWidth - 16;
+                drawText(">", arrowX, labelY, 160, 160, 160, 12, scaledAlpha(200, alpha));
+            } else {
+                std::string shortcut = menuSubmenuItemShortcut(m_activeSubmenuParent, index);
+                if (!shortcut.empty()) {
+                    int shortcutW = getTextWidth(shortcut, labelFontSize);
+                    int shortcutX = activeSubmenuX + submenuWidth - 14 - shortcutW;
+                    if (isFilterSummaryRow) {
+                        drawText(shortcut, shortcutX, labelY,
+                                 COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2],
+                                 labelFontSize, scaledAlpha(220, alpha));
+                    } else {
+                        drawText(shortcut, shortcutX, labelY,
+                                 160, 160, 160,
+                                 labelFontSize, scaledAlpha(200, alpha));
+                    }
+                }
+            }
+
+            if (isFilterSummaryRow) {
+                fillRect(activeSubmenuX + 12, submenuItemY + itemHeight - 1,
+                         submenuWidth - 24, 1, 255, 255, 255, scaledAlpha(35, alpha));
+            }
+
             submenuItemY += itemHeight;
+        }
+
+        // 渲染三级子菜单（若激活）
+        if (m_activeSubmenuLevel3Parent != 0 && activeSubmenuLevel3Y > 0) {
+            int sub3Count = menuSubmenuItemCount(m_activeSubmenuLevel3Parent);
+            if (sub3Count > 0) {
+                const int sub3Width = getSubmenuWidth(m_activeSubmenuLevel3Parent);
+                int sub3Height = sub3Count * itemHeight + menuPadY * 2;
+                int activeSubmenu3X = activeSubmenuX + submenuWidth - 4;
+                if (activeSubmenu3X + sub3Width > m_windowWidth) {
+                    activeSubmenu3X = activeSubmenuX - sub3Width + 4;
+                }
+                int activeSubmenu3Y = activeSubmenuLevel3Y;
+                if (activeSubmenu3Y + sub3Height > m_windowHeight) {
+                    activeSubmenu3Y = std::max(0, m_windowHeight - sub3Height - 8);
+                }
+
+                fillRoundRect(activeSubmenu3X + 2, activeSubmenu3Y + 5, sub3Width, sub3Height, 8,
+                              0, 0, 0, scaledAlpha(95, alpha));
+                fillRoundRect(activeSubmenu3X, activeSubmenu3Y, sub3Width, sub3Height, 8,
+                              38, 39, 43, baseAlpha);
+                drawRect(activeSubmenu3X + 1, activeSubmenu3Y + 1, sub3Width - 2, sub3Height - 2,
+                         255, 255, 255, scaledAlpha(26, alpha));
+
+                int sub3ItemY = activeSubmenu3Y + menuPadY;
+                for (int i = 0; i < sub3Count; ++i) {
+                    int entry3Id = menuSubmenuItemId(m_activeSubmenuLevel3Parent, i);
+                    bool hovered3 = (m_mouseX >= activeSubmenu3X && m_mouseX <= activeSubmenu3X + sub3Width &&
+                                     m_mouseY >= sub3ItemY && m_mouseY <= sub3ItemY + itemHeight);
+                    if (hovered3) {
+                        fillRoundRect(activeSubmenu3X + 5, sub3ItemY + 1, sub3Width - 10, itemHeight - 2, 5,
+                                      48, 96, 132, scaledAlpha(215, alpha));
+                        fillRect(activeSubmenu3X + 8, sub3ItemY + 6, 2, itemHeight - 12,
+                                 COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], scaledAlpha(230, alpha));
+                    }
+
+                    bool checked3 = false;
+                    if (entry3Id == static_cast<int>(MenuId::HdrAlgoHable)) {
+                        checked3 = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Hable);
+                    } else if (entry3Id == static_cast<int>(MenuId::HdrAlgoMobius)) {
+                        checked3 = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Mobius);
+                    } else if (entry3Id == static_cast<int>(MenuId::HdrAlgoReinhard)) {
+                        checked3 = (m_hdrToneMapAlgorithm == HdrToneMapAlgorithm::Reinhard);
+                    }
+
+                    int check3X = activeSubmenu3X + leftPadding;
+                    int label3X = check3X + checkColumnWidth;
+                    int label3Y = sub3ItemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
+                    if (checked3) {
+                        drawText("\xE2\x9C\x93", check3X, label3Y,
+                                 COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], labelFontSize, scaledAlpha(255, alpha));
+                    }
+                    drawText(menuSubmenuItemLabel(m_activeSubmenuLevel3Parent, i), label3X, label3Y,
+                             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize, scaledAlpha(255, alpha));
+
+                    std::string shortcut3 = menuSubmenuItemShortcut(m_activeSubmenuLevel3Parent, i);
+                    if (!shortcut3.empty()) {
+                        int shortcutW = getTextWidth(shortcut3, labelFontSize);
+                        int shortcutX = activeSubmenu3X + sub3Width - 14 - shortcutW;
+                        drawText(shortcut3, shortcutX, label3Y, 160, 160, 160, labelFontSize, scaledAlpha(200, alpha));
+                    }
+
+                    sub3ItemY += itemHeight;
+                }
+            }
         }
     }
 }
@@ -691,9 +817,7 @@ void SDLRenderer::hideContextMenu() {
     m_showContextMenu = false;
 }
 
-void SDLRenderer::renderContextMenu() {
-    if (!m_showContextMenu) return;
-
+SDL_Rect SDLRenderer::getContextMenuRect() {
     int itemHeight = 28;
     int leftPadding = 18;
     int rightPadding = 18;
@@ -705,7 +829,11 @@ void SDLRenderer::renderContextMenu() {
 
     for (const auto& item : m_contextMenu.items) {
         if (item.separator) continue;
-        int lw = getTextWidth(item.label, labelFontSize);
+        std::string label = item.label;
+        if (item.id == static_cast<int>(MenuId::VideoFilterPanel)) {
+            label = !m_videoFilterConfig.eqIsIdentity() ? "画面调节面板...（已调节）" : "画面调节面板...";
+        }
+        int lw = getTextWidth(label, labelFontSize);
         if (lw > labelMaxW) labelMaxW = lw;
         if (!item.shortcut.empty()) {
             int sw = getTextWidth(item.shortcut, shortcutFontSize);
@@ -719,9 +847,8 @@ void SDLRenderer::renderContextMenu() {
     }
     if (menuWidth < 160) menuWidth = 160;
 
-    int menuHeight = (int)m_contextMenu.items.size() * itemHeight + 8;
+    int menuHeight = static_cast<int>(m_contextMenu.items.size()) * itemHeight + 8;
 
-    // 确保菜单不超出窗口右边界和下边界
     int renderX = m_contextMenuX;
     int renderY = m_contextMenuY;
     if (renderX + menuWidth > m_windowWidth) {
@@ -732,6 +859,23 @@ void SDLRenderer::renderContextMenu() {
     }
     if (renderX < 0) renderX = 0;
     if (renderY < 0) renderY = 0;
+
+    return SDL_Rect{renderX, renderY, menuWidth, menuHeight};
+}
+
+void SDLRenderer::renderContextMenu() {
+    if (!m_showContextMenu) return;
+
+    SDL_Rect rect = getContextMenuRect();
+    int renderX = rect.x;
+    int renderY = rect.y;
+    int menuWidth = rect.w;
+    int menuHeight = rect.h;
+    int itemHeight = 28;
+    int leftPadding = 18;
+    int rightPadding = 18;
+    int labelFontSize = 14;
+    int shortcutFontSize = 12;
 
     // 菜单背景
     fillRoundRect(renderX, renderY, menuWidth, menuHeight, 8,
@@ -756,7 +900,11 @@ void SDLRenderer::renderContextMenu() {
                 int labelX = renderX + leftPadding;
                 int labelY = itemY + (itemHeight - getFontHeight(labelFontSize)) / 2;
                 int shortcutY = itemY + (itemHeight - getFontHeight(shortcutFontSize)) / 2;
-                drawText(item.label, labelX, labelY,
+                std::string label = item.label;
+                if (item.id == static_cast<int>(MenuId::VideoFilterPanel)) {
+                    label = !m_videoFilterConfig.eqIsIdentity() ? "画面调节面板...（已调节）" : "画面调节面板...";
+                }
+                drawText(label, labelX, labelY,
                         COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], labelFontSize);
 
                 if (!item.shortcut.empty()) {
@@ -773,15 +921,11 @@ void SDLRenderer::renderContextMenu() {
 bool SDLRenderer::handleContextMenuClick(int x, int y) {
     if (!m_showContextMenu) return false;
 
+    SDL_Rect rect = getContextMenuRect();
+    int renderX = rect.x;
+    int renderY = rect.y;
+    int menuWidth = rect.w;
     int itemHeight = 28;
-    int menuWidth = 200; // 估算值，与 renderContextMenu 保持一致
-
-    // 计算实际渲染位置
-    int renderX = m_contextMenuX;
-    int renderY = m_contextMenuY;
-    if (renderX + menuWidth > m_windowWidth) {
-        renderX = m_windowWidth - menuWidth - 5;
-    }
 
     int itemY = renderY + 4;
     for (const auto& item : m_contextMenu.items) {
@@ -794,7 +938,36 @@ bool SDLRenderer::handleContextMenuClick(int x, int y) {
             y >= itemY && y <= itemY + itemHeight && item.enabled) {
             hideContextMenu();
             MenuId id = static_cast<MenuId>(item.id);
-            if (id == MenuId::PlaylistRemove && m_playlistRemoveCallback &&
+            if (id == MenuId::VideoFilterPanel) {
+                toggleVideoControlPanel();
+            } else if (id == MenuId::Aspect) {
+                int next = (static_cast<int>(m_aspectMode) + 1) % 4;
+                setAspectMode(static_cast<AspectMode>(next));
+                std::string modeStr;
+                switch (m_aspectMode) {
+                    case AspectMode::Original: modeStr = "原始比例"; break;
+                    case AspectMode::R16_9: modeStr = "16:9"; break;
+                    case AspectMode::R4_3: modeStr = "4:3"; break;
+                    case AspectMode::FillWindow: modeStr = "铺满窗口"; break;
+                }
+                showOSD(OSDType::Info, "画面比例: " + modeStr);
+            } else if (id == MenuId::HdrToneMap) {
+                if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) {
+                    m_videoFilterConfig.hdrToneMap = HdrToneMapMode::On;
+                } else if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) {
+                    m_videoFilterConfig.hdrToneMap = HdrToneMapMode::Off;
+                } else {
+                    m_videoFilterConfig.hdrToneMap = HdrToneMapMode::Auto;
+                }
+                if (m_videoFilterConfigCallback) {
+                    m_videoFilterConfigCallback(m_videoFilterConfig);
+                }
+                std::string msg = "HDR 色调映射: ";
+                if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) msg += "自动";
+                else if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) msg += "强制开启";
+                else msg += "关闭";
+                showOSD(OSDType::Info, msg);
+            } else if (id == MenuId::PlaylistRemove && m_playlistRemoveCallback &&
                 m_contextPlaylistIndex >= 0) {
                 m_playlistRemoveCallback(static_cast<size_t>(m_contextPlaylistIndex));
             } else if (id == MenuId::PlaylistClear && m_playlistClearCallback) {
@@ -815,11 +988,12 @@ bool SDLRenderer::handleContextMenuClick(int x, int y) {
 }
 
 void SDLRenderer::updateTrackMenus() {
-    // 音轨菜单 index = 2, 字幕菜单 index = 3
-    if (m_menus.size() < 4) return;
+    Menu* audioMenuPtr = findMenu("音轨");
+    Menu* subtitleMenuPtr = findMenu("字幕");
+    if (!audioMenuPtr || !subtitleMenuPtr) return;
 
     // 音轨菜单
-    Menu& audioMenu = m_menus[2];
+    Menu& audioMenu = *audioMenuPtr;
     audioMenu.items.clear();
     if (m_audioTracks.empty()) {
         audioMenu.items.push_back({400, "无可用音轨", "", false, false});
@@ -838,7 +1012,7 @@ void SDLRenderer::updateTrackMenus() {
     }
 
     // 字幕菜单
-    Menu& subtitleMenu = m_menus[3];
+    Menu& subtitleMenu = *subtitleMenuPtr;
     subtitleMenu.items.clear();
     // 第一项：关闭内封字幕
     {

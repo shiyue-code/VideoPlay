@@ -190,6 +190,11 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
                 Settings::instance().setAlwaysOnTop(m_renderer->isAlwaysOnTop());
             }
             break;
+        case MenuId::Screenshot: // 截图
+            if (m_renderer) {
+                m_renderer->takeScreenshot();
+            }
+            break;
         case MenuId::ABLoopSetA: // AB循环: 设置A点
             setLoopPointA();
             break;
@@ -303,11 +308,18 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
             break;
         }
+        case MenuId::VideoFilterPanel: {
+            if (m_renderer) {
+                m_renderer->toggleVideoControlPanel();
+            }
+            break;
+        }
         case MenuId::VideoFilterBrightnessUp:
         case MenuId::VideoFilterBrightnessDown:
         case MenuId::VideoFilterContrastUp:
         case MenuId::VideoFilterContrastDown:
         case MenuId::VideoFilterSaturationUp:
+        case MenuId::VideoFilterSaturationDown:
         case MenuId::VideoFilterReset: {
             if (!m_player) break;
             auto config = m_player->videoFilterConfig();
@@ -318,6 +330,7 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
                 case MenuId::VideoFilterContrastUp: config.contrast = std::clamp(config.contrast + 0.1f, 0.0f, 2.0f); break;
                 case MenuId::VideoFilterContrastDown: config.contrast = std::clamp(config.contrast - 0.1f, 0.0f, 2.0f); break;
                 case MenuId::VideoFilterSaturationUp: config.saturation = std::clamp(config.saturation + 0.1f, 0.0f, 3.0f); break;
+                case MenuId::VideoFilterSaturationDown: config.saturation = std::clamp(config.saturation - 0.1f, 0.0f, 3.0f); break;
                 case MenuId::VideoFilterReset: {
                     auto deint = config.deinterlace;
                     auto hdrMode = config.hdrToneMap;
@@ -334,13 +347,18 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             Settings::instance().save();
             m_player->setVideoFilterConfig(config);
             if (m_renderer) {
+                m_renderer->setVideoFilterConfig(config);
                 if (config.eqIsIdentity()) {
                     m_renderer->showOSD(OSDType::Info, "视频基础参数 已重置");
                 } else {
+                    int bPct = static_cast<int>(std::round(config.brightness * 100.0f));
+                    int cPct = static_cast<int>(std::round(config.contrast * 100.0f));
+                    int sPct = static_cast<int>(std::round(config.saturation * 100.0f));
+                    std::string bSign = bPct > 0 ? "+" : "";
                     m_renderer->showOSD(OSDType::Info,
-                        "亮度 " + std::to_string(config.brightness).substr(0, 5) +
-                        " 对比 " + std::to_string(config.contrast).substr(0, 4) +
-                        " 饱和 " + std::to_string(config.saturation).substr(0, 4));
+                        "亮度 " + bSign + std::to_string(bPct) + "%" +
+                        " 对比 " + std::to_string(cPct) + "%" +
+                        " 饱和 " + std::to_string(sPct) + "%");
                 }
             }
             break;

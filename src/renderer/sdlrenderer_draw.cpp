@@ -1,4 +1,4 @@
-﻿#include "renderer/sdlrenderer.h"
+#include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
@@ -518,13 +518,25 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
         //  静音斜杠在喇叭开口右�?
         drawSoftRoundRect(cx + 68, cy - 52, 12, 104, 4);
     } else if (type == "playlist") {
-        //  汉堡菜单图标：三条横�?
+        //  汉堡菜单图标：三条横线
         int lineW = 128;
         int lineH = 20;
         int gap = 28;
         drawSoftRoundRect(cx - lineW/2, cy - gap - lineH/2, lineW, lineH, lineH/2);
         drawSoftRoundRect(cx - lineW/2, cy - lineH/2, lineW, lineH, lineH/2);
         drawSoftRoundRect(cx - lineW/2, cy + gap - lineH/2, lineW, lineH, lineH/2);
+    } else if (type == "video_control") {
+        // 调色盘 / 滑块调节图标（两条横轨，各带一个滑块滑钮）
+        int lineW = 120;
+        int lineH = 16;
+        int barY1 = cy - 28;
+        int barY2 = cy + 28;
+        drawSoftRoundRect(cx - lineW/2, barY1 - lineH/2, lineW, lineH, lineH/2);
+        drawSoftRoundRect(cx - lineW/2, barY2 - lineH/2, lineW, lineH, lineH/2);
+        fillCircle(cx - 24, barY1, 24, 255, 255, 255, 100);
+        fillCircle(cx - 24, barY1, 18, 255, 255, 255, 255);
+        fillCircle(cx + 24, barY2, 24, 255, 255, 255, 100);
+        fillCircle(cx + 24, barY2, 18, 255, 255, 255, 255);
     } else {
         fillCircle(cx, cy, 72, 255, 255, 255, 100);
         fillCircle(cx, cy, 64, 255, 255, 255, 255);
@@ -555,7 +567,7 @@ SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
 
 void SDLRenderer::loadIconTextures() {
     const std::vector<std::string> iconNames = {
-        "play", "pause", "stop", "prev", "next", "volume", "mute", "playlist"
+        "play", "pause", "stop", "prev", "next", "volume", "mute", "playlist", "video_control"
     };
     for (const auto& name : iconNames) {
         getIconTexture(name);

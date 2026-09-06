@@ -743,7 +743,106 @@ std::string SDLRenderer::menuSubmenuItemLabel(int parentId, int index) const {
         }
         return {};
     }
+    if (parentId == static_cast<int>(MenuId::VideoFilter)) {
+        int bPct = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
+        int cPct = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
+        int sPct = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
+        std::string bSign = bPct > 0 ? "+" : "";
+        switch (index) {
+            case 0: return "亮 " + bSign + std::to_string(bPct) + "% · 对 " + std::to_string(cPct) + "% · 饱 " + std::to_string(sPct) + "%";
+            case 1: return "亮度 +5%";
+            case 2: return "亮度 -5%";
+            case 3: return "对比度 +10%";
+            case 4: return "对比度 -10%";
+            case 5: return "饱和度 +10%";
+            case 6: return "饱和度 -10%";
+            case 7: return "重置默认参数";
+            default: break;
+        }
+    }
+    if (parentId == static_cast<int>(MenuId::HdrToneMap) && index == 3) {
+        return std::string("调色算法（") + hdrToneMapAlgorithmName(m_hdrToneMapAlgorithm) + "）";
+    }
     return submenuItemLabel(parentId, index);
+}
+
+std::string SDLRenderer::menuSubmenuItemShortcut(int parentId, int index) const {
+    if (parentId == static_cast<int>(MenuId::VideoFilter)) {
+        switch (index) {
+            case 0: return ""; // 状态仪表行不显示快捷键，避免右侧重叠
+            case 1: return "Ctrl+Up";
+            case 2: return "Ctrl+Down";
+            case 3: return "Ctrl+Shift+Up";
+            case 4: return "Ctrl+Shift+Down";
+            case 7: return "Ctrl+0";
+            default: return "";
+        }
+    }
+    return "";
+}
+
+int SDLRenderer::getSubmenuWidth(int parentId) {
+    if (parentId == 0) return 180;
+    int count = menuSubmenuItemCount(parentId);
+    int labelMaxW = 0;
+    int shortcutMaxW = 0;
+    bool hasSubmenuChild = false;
+    constexpr int labelFontSize = 14;
+    constexpr int shortcutFontSize = 12;
+    for (int i = 0; i < count; i++) {
+        std::string label = menuSubmenuItemLabel(parentId, i);
+        int lw = getTextWidth(label, labelFontSize);
+        if (lw > labelMaxW) labelMaxW = lw;
+
+        std::string shortcut = menuSubmenuItemShortcut(parentId, i);
+        if (!shortcut.empty()) {
+            int sw = getTextWidth(shortcut, shortcutFontSize);
+            if (sw > shortcutMaxW) shortcutMaxW = sw;
+        }
+        int entryId = menuSubmenuItemId(parentId, i);
+        if (isSubmenuParent(entryId)) {
+            hasSubmenuChild = true;
+        }
+    }
+    constexpr int leftPadding = 18;
+    constexpr int checkColumnWidth = 16;
+    constexpr int rightPadding = 18;
+    constexpr int shortcutGap = 24;
+    int width = leftPadding + checkColumnWidth + labelMaxW + rightPadding;
+    if (shortcutMaxW > 0) {
+        width += shortcutGap + shortcutMaxW;
+    }
+    if (hasSubmenuChild) {
+        width += 24; // 为右侧级联箭头 '>' 预留空间
+    }
+    return std::max(width, 180);
+}
+
+std::string SDLRenderer::getMenuItemDisplayLabel(const MenuItem& item) const {
+    std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset, m_videoFilterConfig);
+    if (item.id == static_cast<int>(MenuId::AudioOutput)) {
+        std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
+        displayLabel = item.label + "（" + current + "）";
+    } else if (item.id == static_cast<int>(MenuId::Deinterlace)) {
+        displayLabel = item.label + std::string("（") + deinterlaceModeName(m_deinterlaceMode) + "）";
+    } else if (item.id == static_cast<int>(MenuId::HdrToneMap)) {
+        if (m_hdrToneMapMode == HdrToneMapMode::Off) {
+            displayLabel = item.label + "（关闭）";
+        } else if (m_hdrToneMapMode == HdrToneMapMode::On) {
+            displayLabel = item.label + "（开启）";
+        } else {
+            displayLabel = item.label + "（自动）";
+        }
+    } else if (item.id == static_cast<int>(MenuId::VideoTransform)) {
+        std::string summary = std::to_string(m_videoTransform.rotation) + "°";
+        if (m_videoTransform.flipHorizontal) summary += " 水平";
+        if (m_videoTransform.flipVertical) summary += " 垂直";
+        if (m_videoTransform.cropPercent > 0) {
+            summary += " 裁" + std::to_string(m_videoTransform.cropPercent) + "%";
+        }
+        displayLabel = item.label + "（" + summary + "）";
+    }
+    return displayLabel;
 }
 
 void SDLRenderer::applySmallWindowPanelGuard() {
@@ -912,13 +1011,13 @@ void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {
 }
 
 void SDLRenderer::updateChapterMenuItems() {
-    if (m_menus.size() < 5) return; // Chapter menu is index 4 (after 文件/播放/音轨/字幕)
-    Menu& chapterMenu = m_menus[4];
+    Menu* chapterMenu = findMenu("章节");
+    if (!chapterMenu) return;
     
-    chapterMenu.items.clear();
+    chapterMenu->items.clear();
     
     if (m_chapters.empty()) {
-        chapterMenu.items.push_back({200, "无可用章节", "", false, false});
+        chapterMenu->items.push_back({200, "无可用章节", "", false, false});
     } else {
         for (size_t i = 0; i < m_chapters.size() && i < 50; ++i) {
             std::string label = m_chapters[i].title;
@@ -928,7 +1027,7 @@ void SDLRenderer::updateChapterMenuItems() {
             if (label.length() > 30) {
                 label = label.substr(0, 27) + "...";
             }
-            chapterMenu.items.push_back({static_cast<int>(200 + i), label, "", false, true});
+            chapterMenu->items.push_back({static_cast<int>(200 + i), label, "", false, true});
         }
     }
 }
@@ -1080,6 +1179,80 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
     m_uiManager->renderUI(position, duration, volume, isMuted, isPlaying, speed,
                           filename, subtitle, playlist, currentPlaylistIndex,
                           audioPts, videoPts, avDiff, isPreloading);
+}
+
+Menu* SDLRenderer::findMenu(const std::string& label) {
+    for (auto& menu : m_menus) {
+        if (menu.label == label) return &menu;
+    }
+    return nullptr;
+}
+
+void SDLRenderer::setVideoFilterConfig(const VideoFilterConfig& config) {
+    m_videoFilterConfig = config;
+    m_deinterlaceMode = config.deinterlace;
+    m_hdrToneMapMode = config.hdrToneMap;
+    m_hdrToneMapAlgorithm = config.hdrAlgorithm;
+}
+
+void SDLRenderer::setVideoFilterConfigCallback(VideoFilterConfigCallback callback) {
+    m_videoFilterConfigCallback = callback;
+}
+
+void SDLRenderer::toggleVideoControlPanel() {
+    m_showVideoControlPanel = !m_showVideoControlPanel;
+    if (m_showVideoControlPanel) {
+        m_showControls = true;
+        m_lastMouseMove = SDL_GetTicks();
+    }
+}
+
+void SDLRenderer::adjustBrightness(float delta) {
+    m_videoFilterConfig.brightness = std::clamp(m_videoFilterConfig.brightness + delta, -1.0f, 1.0f);
+    m_videoFilterConfig.enabled = true;
+    if (m_videoFilterConfigCallback) {
+        m_videoFilterConfigCallback(m_videoFilterConfig);
+    }
+    int percent = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
+    std::string sign = percent > 0 ? "+" : "";
+    float progress = (m_videoFilterConfig.brightness + 1.0f) / 2.0f;
+    showOSD(OSDType::Info, "亮度: " + sign + std::to_string(percent) + "%", progress);
+}
+
+void SDLRenderer::adjustContrast(float delta) {
+    m_videoFilterConfig.contrast = std::clamp(m_videoFilterConfig.contrast + delta, 0.0f, 2.0f);
+    m_videoFilterConfig.enabled = true;
+    if (m_videoFilterConfigCallback) {
+        m_videoFilterConfigCallback(m_videoFilterConfig);
+    }
+    int percent = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
+    float progress = m_videoFilterConfig.contrast / 2.0f;
+    showOSD(OSDType::Info, "对比度: " + std::to_string(percent) + "%", progress);
+}
+
+void SDLRenderer::adjustSaturation(float delta) {
+    m_videoFilterConfig.saturation = std::clamp(m_videoFilterConfig.saturation + delta, 0.0f, 3.0f);
+    m_videoFilterConfig.enabled = true;
+    if (m_videoFilterConfigCallback) {
+        m_videoFilterConfigCallback(m_videoFilterConfig);
+    }
+    int percent = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
+    float progress = m_videoFilterConfig.saturation / 3.0f;
+    showOSD(OSDType::Info, "饱和度: " + std::to_string(percent) + "%", progress);
+}
+
+void SDLRenderer::resetVideoFilter() {
+    auto deint = m_videoFilterConfig.deinterlace;
+    auto hdrMode = m_videoFilterConfig.hdrToneMap;
+    auto hdrAlgo = m_videoFilterConfig.hdrAlgorithm;
+    m_videoFilterConfig = VideoFilterConfig{};
+    m_videoFilterConfig.deinterlace = deint;
+    m_videoFilterConfig.hdrToneMap = hdrMode;
+    m_videoFilterConfig.hdrAlgorithm = hdrAlgo;
+    if (m_videoFilterConfigCallback) {
+        m_videoFilterConfigCallback(m_videoFilterConfig);
+    }
+    showOSD(OSDType::Info, "画面参数已重置");
 }
 
 } // namespace VideoPlay

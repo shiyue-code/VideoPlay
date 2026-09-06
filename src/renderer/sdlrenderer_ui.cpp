@@ -212,6 +212,10 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
         renderMediaInfoPanel();
     }
 
+    if (m_showVideoControlPanel) {
+        renderVideoControlPanel();
+    }
+
     renderOSD();
 
     // 预缓冲加载动画已集成到进度条�?    
@@ -289,6 +293,16 @@ void SDLRenderer::renderControls(int64_t position, int64_t duration, int volume,
     
     // 时间显示
     renderTimeDisplay(position, duration, controlY);
+
+    // 画面调节按钮
+    {
+        int btnX = m_windowWidth - 44 - m_volumeWidth - 40 - 42 - 38;
+        int btnY = controlY + 32;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelToggle) || m_showVideoControlPanel;
+        bool pressed = (m_pressedControl == ControlType::VideoPanelToggle);
+        drawButton(btnX, btnY, m_buttonSize, m_buttonSize, "video_control", hovered, pressed);
+        m_controlRects.push_back({btnX, btnY, m_buttonSize, m_buttonSize, ControlType::VideoPanelToggle, 0});
+    }
 
     // 播放列表切换按钮
     {
@@ -1868,6 +1882,164 @@ void SDLRenderer::renderSearchPanel() {
 
     m_controlRects.push_back({inputX, inputY, inputW, inputH, ControlType::SearchInput, 0});
     // 面板背景命中检测
+    m_controlRects.push_back({panelX, panelY, panelW, panelH, ControlType::PanelBackground, 0});
+}
+
+void SDLRenderer::renderVideoControlPanel() {
+    int panelW = 340;
+    int panelH = 240;
+    int panelX = m_windowWidth - 24 - panelW;
+    int panelY = m_windowHeight - m_controlHeight - 24 - 12 - panelH;
+    if (panelY < m_menuBarHeight + 10) {
+        panelY = m_menuBarHeight + 10;
+    }
+    int radius = 16;
+
+    // 阴影
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 90);
+    // 高光边框
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 50);
+    // 半透明深色背景
+    fillRoundRect(panelX, panelY, panelW, panelH, radius,
+                  COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+
+    // 标题
+    drawText("画面调节", panelX + 18, panelY + 16, 255, 255, 255, 13);
+
+    // 关闭按钮 '×'
+    int closeSize = 22;
+    int closeX = panelX + panelW - closeSize - 14;
+    int closeY = panelY + 14;
+    bool closeHovered = (m_hoveredControl == ControlType::VideoPanelClose);
+    bool closePressed = (m_pressedControl == ControlType::VideoPanelClose);
+    if (closePressed) {
+        fillRoundRect(closeX, closeY, closeSize, closeSize, 4, 80, 85, 95, 220);
+    } else if (closeHovered) {
+        fillRoundRect(closeX, closeY, closeSize, closeSize, 4, 70, 75, 85, 180);
+    }
+    SDL_SetRenderDrawColor(m_renderer, 220, 220, 220, closeHovered ? 255 : 180);
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(closeX + 6), static_cast<float>(closeY + 6),
+                   static_cast<float>(closeX + closeSize - 6), static_cast<float>(closeY + closeSize - 6));
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(closeX + closeSize - 6), static_cast<float>(closeY + 6),
+                   static_cast<float>(closeX + 6), static_cast<float>(closeY + closeSize - 6));
+    m_controlRects.push_back({closeX, closeY, closeSize, closeSize, ControlType::VideoPanelClose, 0});
+
+    // 滑块参数
+    int startY = panelY + 48;
+    int rowSpacing = 38;
+    int barW = 180;
+    int barH = 6;
+    int barX = panelX + 76;
+
+    // 1. 亮度滑块 (-1.0 ~ 1.0, 默认 0.0)
+    {
+        int rowY = startY;
+        drawText("亮度", panelX + 18, rowY, 210, 210, 215, 12);
+        int barY = rowY + 5;
+        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
+        float bRatio = std::clamp((m_videoFilterConfig.brightness + 1.0f) / 2.0f, 0.0f, 1.0f);
+        int fillW = static_cast<int>(barW * bRatio);
+        if (fillW > 0) {
+            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
+        }
+        int thumbX = barX + fillW;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelBrightnessBar) || m_draggingBrightness;
+        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
+        if (hovered) {
+            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
+        }
+        int bPct = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
+        std::string bStr = (bPct > 0 ? "+" : "") + std::to_string(bPct) + "%";
+        drawText(bStr, panelX + 268, rowY, 200, 200, 210, 12);
+
+        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelBrightnessBar, 0});
+    }
+
+    // 2. 对比度滑块 (0.0 ~ 2.0, 默认 1.0)
+    {
+        int rowY = startY + rowSpacing;
+        drawText("对比度", panelX + 18, rowY, 210, 210, 215, 12);
+        int barY = rowY + 5;
+        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
+        float cRatio = std::clamp(m_videoFilterConfig.contrast / 2.0f, 0.0f, 1.0f);
+        int fillW = static_cast<int>(barW * cRatio);
+        if (fillW > 0) {
+            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
+        }
+        int thumbX = barX + fillW;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelContrastBar) || m_draggingContrast;
+        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
+        if (hovered) {
+            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
+        }
+        int cPct = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
+        std::string cStr = std::to_string(cPct) + "%";
+        drawText(cStr, panelX + 268, rowY, 200, 200, 210, 12);
+
+        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelContrastBar, 0});
+    }
+
+    // 3. 饱和度滑块 (0.0 ~ 3.0, 默认 1.0)
+    {
+        int rowY = startY + rowSpacing * 2;
+        drawText("饱和度", panelX + 18, rowY, 210, 210, 215, 12);
+        int barY = rowY + 5;
+        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
+        float sRatio = std::clamp(m_videoFilterConfig.saturation / 3.0f, 0.0f, 1.0f);
+        int fillW = static_cast<int>(barW * sRatio);
+        if (fillW > 0) {
+            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
+        }
+        int thumbX = barX + fillW;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelSaturationBar) || m_draggingSaturation;
+        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
+        if (hovered) {
+            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
+        }
+        int sPct = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
+        std::string sStr = std::to_string(sPct) + "%";
+        drawText(sStr, panelX + 268, rowY, 200, 200, 210, 12);
+
+        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelSaturationBar, 0});
+    }
+
+    // 底部操作栏
+    int btnY = panelY + panelH - 42;
+    int btnH = 26;
+
+    // 重置按钮
+    {
+        int btnW = 86;
+        int btnX = panelX + 18;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelReset);
+        bool pressed = (m_pressedControl == ControlType::VideoPanelReset);
+        uint8_t bgAlpha = pressed ? 220 : (hovered ? 180 : 120);
+        fillRoundRect(btnX, btnY, btnW, btnH, 4, 60, 64, 75, bgAlpha);
+        drawText("重置默认", btnX + 16, btnY + 5, 220, 220, 220, 11);
+        m_controlRects.push_back({btnX, btnY, btnW, btnH, ControlType::VideoPanelReset, 0});
+    }
+
+    // HDR 映射切换按钮
+    {
+        int btnW = 120;
+        int btnX = panelX + 114;
+        bool hovered = (m_hoveredControl == ControlType::VideoPanelHdrToggle);
+        bool pressed = (m_pressedControl == ControlType::VideoPanelHdrToggle);
+        uint8_t bgAlpha = pressed ? 220 : (hovered ? 180 : 120);
+        fillRoundRect(btnX, btnY, btnW, btnH, 4, 60, 64, 75, bgAlpha);
+        std::string hdrText = "HDR: ";
+        switch (m_videoFilterConfig.hdrToneMap) {
+            case HdrToneMapMode::Off: hdrText += "关闭"; break;
+            case HdrToneMapMode::Auto: hdrText += "自动"; break;
+            case HdrToneMapMode::On: hdrText += "强制开启"; break;
+        }
+        drawText(hdrText, btnX + 12, btnY + 5, 220, 220, 220, 11);
+        m_controlRects.push_back({btnX, btnY, btnW, btnH, ControlType::VideoPanelHdrToggle, 0});
+    }
+
+    // 面板背景命中检测（防止穿透）
     m_controlRects.push_back({panelX, panelY, panelW, panelH, ControlType::PanelBackground, 0});
 }
 
