@@ -46,3 +46,11 @@ add_executable(test_playbackcontroller
 target_include_directories(test_playbackcontroller PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
 target_link_libraries(test_playbackcontroller PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_playbackcontroller)
+
+add_executable(test_menuitem
+    test_menuitem_gtest.cpp
+)
+target_include_directories(test_menuitem PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_menuitem PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_menuitem)
+

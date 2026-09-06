@@ -174,6 +174,7 @@ set(HEADERS
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/menu_manager.h
+    src/renderer/menu_item.h
     src/renderer/ui_manager.h
     src/renderer/dialog_manager.h
     src/renderer/windowframe.h

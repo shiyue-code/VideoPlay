@@ -543,53 +543,7 @@ void SDLRenderer::updateRecentFilesMenu() {
     m_menuManager->updateRecentFilesMenu();
 }
 
-void SDLRenderer::updateRecentFilesMenuImpl() {
-    if (m_menus.empty()) return;
-    Menu& fileMenu = m_menus[0];
 
-    // 保留固定项（ID < 100），过滤掉空的分隔线
-    std::vector<MenuItem> fixedItems;
-    for (const auto& item : fileMenu.items) {
-        if (item.id < 100) {
-            fixedItems.push_back(item);
-        }
-    }
-
-    auto recent = Settings::instance().recentFiles();
-    if (!recent.empty()) {
-        // 在退出前添加分隔线和最近文件
-        fixedItems.insert(fixedItems.end() - 1, {0, "", "", true}); // 分隔线
-        for (size_t i = 0; i < recent.size() && i < 10; ++i) {
-            std::string label = std::filesystem::u8path(recent[i]).filename().u8string();
-            if (label.length() > 40) {
-                label = label.substr(0, 37) + "...";
-            }
-            fixedItems.insert(fixedItems.end() - 1,
-                {static_cast<int>(100 + i), label, "", false, true});
-        }
-    }
-
-    // 清理连续的空分隔线
-    std::vector<MenuItem> cleanedItems;
-    bool lastWasSeparator = false;
-    for (const auto& item : fixedItems) {
-        if (item.separator) {
-            if (!lastWasSeparator) {
-                cleanedItems.push_back(item);
-                lastWasSeparator = true;
-            }
-        } else {
-            cleanedItems.push_back(item);
-            lastWasSeparator = false;
-        }
-    }
-    // 移除末尾的分隔线
-    while (!cleanedItems.empty() && cleanedItems.back().separator) {
-        cleanedItems.pop_back();
-    }
-
-    fileMenu.items = std::move(cleanedItems);
-}
 
 void SDLRenderer::takeScreenshot() {
     if (!m_renderer || !m_window) return;
@@ -722,128 +676,7 @@ void SDLRenderer::setAudioOutputDeviceName(const std::string& name) {
     m_audioOutputDeviceName = name;
 }
 
-int SDLRenderer::menuSubmenuItemCount(int parentId) const {
-    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
-        return static_cast<int>(m_audioOutputDevices.size());
-    }
-    return submenuItemCount(parentId);
-}
 
-int SDLRenderer::menuSubmenuItemId(int parentId, int index) const {
-    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
-        return static_cast<int>(MenuId::AudioDeviceBase) + index;
-    }
-    return submenuItemId(parentId, index);
-}
-
-std::string SDLRenderer::menuSubmenuItemLabel(int parentId, int index) const {
-    if (parentId == static_cast<int>(MenuId::AudioOutput)) {
-        if (index >= 0 && index < static_cast<int>(m_audioOutputDevices.size())) {
-            return m_audioOutputDevices[static_cast<size_t>(index)].name;
-        }
-        return {};
-    }
-    if (parentId == static_cast<int>(MenuId::VideoFilter)) {
-        int bPct = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
-        int cPct = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
-        int sPct = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
-        std::string bSign = bPct > 0 ? "+" : "";
-        switch (index) {
-            case 0: return "亮 " + bSign + std::to_string(bPct) + "% · 对 " + std::to_string(cPct) + "% · 饱 " + std::to_string(sPct) + "%";
-            case 1: return "亮度 +5%";
-            case 2: return "亮度 -5%";
-            case 3: return "对比度 +10%";
-            case 4: return "对比度 -10%";
-            case 5: return "饱和度 +10%";
-            case 6: return "饱和度 -10%";
-            case 7: return "重置默认参数";
-            default: break;
-        }
-    }
-    if (parentId == static_cast<int>(MenuId::HdrToneMap) && index == 3) {
-        return std::string("调色算法（") + hdrToneMapAlgorithmName(m_hdrToneMapAlgorithm) + "）";
-    }
-    return submenuItemLabel(parentId, index);
-}
-
-std::string SDLRenderer::menuSubmenuItemShortcut(int parentId, int index) const {
-    if (parentId == static_cast<int>(MenuId::VideoFilter)) {
-        switch (index) {
-            case 0: return ""; // 状态仪表行不显示快捷键，避免右侧重叠
-            case 1: return "Ctrl+Up";
-            case 2: return "Ctrl+Down";
-            case 3: return "Ctrl+Shift+Up";
-            case 4: return "Ctrl+Shift+Down";
-            case 7: return "Ctrl+0";
-            default: return "";
-        }
-    }
-    return "";
-}
-
-int SDLRenderer::getSubmenuWidth(int parentId) {
-    if (parentId == 0) return 180;
-    int count = menuSubmenuItemCount(parentId);
-    int labelMaxW = 0;
-    int shortcutMaxW = 0;
-    bool hasSubmenuChild = false;
-    constexpr int labelFontSize = 14;
-    constexpr int shortcutFontSize = 12;
-    for (int i = 0; i < count; i++) {
-        std::string label = menuSubmenuItemLabel(parentId, i);
-        int lw = getTextWidth(label, labelFontSize);
-        if (lw > labelMaxW) labelMaxW = lw;
-
-        std::string shortcut = menuSubmenuItemShortcut(parentId, i);
-        if (!shortcut.empty()) {
-            int sw = getTextWidth(shortcut, shortcutFontSize);
-            if (sw > shortcutMaxW) shortcutMaxW = sw;
-        }
-        int entryId = menuSubmenuItemId(parentId, i);
-        if (isSubmenuParent(entryId)) {
-            hasSubmenuChild = true;
-        }
-    }
-    constexpr int leftPadding = 18;
-    constexpr int checkColumnWidth = 16;
-    constexpr int rightPadding = 18;
-    constexpr int shortcutGap = 24;
-    int width = leftPadding + checkColumnWidth + labelMaxW + rightPadding;
-    if (shortcutMaxW > 0) {
-        width += shortcutGap + shortcutMaxW;
-    }
-    if (hasSubmenuChild) {
-        width += 24; // 为右侧级联箭头 '>' 预留空间
-    }
-    return std::max(width, 180);
-}
-
-std::string SDLRenderer::getMenuItemDisplayLabel(const MenuItem& item) const {
-    std::string displayLabel = submenuParentLabel(item, m_loopMode, m_aspectMode, m_audioFilterPreset, m_videoFilterConfig);
-    if (item.id == static_cast<int>(MenuId::AudioOutput)) {
-        std::string current = m_audioOutputDeviceName.empty() ? "系统默认" : m_audioOutputDeviceName;
-        displayLabel = item.label + "（" + current + "）";
-    } else if (item.id == static_cast<int>(MenuId::Deinterlace)) {
-        displayLabel = item.label + std::string("（") + deinterlaceModeName(m_deinterlaceMode) + "）";
-    } else if (item.id == static_cast<int>(MenuId::HdrToneMap)) {
-        if (m_hdrToneMapMode == HdrToneMapMode::Off) {
-            displayLabel = item.label + "（关闭）";
-        } else if (m_hdrToneMapMode == HdrToneMapMode::On) {
-            displayLabel = item.label + "（开启）";
-        } else {
-            displayLabel = item.label + "（自动）";
-        }
-    } else if (item.id == static_cast<int>(MenuId::VideoTransform)) {
-        std::string summary = std::to_string(m_videoTransform.rotation) + "°";
-        if (m_videoTransform.flipHorizontal) summary += " 水平";
-        if (m_videoTransform.flipVertical) summary += " 垂直";
-        if (m_videoTransform.cropPercent > 0) {
-            summary += " 裁" + std::to_string(m_videoTransform.cropPercent) + "%";
-        }
-        displayLabel = item.label + "（" + summary + "）";
-    }
-    return displayLabel;
-}
 
 void SDLRenderer::applySmallWindowPanelGuard() {
     constexpr int kDualPanelMinWidth = 860;
@@ -1011,24 +844,8 @@ void SDLRenderer::setSearchHighlights(const std::vector<int64_t>& timestamps) {
 }
 
 void SDLRenderer::updateChapterMenuItems() {
-    Menu* chapterMenu = findMenu("章节");
-    if (!chapterMenu) return;
-    
-    chapterMenu->items.clear();
-    
-    if (m_chapters.empty()) {
-        chapterMenu->items.push_back({200, "无可用章节", "", false, false});
-    } else {
-        for (size_t i = 0; i < m_chapters.size() && i < 50; ++i) {
-            std::string label = m_chapters[i].title;
-            if (label.empty()) {
-                label = "Chapter " + std::to_string(i + 1);
-            }
-            if (label.length() > 30) {
-                label = label.substr(0, 27) + "...";
-            }
-            chapterMenu->items.push_back({static_cast<int>(200 + i), label, "", false, true});
-        }
+    if (m_menuManager) {
+        m_menuManager->updateChapterMenuItems();
     }
 }
 
@@ -1181,12 +998,7 @@ void SDLRenderer::renderUI(int64_t position, int64_t duration, int volume, bool 
                           audioPts, videoPts, avDiff, isPreloading);
 }
 
-Menu* SDLRenderer::findMenu(const std::string& label) {
-    for (auto& menu : m_menus) {
-        if (menu.label == label) return &menu;
-    }
-    return nullptr;
-}
+
 
 void SDLRenderer::setVideoFilterConfig(const VideoFilterConfig& config) {
     m_videoFilterConfig = config;

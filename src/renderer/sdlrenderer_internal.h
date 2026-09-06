@@ -29,4 +29,9 @@ inline constexpr int SPEED_COUNT = sizeof(SPEED_OPTIONS) / sizeof(SPEED_OPTIONS[
 // 子菜单统一宽度
 inline constexpr int kSubmenuWidth = 220;
 
+// 顶部菜单栏布局常量
+inline constexpr int kTopMenuX = 10;
+inline constexpr int kTopMenuPaddingX = 14;
+inline constexpr int kTopMenuGap = 6;
+
 } // namespace VideoPlay

@@ -161,8 +161,9 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
         }
     }
 
-    // 自动隐藏控制栏（仅在播放状态下，3秒无鼠标操作）
+    // 自动隐藏控制栏（仅在播放状态下，3秒无鼠标操作，且菜单未打开）
     if (m_showControls && isPlaying && !m_showSearchPanel &&
+        (!m_menuManager || !m_menuManager->isMenuOpen()) &&
         SDL_GetTicks() - m_lastMouseMove > 3000) {
         m_showControls = false;
     }
@@ -218,32 +219,17 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
 
     renderOSD();
 
-    // 预缓冲加载动画已集成到进度条�?    
-    //  渲染打开的菜�?
     m_menuManager->updateMenuAnimation();
-    if ((m_activeMenu >= 0 && m_activeMenu < (int)m_menus.size()) || m_menuAnimating) {
-        if (m_menuAnimAlpha > 0.01f) {
-            constexpr int kTopMenuX = 10;
-            constexpr int kTopMenuPaddingX = 16;
-            constexpr int kTopMenuGap = 8;
-            int menuX = kTopMenuX;
-            for (int i = 0; i < m_activeMenu; i++) {
-                if (!isTopMenuVisible(static_cast<size_t>(i))) continue;
-                int textW = getTextWidth(m_menus[i].label);
-                menuX += textW + kTopMenuPaddingX * 2 + kTopMenuGap;
-            }
-            renderMenu(m_menus[m_activeMenu], menuX, m_menuBarHeight, m_menuAnimAlpha);
-        }
-    }
 
     // 进度条缩略图（在 tooltip 之上）
     renderProgressPreview();
 
+    // 渲染级联下拉菜单与右键上下文菜单（最高层级，防止被任何侧栏面板或 OSD 遮挡）
+    m_menuManager->renderCascadeMenus();
+    m_menuManager->renderContextMenu();
+
     // 渲染 Tooltip
     renderTooltip();
-
-    // 渲染右键上下文菜单
-    m_menuManager->renderContextMenu();
 
     // 自绘 1px 边框，确�?Win10 �?Win11 显示效果完全一�?    // （Win11 �?DWMWA_BORDER_COLOR 是独占特性，Win10 不支持，因此统一�?SDL 自绘�?    // 圆角窗口下不绘制四边直边框，�?DWM 圆角自然呈现
     if (m_borderless && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {

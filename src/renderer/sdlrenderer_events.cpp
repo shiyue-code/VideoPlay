@@ -13,10 +13,6 @@ Logger& logger() {
     return *logger;
 }
 
-constexpr int kTopMenuX = 10;
-constexpr int kTopMenuPaddingX = 16;
-constexpr int kTopMenuGap = 8;
-
 }
 
 
@@ -415,7 +411,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             if (event.button.button == SDL_BUTTON_LEFT) {
                 m_mouseDown = true;
                 // 先检查右键菜单点击
-                if (m_showContextMenu) {
+                if (m_menuManager && m_menuManager->isContextMenuOpen()) {
                     m_menuManager->handleContextMenuClick(m_mouseX, m_mouseY);
                     break;
                 }
@@ -437,7 +433,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 
         case SDL_EVENT_MOUSE_WHEEL: {
             SDL_Keymod mod = SDL_GetModState();
-            if (mod & SDL_KMOD_SHIFT || m_activeSubmenuParent == static_cast<int>(MenuId::VideoFilter)) {
+            if (mod & SDL_KMOD_SHIFT || (m_menuManager && m_menuManager->getActiveSubmenuId() == static_cast<int>(MenuId::VideoFilter))) {
                 // Shift+滚轮 或 展开画面参数子菜单时：无级调节亮度
                 adjustBrightness(event.wheel.y > 0.0f ? 0.05f : -0.05f);
                 break;
@@ -551,39 +547,8 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
         m_tooltipShowTime = 0;
     }
 
-    // 检测菜单栏悬浮
-    m_menuBarHovered = (y < m_menuBarHeight);
-
-    // 菜单/子菜单：鼠标移出时自动消失
-    if (m_activeMenu >= 0 && !m_menuBarHovered) {
-        handleMenuAutoDismiss(x, y);
-    }
-
-    // 菜单�?hover 自动切换（当已有菜单打开时）
-    if (m_menuBarHovered && (m_activeMenu >= 0 || m_menuAnimating)) {
-        int menuX = kTopMenuX;
-        bool menuBarHit = false;
-        for (int i = 0; i < (int)m_menus.size(); i++) {
-            if (!m_menuManager->isTopMenuVisible(static_cast<size_t>(i))) continue;
-            int textW = getTextWidth(m_menus[i].label);
-            int itemWidth = textW + kTopMenuPaddingX * 2;
-            if (m_mouseX >= menuX && m_mouseX <= menuX + itemWidth) {
-                menuBarHit = true;
-                if (m_activeMenu != i) {
-                    m_activeMenu = i;
-                    m_activeSubmenuParent = 0;
-                    m_activeSubmenuLevel3Parent = 0;
-                    m_pendingMenu = i;
-                    m_menuAnimStartTime = SDL_GetTicks();
-                    m_menuAnimating = true;
-                }
-                break;
-            }
-            menuX += itemWidth + kTopMenuGap;
-        }
-        if (!menuBarHit) {
-            m_menuManager->closeAllMenus();
-        }
+    if (m_menuManager && m_menuManager->isMenuOpen()) {
+        m_menuManager->handleMouseMove(x, y);
     }
 
     
@@ -848,197 +813,18 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         return;
     }
     
-    // 如果点击了菜单区域之外，关闭菜单
-    if (m_activeMenu >= 0 && y >= m_menuBarHeight) {
-        bool inMenu = false;
-        // 检查是否在打开的菜单内（使用与 renderMenuBar/renderMenu 一致的位置和尺寸）
-        int menuX = kTopMenuX;
-        for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
-            if (!m_menuManager->isTopMenuVisible(static_cast<size_t>(i))) continue;
-            menuX += getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2 + kTopMenuGap;
-        }
-        // 计算实际菜单宽度（与 renderMenu 一致）
-        const Menu& activeMenu = m_menus[m_activeMenu];
-        int labelMaxW = 0;
-        int shortcutMaxW = 0;
-        bool hasSubmenu = false;
-        for (const auto& item : activeMenu.items) {
-            if (!item.separator && item.enabled) {
-                std::string displayLabel = getMenuItemDisplayLabel(item);
-                int lw = getTextWidth(displayLabel, 14);
-                if (lw > labelMaxW) labelMaxW = lw;
-                if (!item.shortcut.empty()) {
-                    int sw = getTextWidth(item.shortcut, 12);
-                    if (sw > shortcutMaxW) shortcutMaxW = sw;
-                }
-                if (isSubmenuParent(item.id)) {
-                    hasSubmenu = true;
-                }
-            }
-        }
-        constexpr int itemHeight = 30;
-        constexpr int separatorHeight = 14;
-        constexpr int menuPadY = 5;
-        int menuWidth = 16 + 22 + labelMaxW + 18;
-        if (shortcutMaxW > 0) menuWidth += 30 + shortcutMaxW;
-        if (hasSubmenu) {
-            int arrowExtra = getTextWidth(">", 12) + 20;
-            if (menuWidth < 16 + 22 + labelMaxW + arrowExtra + 18) {
-                menuWidth = 16 + 22 + labelMaxW + arrowExtra + 18;
-            }
-        }
-        if (menuWidth < 192) menuWidth = 192;
-        int menuHeight = menuPadY * 2;
-        for (const auto& item : activeMenu.items) {
-            menuHeight += item.separator ? separatorHeight : itemHeight;
-        }
-
-        int activeSubmenuX = menuX + menuWidth - 4;
-        int activeSubmenuY = m_menuBarHeight;
-        bool clickedMainMenuRow = false;
-        int clickedSubmenuParent = 0;
-        int rowY = m_menuBarHeight + menuPadY;
-        for (const auto& item : activeMenu.items) {
-            int rowHeight = item.separator ? separatorHeight : itemHeight;
-            bool rowHovered = !item.separator &&
-                x >= menuX && x <= menuX + menuWidth && y >= rowY && y <= rowY + itemHeight;
-            if (rowHovered) {
-                clickedMainMenuRow = true;
-                if (isSubmenuParent(item.id)) {
-                    clickedSubmenuParent = item.id;
-                }
-            }
-            if (isSubmenuParent(item.id)) {
-                if (item.id == m_activeSubmenuParent) {
-                    activeSubmenuY = rowY;
-                }
-            }
-            rowY += rowHeight;
-        }
-        if (clickedMainMenuRow) {
-            if (m_activeSubmenuParent != clickedSubmenuParent) {
-                m_activeSubmenuParent = clickedSubmenuParent;
-                m_activeSubmenuLevel3Parent = 0;
-            }
-            if (m_activeSubmenuParent != 0) {
-                activeSubmenuY = m_menuBarHeight + menuPadY;
-                for (const auto& item : activeMenu.items) {
-                    int rowHeight = item.separator ? separatorHeight : itemHeight;
-                    if (item.id == m_activeSubmenuParent) {
-                        break;
-                    }
-                    activeSubmenuY += rowHeight;
-                }
-            }
-        } else if (x >= menuX && x <= menuX + menuWidth &&
-                   y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
-            m_activeSubmenuParent = 0;
-            m_activeSubmenuLevel3Parent = 0;
-        }
-
-        const int submenuWidth = getSubmenuWidth(m_activeSubmenuParent);
-        int submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
-        int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
-
-        // 优先检测三级子菜单点击
-        if (m_activeSubmenuLevel3Parent != 0 && m_activeSubmenuParent != 0) {
-            int sub3Count = menuSubmenuItemCount(m_activeSubmenuLevel3Parent);
-            const int sub3Width = getSubmenuWidth(m_activeSubmenuLevel3Parent);
-            int sub3Height = sub3Count * itemHeight + menuPadY * 2;
-            int sub3X = activeSubmenuX + submenuWidth - 4;
-            if (sub3X + sub3Width > m_windowWidth) {
-                sub3X = activeSubmenuX - sub3Width + 4;
-            }
-            int sub3Y = activeSubmenuY + menuPadY;
-            for (int i = 0; i < submenuCount; ++i) {
-                if (menuSubmenuItemId(m_activeSubmenuParent, i) == m_activeSubmenuLevel3Parent) {
-                    break;
-                }
-                sub3Y += itemHeight;
-            }
-            if (sub3Y + sub3Height > m_windowHeight) {
-                sub3Y = std::max(0, m_windowHeight - sub3Height - 8);
-            }
-
-            if (x >= sub3X && x <= sub3X + sub3Width &&
-                y >= sub3Y && y <= sub3Y + sub3Height) {
-                inMenu = true;
-                int localY = y - sub3Y - menuPadY;
-                if (localY >= 0) {
-                    int itemIndex = localY / itemHeight;
-                    if (itemIndex >= 0 && itemIndex < sub3Count && m_menuCallback) {
-                        MenuId clickedId = static_cast<MenuId>(menuSubmenuItemId(m_activeSubmenuLevel3Parent, itemIndex));
-                        m_menuCallback(clickedId);
-                        m_menuManager->closeAllMenus();
-                        m_pressedControl = ControlType::None;
-                        return;
-                    }
-                }
-            }
-        }
-
-        // 检测二级子菜单点击
-        if (m_activeSubmenuParent != 0 &&
-            x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
-            y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight) {
-            inMenu = true;
-            int localY = y - activeSubmenuY - menuPadY;
-            if (localY >= 0) {
-                int itemIndex = localY / itemHeight;
-                if (itemIndex >= 0 && itemIndex < submenuCount && m_menuCallback) {
-                    int clickedRawId = menuSubmenuItemId(m_activeSubmenuParent, itemIndex);
-                    if (isSubmenuParent(clickedRawId)) {
-                        m_activeSubmenuLevel3Parent = clickedRawId;
-                    } else {
-                        MenuId clickedId = static_cast<MenuId>(clickedRawId);
-                        m_menuCallback(clickedId);
-                        // 针对画面参数的步进调节项，不关闭菜单，方便连续点击；面板和重置选项则正常关闭菜单
-                        bool keepMenuOpen = (m_activeSubmenuParent == static_cast<int>(MenuId::VideoFilter) &&
-                                             clickedId != MenuId::VideoFilterReset &&
-                                             clickedId != MenuId::VideoFilterPanel);
-                        if (!keepMenuOpen) {
-                            m_menuManager->closeAllMenus();
-                        }
-                        m_pressedControl = ControlType::None;
-                    }
-                }
-            }
-        }
-
-        if (x >= menuX && x <= menuX + menuWidth && y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight) {
-            inMenu = true;
-            // 处理菜单项点击
-            int localY = y - m_menuBarHeight - menuPadY;
-            if (localY >= 0) {
-                int cursorY = 0;
-                for (const auto& item : activeMenu.items) {
-                    int rowHeight = item.separator ? separatorHeight : itemHeight;
-                    if (localY >= cursorY && localY < cursorY + rowHeight) {
-                        if (isSubmenuParent(item.id)) {
-                            m_pressedControl = ControlType::None;
-                        } else if (!item.separator && item.enabled && m_menuCallback) {
-                            m_menuCallback(static_cast<MenuId>(item.id));
-                            m_menuManager->closeAllMenus();
-                            // 防止 handleMouseButtonUp 触发菜单下方的控件点击
-                            m_pressedControl = ControlType::None;
-                        }
-                        break;
-                    }
-                    cursorY += rowHeight;
-                }
-            }
-        }
+    // 如果菜单已打开，在菜单栏下方点击交给 MenuManager 处理
+    if (m_menuManager && m_menuManager->isMenuOpen() && y >= m_menuBarHeight) {
+        bool inMenu = m_menuManager->handleMenuClick(x, y);
         if (!inMenu) {
             m_menuManager->closeAllMenus();
+            if (m_pressedControl != ControlType::SearchInput &&
+                m_pressedControl != ControlType::SearchPanelToggle) {
+                m_isSearchInputFocused = false;
+                SDL_StopTextInput(m_window);
+            }
         }
-
-        // 点击空白处取消搜索框焦点
-        if (!inMenu &&
-            m_pressedControl != ControlType::SearchInput &&
-            m_pressedControl != ControlType::SearchPanelToggle) {
-            m_isSearchInputFocused = false;
-            SDL_StopTextInput(m_window);
-        }
+        m_pressedControl = ControlType::None;
         return;
     }
     
@@ -1285,15 +1071,18 @@ FrameHitTest SDLRenderer::captionHitTestAt(int x, int y) {
     }
 
     // 菜单展开期间整条菜单栏都交给客户区，保证 hover 切换与点击关闭正常
-    if (m_activeMenu >= 0 || m_menuAnimating) return FrameHitTest::None;
+    if (m_menuManager && m_menuManager->isMenuOpen()) return FrameHitTest::None;
 
     // 顶部菜单项区域（几何与 renderMenuBar 保持一致）
-    int menuX = kTopMenuX;
-    for (size_t i = 0; i < m_menus.size(); i++) {
-        if (!isTopMenuVisible(i)) continue;
-        int itemWidth = getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2;
-        if (x >= menuX && x <= menuX + itemWidth) return FrameHitTest::None;
-        menuX += itemWidth + kTopMenuGap;
+    if (m_menuManager) {
+        int menuX = kTopMenuX;
+        const auto& topMenus = m_menuManager->getTopMenus();
+        for (size_t i = 0; i < topMenus.size(); i++) {
+            if (!m_menuManager->isTopMenuVisible(i)) continue;
+            int itemWidth = getTextWidth(topMenus[i]->getLabel()) + kTopMenuPaddingX * 2;
+            if (x >= menuX && x <= menuX + itemWidth) return FrameHitTest::None;
+            menuX += itemWidth + kTopMenuGap;
+        }
     }
 
     // 剩下的空白区域可用于拖动窗口
@@ -1314,7 +1103,6 @@ void SDLRenderer::handleFrameMouse(FrameHitTest hit, FrameMouseAction action) {
             // 鼠标位于非客户区，SDL 收不到移动事件，这里手动维护 hover 状态
             m_hoveredControl = control;
             m_hoveredControlValue = 0;
-            m_menuBarHovered = true;
             m_mouseX = -1;  // 避免误判菜单项 hover
             m_mouseY = -1;
             m_lastMouseMove = SDL_GetTicks();
@@ -1323,7 +1111,6 @@ void SDLRenderer::handleFrameMouse(FrameHitTest hit, FrameMouseAction action) {
         case FrameMouseAction::Leave:
             m_hoveredControl = ControlType::None;
             m_pressedControl = ControlType::None;
-            m_menuBarHovered = false;
             m_mouseX = -1;
             m_mouseY = -1;
             break;
@@ -1373,132 +1160,6 @@ ResizeMode SDLRenderer::getResizeModeAt(int x, int y) const {
 }
 
 
-void SDLRenderer::handleMenuAutoDismiss(int x, int y)
-{
-    if (m_activeMenu < 0) return;
 
-    int menuX = kTopMenuX;
-    for (int i = 0; i < m_activeMenu && i < (int)m_menus.size(); i++) {
-        if (!m_menuManager->isTopMenuVisible(static_cast<size_t>(i))) continue;
-        menuX += getTextWidth(m_menus[i].label) + kTopMenuPaddingX * 2 + kTopMenuGap;
-    }
-
-    const Menu& activeMenu = m_menus[m_activeMenu];
-    int labelMaxW = 0;
-    int shortcutMaxW = 0;
-    bool hasSubmenu = false;
-    for (const auto& item : activeMenu.items) {
-        if (!item.separator && item.enabled) {
-            std::string displayLabel = getMenuItemDisplayLabel(item);
-            int lw = getTextWidth(displayLabel, 14);
-            if (lw > labelMaxW) labelMaxW = lw;
-            if (!item.shortcut.empty()) {
-                int sw = getTextWidth(item.shortcut, 12);
-                if (sw > shortcutMaxW) shortcutMaxW = sw;
-            }
-            if (isSubmenuParent(item.id)) {
-                hasSubmenu = true;
-            }
-        }
-    }
-    constexpr int itemHeight = 30;
-    constexpr int separatorHeight = 14;
-    constexpr int menuPadY = 5;
-    int menuWidth = 16 + 22 + labelMaxW + 18;
-    if (shortcutMaxW > 0) menuWidth += 30 + shortcutMaxW;
-    if (hasSubmenu) {
-        int arrowExtra = getTextWidth(">", 12) + 20;
-        if (menuWidth < 16 + 22 + labelMaxW + arrowExtra + 18) {
-            menuWidth = 16 + 22 + labelMaxW + arrowExtra + 18;
-        }
-    }
-    if (menuWidth < 192) menuWidth = 192;
-    int menuHeight = menuPadY * 2;
-    for (const auto& item : activeMenu.items) {
-        menuHeight += item.separator ? separatorHeight : itemHeight;
-    }
-
-    bool inMainMenu = (x >= menuX && x <= menuX + menuWidth &&
-                       y >= m_menuBarHeight && y <= m_menuBarHeight + menuHeight);
-
-    bool inSubmenu = false;
-    int activeSubmenuX = menuX + menuWidth - 4;
-    int activeSubmenuY = m_menuBarHeight + menuPadY;
-    int submenuCount = 0;
-    int submenuWidth = 0;
-    if (m_activeSubmenuParent != 0) {
-        for (const auto& item : activeMenu.items) {
-            if (item.id == m_activeSubmenuParent) break;
-            activeSubmenuY += item.separator ? separatorHeight : itemHeight;
-        }
-        submenuWidth = getSubmenuWidth(m_activeSubmenuParent);
-        submenuCount = menuSubmenuItemCount(m_activeSubmenuParent);
-        int submenuHeight = submenuCount * itemHeight + menuPadY * 2;
-        inSubmenu = (x >= activeSubmenuX && x <= activeSubmenuX + submenuWidth &&
-                     y >= activeSubmenuY && y <= activeSubmenuY + submenuHeight);
-    }
-
-    bool inSubmenu3 = false;
-    if (m_activeSubmenuLevel3Parent != 0 && m_activeSubmenuParent != 0) {
-        int sub3Count = menuSubmenuItemCount(m_activeSubmenuLevel3Parent);
-        const int sub3Width = getSubmenuWidth(m_activeSubmenuLevel3Parent);
-        int sub3Height = sub3Count * itemHeight + menuPadY * 2;
-        int sub3X = activeSubmenuX + submenuWidth - 4;
-        if (sub3X + sub3Width > m_windowWidth) {
-            sub3X = activeSubmenuX - sub3Width + 4;
-        }
-        int sub3Y = activeSubmenuY + menuPadY;
-        for (int i = 0; i < submenuCount; ++i) {
-            if (menuSubmenuItemId(m_activeSubmenuParent, i) == m_activeSubmenuLevel3Parent) {
-                break;
-            }
-            sub3Y += itemHeight;
-        }
-        if (sub3Y + sub3Height > m_windowHeight) {
-            sub3Y = std::max(0, m_windowHeight - sub3Height - 8);
-        }
-        inSubmenu3 = (x >= sub3X && x <= sub3X + sub3Width &&
-                      y >= sub3Y && y <= sub3Y + sub3Height);
-    }
-
-    if (inSubmenu3) return;
-
-    if (inSubmenu) {
-        int localY = y - activeSubmenuY - menuPadY;
-        if (localY >= 0) {
-            int itemIdx = localY / itemHeight;
-            if (itemIdx >= 0 && itemIdx < submenuCount) {
-                int itemId = menuSubmenuItemId(m_activeSubmenuParent, itemIdx);
-                if (isSubmenuParent(itemId)) {
-                    m_activeSubmenuLevel3Parent = itemId;
-                } else {
-                    m_activeSubmenuLevel3Parent = 0;
-                }
-            }
-        }
-        return;
-    }
-
-    if (inMainMenu) {
-        int rowY = m_menuBarHeight + menuPadY;
-        int newParent = 0;
-        for (const auto& item : activeMenu.items) {
-            int rowHeight = item.separator ? separatorHeight : itemHeight;
-            if (!item.separator &&
-                x >= menuX && x <= menuX + menuWidth &&
-                y >= rowY && y <= rowY + itemHeight) {
-                if (isSubmenuParent(item.id)) newParent = item.id;
-                break;
-            }
-            rowY += rowHeight;
-        }
-        if (m_activeSubmenuParent != newParent) {
-            m_activeSubmenuParent = newParent;
-            m_activeSubmenuLevel3Parent = 0;
-        }
-    } else {
-        m_menuManager->closeAllMenus();
-    }
-}
 
 } // namespace VideoPlay

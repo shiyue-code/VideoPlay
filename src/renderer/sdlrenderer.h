@@ -33,6 +33,8 @@ enum class MenuId : int {
     OpenFile = 1,
     OpenFolder = 2,
     ImportSubtitle = 4,
+    RecentFiles = 5,
+    MediaInfo = 6,
     Exit = 3,
 
     // 播放菜单
@@ -244,131 +246,6 @@ enum class ResizeMode {
     BottomRight
 };
 
-// 菜单项
-struct MenuItem {
-    int id;
-    std::string label;
-    std::string shortcut;
-    bool separator = false;
-    bool enabled = true;
-};
-
-// 菜单
-struct Menu {
-    std::string label;
-    std::vector<MenuItem> items;
-    bool open = false;
-};
-
-// 子菜单注册表：新增子菜单时只需在这里增加一项
-struct SubmenuInfo {
-    std::vector<std::pair<MenuId, const char*>> items;
-};
-
-inline const std::map<MenuId, SubmenuInfo>& submenuRegistry() {
-    static const std::map<MenuId, SubmenuInfo> registry = {
-        {MenuId::ABLoop, {{ {MenuId::ABLoopSetA, "设置 A 点"},
-                            {MenuId::ABLoopSetB, "设置 B 点"},
-                            {MenuId::ABLoopClear, "清除"} }}},
-        {MenuId::Loop,   {{ {MenuId::LoopNone, "不循环"},
-                            {MenuId::LoopSingle, "单曲循环"},
-                            {MenuId::LoopPlaylist, "列表循环"} }}},
-        {MenuId::Aspect, {{ {MenuId::AspectOriginal, "原始"},
-                            {MenuId::Aspect16_9, "16:9"},
-                            {MenuId::Aspect4_3, "4:3"},
-                            {MenuId::AspectFill, "铺满"} }}},
-        {MenuId::AudioFilter, {{ {MenuId::AudioFilterOff, "关闭"},
-                                 {MenuId::AudioFilterVoice, "语音增强"},
-                                 {MenuId::AudioFilterBass, "低音增强"},
-                                 {MenuId::AudioFilterNight, "夜间模式"} }}},
-        {MenuId::VideoFilter, {{ {MenuId::VideoFilterPanel, "画面调节滑块面板..."},
-                                 {MenuId::VideoFilterBrightnessUp, "亮度 +5%"},
-                                 {MenuId::VideoFilterBrightnessDown, "亮度 -5%"},
-                                 {MenuId::VideoFilterContrastUp, "对比度 +10%"},
-                                 {MenuId::VideoFilterContrastDown, "对比度 -10%"},
-                                 {MenuId::VideoFilterSaturationUp, "饱和度 +10%"},
-                                 {MenuId::VideoFilterSaturationDown, "饱和度 -10%"},
-                                 {MenuId::VideoFilterReset, "重置默认参数"} }}},
-        {MenuId::VideoTransform, {{ {MenuId::Rotate0, "旋转 0°"},
-                                    {MenuId::Rotate90, "旋转 90°"},
-                                    {MenuId::Rotate180, "旋转 180°"},
-                                    {MenuId::Rotate270, "旋转 270°"},
-                                    {MenuId::FlipHorizontal, "水平翻转"},
-                                    {MenuId::FlipVertical, "垂直翻转"},
-                                    {MenuId::CropOff, "裁剪关闭"},
-                                    {MenuId::Crop10, "裁剪 10%"},
-                                    {MenuId::Crop20, "裁剪 20%"},
-                                    {MenuId::TransformReset, "重置变换"} }}},
-        {MenuId::Deinterlace, {{ {MenuId::DeinterlaceOff, "关闭"},
-                                  {MenuId::DeinterlaceAuto, "自动"},
-                                  {MenuId::DeinterlaceYadif, "线性"},
-                                  {MenuId::DeinterlaceBwdif, "Bob"} }}},
-        {MenuId::HdrToneMap, {{ {MenuId::HdrToneMapAuto, "自动 (推荐)"},
-                                {MenuId::HdrToneMapOn, "始终开启"},
-                                {MenuId::HdrToneMapOff, "关闭"},
-                                {MenuId::HdrAlgorithmMenu, "调色算法"} }}},
-        {MenuId::HdrAlgorithmMenu, {{ {MenuId::HdrAlgoHable, "Hable (推荐)"},
-                                      {MenuId::HdrAlgoMobius, "Mobius"},
-                                      {MenuId::HdrAlgoReinhard, "Reinhard"} }}}
-    };
-    return registry;
-}
-
-// 菜单辅助函数（在 sdlrenderer_events/menus 中复用）
-inline bool isSubmenuParent(int id) {
-    if (id == static_cast<int>(MenuId::AudioOutput)) {
-        return true;
-    }
-    return submenuRegistry().count(static_cast<MenuId>(id)) > 0;
-}
-
-inline int submenuItemCount(int parentId) {
-    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
-    return it == submenuRegistry().end() ? 0 : static_cast<int>(it->second.items.size());
-}
-
-inline int submenuItemId(int parentId, int index) {
-    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
-    if (it == submenuRegistry().end() || index < 0 || index >= (int)it->second.items.size()) return 0;
-    return static_cast<int>(it->second.items[index].first);
-}
-
-inline const char* submenuItemLabel(int parentId, int index) {
-    auto it = submenuRegistry().find(static_cast<MenuId>(parentId));
-    if (it == submenuRegistry().end() || index < 0 || index >= (int)it->second.items.size()) return "";
-    return it->second.items[index].second;
-}
-
-inline std::string formatVideoFilterSummary(const VideoFilterConfig& cfg) {
-    if (cfg.eqIsIdentity()) {
-        return "";
-    }
-    return "已调节";
-}
-
-inline std::string submenuParentLabel(const MenuItem& item, int loopMode,
-                                       AspectMode aspectMode,
-                                       AudioFilterPreset audioFilterPreset,
-                                       const VideoFilterConfig& filterConfig = {}) {
-    auto it = submenuRegistry().find(static_cast<MenuId>(item.id));
-    if (it == submenuRegistry().end()) return item.label;
-
-    int index = -1;
-    if (item.id == static_cast<int>(MenuId::Loop)) {
-        index = loopMode;
-    } else if (item.id == static_cast<int>(MenuId::Aspect)) {
-        index = static_cast<int>(aspectMode);
-    } else if (item.id == static_cast<int>(MenuId::AudioFilter)) {
-        index = static_cast<int>(audioFilterPreset);
-    } else if (item.id == static_cast<int>(MenuId::VideoFilter)) {
-        if (!filterConfig.eqIsIdentity()) {
-            return item.label + "（已调节）";
-        }
-        return item.label;
-    }
-    if (index < 0 || index >= (int)it->second.items.size()) return item.label;
-    return item.label + "（" + it->second.items[index].second + "）";
-}
 
 struct ChatMessage {
     bool isUser;
@@ -561,12 +438,9 @@ private:
                       const std::string& subtitle, const std::vector<std::string>& playlist,
                       size_t currentPlaylistIndex, int64_t audioPts, int64_t videoPts,
                       double avDiff, bool isPreloading);
-    void updateRecentFilesMenuImpl();
-
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);
     void handleMouseMotion(int x, int y);
-    void handleMenuAutoDismiss(int x, int y);
     void handleMouseButtonDown(int x, int y);
     void handleMouseButtonUp(int x, int y);
     void handleMouseWheel(int y);
@@ -582,39 +456,30 @@ private:
     void handleFrameMouse(FrameHitTest hit, FrameMouseAction action);
     void renderLiveFrame();
 
-    // 菜单处理
+    // 菜单处理（由 MenuManager 统一接管）
     void initMenus();
     void updateChapterMenuItems();
     void updateTrackMenus();
     void renderMenuBar();
-    void renderMenu(const Menu& menu, int x, int y, float alpha = 1.0f);
     bool handleMenuClick(int x, int y);
     void closeAllMenus(bool animate = true);
+    void closeMenu();
     bool isMenuOpen() const;
     bool isTopMenuVisible(size_t index) const;
 
     // 右键上下文菜单
     void showContextMenu(int x, int y);
     void hideContextMenu();
+    void closeContextMenu();
     void renderContextMenu();
     bool handleContextMenuClick(int x, int y);
-    SDL_Rect getContextMenuRect();
-    Menu m_contextMenu;
-    bool m_showContextMenu = false;
-    int m_contextMenuX = 0;
-    int m_contextMenuY = 0;
+    bool isContextMenuOpen() const;
 
     // 渲染各个部分
     void renderControls(int64_t position, int64_t duration, int volume, bool isMuted,
                         bool isPlaying, double speed, bool isPreloading);
     void renderProgressBar(int64_t position, int64_t duration, int controlY, bool isPreloading, bool isPlaying);
     void renderProgressPreview();
-    int menuSubmenuItemCount(int parentId) const;
-    int menuSubmenuItemId(int parentId, int index) const;
-    std::string menuSubmenuItemLabel(int parentId, int index) const;
-    std::string menuSubmenuItemShortcut(int parentId, int index) const;
-    int getSubmenuWidth(int parentId);
-    std::string getMenuItemDisplayLabel(const MenuItem& item) const;
     void applySmallWindowPanelGuard();
     void renderVolumeControl(int volume, bool isMuted, int controlY);
     void renderPlaybackControls(bool isPlaying, int controlY);
@@ -628,7 +493,6 @@ private:
     void renderOSD();
     void renderMediaInfoPanel();
     void renderVideoControlPanel();
-    Menu* findMenu(const std::string& label);
     void renderNetworkState();
     void renderAIAnalysisOverlay();
     void renderLoadingAnimation();
@@ -689,6 +553,7 @@ private:
     std::string m_fontPath;
 
     // 子系统管理器
+    friend class MenuManager;
     std::unique_ptr<MenuManager> m_menuManager;
     std::unique_ptr<UIManager> m_uiManager;
     std::unique_ptr<DialogManager> m_dialogManager;
@@ -798,8 +663,6 @@ private:
     };
     std::vector<ControlRect> m_controlRects;
     
-    // 菜单
-    std::vector<Menu> m_menus;
     std::vector<ChapterInfo> m_chapters;
     std::vector<Bookmark> m_bookmarks;
     bool m_hasChapters = false;
@@ -807,18 +670,6 @@ private:
     int64_t m_lastDuration = 0;
     int m_lastBarX = 0;
     int m_lastBarW = 0;
-    int m_activeMenu = -1;
-    int m_activeSubmenuParent = 0;
-    int m_activeSubmenuLevel3Parent = 0;
-    bool m_menuBarHovered = false;
-
-    // 菜单动画
-    void updateMenuAnimation();
-    float m_menuAnimAlpha = 0.0f;
-    bool m_menuAnimating = false;
-    uint64_t m_menuAnimStartTime = 0;
-    static constexpr uint64_t MENU_ANIM_DURATION_MS = 120;
-    int m_pendingMenu = -1;
 
     // 进度条宽度动画 (0.0 = 1/3 width, 1.0 = full width)
     float m_progressBarScale = 0.0f;
@@ -894,8 +745,6 @@ private:
     PlaylistItemCallback m_playlistRemoveCallback;
     std::function<void()> m_playlistClearCallback;
     std::function<void(size_t, size_t)> m_playlistReorderCallback;
-    Menu m_playbackContextMenu;
-    int m_contextPlaylistIndex = -1;
     EpisodeItemCallback m_episodeItemCallback;
     EpisodePrevCallback m_episodePrevCallback;
     EpisodeNextCallback m_episodeNextCallback;
