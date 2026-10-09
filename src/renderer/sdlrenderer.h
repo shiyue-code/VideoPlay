@@ -158,9 +158,13 @@ constexpr int kAudioDeviceCount = 32;
 using FileDropCallback = std::function<void(const std::string&)>;
 using FileOpenCallback = std::function<void()>;
 using KeyCallback = std::function<void(int, bool)>;  // keycode, pressed
-using MouseCallback = std::function<void(int, int, int)>;  // x, y, button
-using SeekCallback = std::function<void(double)>;  // position (0-1)
-using VolumeCallback = std::function<void(int)>;   // volume delta (>=1000 means absolute: value-1000)
+// 回调编码约定：UI 只知道自己拿到的相对量，seek/音量条拖动需要回传绝对值。
+// 统一编码为「base + 值」，接收方按 >= base 判绝对值再解码。
+inline constexpr double kSeekAbsoluteBase = 1000.0;  // seek: base + ratio*1000，解码后 ratio ∈ [0,1]
+inline constexpr int kVolumeAbsoluteBase = 1000;     // volume: base + 音量(0~100)
+
+using SeekCallback = std::function<void(double)>;  // 相对秒数 或 kSeekAbsoluteBase + ratio*1000
+using VolumeCallback = std::function<void(int)>;   // 相对增量 或 kVolumeAbsoluteBase + 音量值
 using UIMuteCallback = std::function<void()>;
 using PlayPauseCallback = std::function<void()>;
 using StopCallback = std::function<void()>;
@@ -178,10 +182,46 @@ using SearchCallback = std::function<void(const std::string&)>;
 using SubtitleSyncCallback = std::function<void(int)>;  // deltaMs (positive = delay, negative = advance)
 using AudioSyncCallback = std::function<void(int)>;   // deltaMs (positive = audio delay, negative = audio advance)
 using ABLoopCallback = std::function<void(char)>;  // 'a'=set A, 'b'=set B, 'c'=clear
-using ChapterSeekCallback = std::function<void(int64_t)>; // 毫秒
 using AudioTrackCallback = std::function<void(int)>;  // 音轨下标，-1=关闭
 using SubtitleTrackCallback = std::function<void(int)>;  // 字幕轨下标，-1=关闭内封
 using VideoFilterConfigCallback = std::function<void(const VideoFilterConfig&)>;
+
+// App → Renderer 的全部回调，一次 setCallbacks() 传入。
+// 字段即原 setXxxCallback 的对应项；留空表示不关心。
+struct RendererCallbacks {
+    FileDropCallback fileDrop;
+    FileOpenCallback fileOpen;
+    KeyCallback key;
+    SeekCallback seek;
+    VolumeCallback volume;
+    UIMuteCallback mute;
+    PlayPauseCallback playPause;
+    StopCallback stop;
+    SpeedCallback speed;
+    PrevCallback prev;
+    NextCallback next;
+    FullscreenCallback fullscreen;
+    MenuCallback menu;
+    PlaylistItemCallback playlistItem;
+    PlaylistItemCallback playlistRemove;
+    std::function<void()> playlistClear;
+    std::function<void(size_t, size_t)> playlistReorder;
+    EpisodeItemCallback episodeItem;
+    EpisodePrevCallback episodePrev;
+    EpisodeNextCallback episodeNext;
+    LoopModeCallback loopMode;
+    SearchCallback search;
+    SubtitleSyncCallback subtitleSync;
+    AudioSyncCallback audioSync;
+    std::function<void()> addBookmark;
+    std::function<void()> clearBookmarks;
+    std::function<void(int)> bookmarkClick;
+    ABLoopCallback abLoop;
+    AudioTrackCallback audioTrack;
+    SubtitleTrackCallback subtitleTrack;
+    VideoFilterConfigCallback videoFilterConfig;
+    std::function<void()> liveRender;  // 系统拖动/缩放模态循环期间实时重绘
+};
 
 enum class OSDType {
     Message,
@@ -284,40 +324,10 @@ public:
     // 事件处理
     bool processEvents();
 
-    // 设置回调
-    void setFileDropCallback(FileDropCallback callback);
-    void setFileOpenCallback(FileOpenCallback callback);
-    void setKeyCallback(KeyCallback callback);
-    void setMouseCallback(MouseCallback callback);
-    void setSeekCallback(SeekCallback callback);
-    void setVolumeCallback(VolumeCallback callback);
-    void setMuteCallback(UIMuteCallback callback);
-    void setPlayPauseCallback(PlayPauseCallback callback);
-    void setStopCallback(StopCallback callback);
-    void setSpeedCallback(SpeedCallback callback);
-    void setPrevCallback(PrevCallback callback);
-    void setNextCallback(NextCallback callback);
-    void setFullscreenCallback(FullscreenCallback callback);
-    void setMenuCallback(MenuCallback callback);
-    void setPlaylistItemCallback(PlaylistItemCallback callback);
-    void setPlaylistRemoveCallback(PlaylistItemCallback callback);
-    void setPlaylistClearCallback(std::function<void()> callback);
-    void setPlaylistReorderCallback(std::function<void(size_t, size_t)> callback);
-    void setEpisodeItemCallback(EpisodeItemCallback callback);
-    void setEpisodePrevCallback(EpisodePrevCallback callback);
-    void setEpisodeNextCallback(EpisodeNextCallback callback);
-    void setLoopModeCallback(LoopModeCallback callback);
-    void setSearchCallback(SearchCallback callback);
-    void setSubtitleSyncCallback(SubtitleSyncCallback callback);
-    void setAudioSyncCallback(AudioSyncCallback callback);
-    void setAddBookmarkCallback(std::function<void()> callback);
-    void setClearBookmarksCallback(std::function<void()> callback);
-    void setBookmarkClickCallback(std::function<void(int)> callback);
-    void setABLoopCallback(ABLoopCallback callback);
-    void setChapterSeekCallback(ChapterSeekCallback callback);
-    void setAudioTrackCallback(AudioTrackCallback callback);
-    void setSubtitleTrackCallback(SubtitleTrackCallback callback);
-    void setVideoFilterConfigCallback(VideoFilterConfigCallback callback);
+    // 一次性设置全部 App 回调
+    void setCallbacks(RendererCallbacks callbacks);
+    // 实时重绘回调在 initialize 之后设置，单独保留入口
+    void setLiveRenderCallback(std::function<void()> callback);
     void setVideoFilterConfig(const VideoFilterConfig& config);
     const VideoFilterConfig& videoFilterConfig() const { return m_videoFilterConfig; }
     void toggleVideoControlPanel();
@@ -326,9 +336,6 @@ public:
     void adjustContrast(float delta);
     void adjustSaturation(float delta);
     void resetVideoFilter();
-
-    // 系统拖动/缩放模态循环期间用于实时重绘整帧的回调（由 App 提供）
-    void setLiveRenderCallback(std::function<void()> callback);
 
     // 多轨道数据
     void setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex);
@@ -642,7 +649,6 @@ private:
     bool m_draggingContrast = false;
     bool m_draggingSaturation = false;
     VideoFilterConfig m_videoFilterConfig;
-    VideoFilterConfigCallback m_videoFilterConfigCallback;
     int m_windowWidth = 1280;
     int m_windowHeight = 720;
 
@@ -692,8 +698,7 @@ private:
     // 窗口框架管理器（无边框模式）
     std::unique_ptr<WindowFrame> m_windowFrame;
 
-    // 模态循环（原生拖动/缩放）期间的实时重绘
-    std::function<void()> m_liveRenderCallback;
+    // 模态循环（原生拖动/缩放）期间的实时重绘（回调存于 m_callbacks.liveRender）
     bool m_inLiveRender = false;
 
     // 无边框 resize 状态
@@ -729,39 +734,8 @@ private:
     static constexpr uint64_t OSD_DURATION_MS = 1400;
     MediaInfo m_mediaInfo;
 
-    // 回调
-    FileDropCallback m_fileDropCallback;
-    FileOpenCallback m_fileOpenCallback;
-    KeyCallback m_keyCallback;
-    MouseCallback m_mouseCallback;
-    SeekCallback m_seekCallback;
-    VolumeCallback m_volumeCallback;
-    UIMuteCallback m_muteCallback;
-    PlayPauseCallback m_playPauseCallback;
-    StopCallback m_stopCallback;
-    SpeedCallback m_speedCallback;
-    PrevCallback m_prevCallback;
-    NextCallback m_nextCallback;
-    FullscreenCallback m_fullscreenCallback;
-    MenuCallback m_menuCallback;
-    PlaylistItemCallback m_playlistItemCallback;
-    PlaylistItemCallback m_playlistRemoveCallback;
-    std::function<void()> m_playlistClearCallback;
-    std::function<void(size_t, size_t)> m_playlistReorderCallback;
-    EpisodeItemCallback m_episodeItemCallback;
-    EpisodePrevCallback m_episodePrevCallback;
-    EpisodeNextCallback m_episodeNextCallback;
-    LoopModeCallback m_loopModeCallback;
-    SearchCallback m_searchCallback;
-    SubtitleSyncCallback m_subtitleSyncCallback;
-    AudioSyncCallback m_audioSyncCallback;
-    std::function<void()> m_addBookmarkCallback;
-    std::function<void()> m_clearBookmarksCallback;
-    std::function<void(int)> m_bookmarkClickCallback;
-    ABLoopCallback m_abLoopCallback;
-    ChapterSeekCallback m_chapterSeekCallback;
-    AudioTrackCallback m_audioTrackCallback;
-    SubtitleTrackCallback m_subtitleTrackCallback;
+    // 回调（App 经 setCallbacks 一次传入）
+    RendererCallbacks m_callbacks;
 
     // 多轨道数据
     std::vector<TrackInfo> m_audioTracks;

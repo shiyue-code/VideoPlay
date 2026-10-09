@@ -1,32 +1,14 @@
 #include "renderer/settingsdialog.h"
-#include "renderer/textutils.h"
-#include "utils/logger.h"
+
 #include "utils/string_utils.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cctype>
 
-#ifdef _WIN32
-#define NOMINMAX
-#include <windows.h>
-#include <dwmapi.h>
-#pragma comment(lib, "dwmapi.lib")
-
-// DWM 圆角偏好（Win11+）。新 SDK 已在 dwmapi.h 中定义同名枚举，这里使用
-// 本地常量避免在新旧 Windows SDK 之间重复定义类型。
-constexpr DWORD kDwmwaWindowCornerPreference = 33;
-constexpr int kDwmWindowCornerRound = 2;
-#endif
-
 namespace VideoPlay {
 
 namespace {
-Logger& logger() {
-    static auto logger = Logger::get("renderer.settings");
-    return *logger;
-}
-
 std::string normalizeProvider(std::string provider) {
     provider = toLower(trim(provider));
     if (provider.empty() || provider == "auto") {
@@ -101,32 +83,24 @@ void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
 }
 }
 
-static constexpr uint8_t COLOR_BG[4] = {30, 30, 30, 240};
-static constexpr uint8_t COLOR_TITLE_BG[4] = {40, 40, 40, 255};
-static constexpr uint8_t COLOR_TITLE_TEXT[4] = {255, 255, 255, 255};
 static constexpr uint8_t COLOR_LABEL[4] = {180, 180, 180, 255};
 static constexpr uint8_t COLOR_INPUT_BG[4] = {50, 50, 50, 255};
 static constexpr uint8_t COLOR_INPUT_BORDER[4] = {80, 80, 80, 255};
 static constexpr uint8_t COLOR_BUTTON_PRIMARY[4] = {50, 120, 200, 255};
 static constexpr uint8_t COLOR_BUTTON_PRIMARY_HOVER[4] = {70, 140, 220, 255};
 static constexpr uint8_t COLOR_BUTTON_TEXT[4] = {255, 255, 255, 255};
-static constexpr uint8_t COLOR_CLOSE_HOVER[4] = {232, 17, 35, 255};
 static constexpr uint8_t COLOR_DROPDOWN_HOVER[4] = {65, 75, 90, 255};
 
 SettingsDialog::SettingsDialog(SDL_Window* parentWindow, TTF_Font* font)
-    : m_parentWindow(parentWindow), m_font(font) {
-}
-
-SettingsDialog::~SettingsDialog() {
-    if (m_renderer) SDL_DestroyRenderer(m_renderer);
-    if (m_window) SDL_DestroyWindow(m_window);
+    : ModalDialog(parentWindow, font) {
+    m_windowWidth = 500;
+    m_windowHeight = 420;
 }
 
 void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave) {
     m_settings = currentSettings;
     m_settings.provider = normalizeProvider(m_settings.provider);
     m_saveCallback = onSave;
-    m_dragging = false;
     m_apiKeyVisible = false;
     m_providerDropdownOpen = false;
     m_modelDropdownOpen = false;
@@ -148,60 +122,10 @@ void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave
     loadProviderFields(m_settings.provider);
     calculateLayout();
 
-    m_window = SDL_CreateWindow("AI 设置", m_windowWidth, m_windowHeight, SDL_WINDOW_BORDERLESS);
-    if (!m_window) {
-        logger().error("Failed to create settings dialog: " + std::string(SDL_GetError()));
+    if (!openWindow("AI 设置", true)) {
         return;
     }
-
-    SDL_SetWindowAlwaysOnTop(m_window, true);
-
-    if (m_parentWindow) {
-        int parentX, parentY, parentW, parentH;
-        SDL_GetWindowPosition(m_parentWindow, &parentX, &parentY);
-        SDL_GetWindowSize(m_parentWindow, &parentW, &parentH);
-        int x = parentX + (parentW - m_windowWidth) / 2;
-        int y = parentY + (parentH - m_windowHeight) / 2;
-        SDL_SetWindowPosition(m_window, x, y);
-    }
-
-#ifdef _WIN32
-    SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
-    HWND hwnd = (HWND)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-    if (hwnd) {
-        int corner = kDwmWindowCornerRound;
-        DwmSetWindowAttribute(hwnd, kDwmwaWindowCornerPreference, &corner, sizeof(corner));
-    }
-#endif
-
-    m_renderer = SDL_CreateRenderer(m_window, nullptr);
-    if (!m_renderer) {
-        logger().error("Failed to create settings renderer: " + std::string(SDL_GetError()));
-        SDL_DestroyWindow(m_window);
-        m_window = nullptr;
-        return;
-    }
-
-    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
-    SDL_StartTextInput(m_window);
-
-    m_running = true;
-    while (m_running) {
-        handleEvents();
-        render();
-        SDL_Delay(16);
-    }
-
-    SDL_StopTextInput(m_window);
-
-    if (m_renderer) {
-        SDL_DestroyRenderer(m_renderer);
-        m_renderer = nullptr;
-    }
-    if (m_window) {
-        SDL_DestroyWindow(m_window);
-        m_window = nullptr;
-    }
+    runModal();
 }
 
 AIProviderSettings& SettingsDialog::currentProviderSettings() {
@@ -359,7 +283,7 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
 }
 
 void SettingsDialog::calculateLayout() {
-    int y = TITLE_HEIGHT + PADDING;
+    int y = kTitleHeight + PADDING;
 
     m_providerDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
                               static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
@@ -397,48 +321,11 @@ void SettingsDialog::calculateLayout() {
                        static_cast<float>(btnY), static_cast<float>(btnWidth), static_cast<float>(btnHeight)};
 }
 
-void SettingsDialog::render() {
-    if (!m_renderer) return;
-
-    SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 0);
-    SDL_RenderClear(m_renderer);
-
-    SDL_FRect bgRect = {0, 0, static_cast<float>(m_windowWidth), static_cast<float>(m_windowHeight)};
-    SDL_SetRenderDrawColor(m_renderer, COLOR_BG[0], COLOR_BG[1], COLOR_BG[2], COLOR_BG[3]);
-    SDL_RenderFillRect(m_renderer, &bgRect);
-
-    SDL_FRect titleBar = {0, 0, static_cast<float>(m_windowWidth), static_cast<float>(TITLE_HEIGHT)};
-    SDL_SetRenderDrawColor(m_renderer, COLOR_TITLE_BG[0], COLOR_TITLE_BG[1], COLOR_TITLE_BG[2], COLOR_TITLE_BG[3]);
-    SDL_RenderFillRect(m_renderer, &titleBar);
-
-    int titleTextY = (TITLE_HEIGHT - getFontHeight()) / 2;
-    drawText("AI 设置", 15, titleTextY, COLOR_TITLE_TEXT[0], COLOR_TITLE_TEXT[1], COLOR_TITLE_TEXT[2], 255);
-
-    constexpr int closeWidth = 46;
-    constexpr int closeIconSize = 10;
-    int closeX = m_windowWidth - closeWidth;
-    int closeY = 0;
-
+void SettingsDialog::renderContent() {
     float mx, my;
     SDL_GetMouseState(&mx, &my);
-    bool closeHovered = (mx >= closeX && mx <= closeX + closeWidth && my >= closeY && my <= closeY + TITLE_HEIGHT);
 
-    if (closeHovered) {
-        SDL_SetRenderDrawColor(m_renderer, COLOR_CLOSE_HOVER[0], COLOR_CLOSE_HOVER[1],
-                               COLOR_CLOSE_HOVER[2], COLOR_CLOSE_HOVER[3]);
-        SDL_FRect closeBtn = {static_cast<float>(closeX), static_cast<float>(closeY),
-                              static_cast<float>(closeWidth), static_cast<float>(TITLE_HEIGHT)};
-        SDL_RenderFillRect(m_renderer, &closeBtn);
-    }
-
-    SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1],
-                           COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
-    int iconX = closeX + (closeWidth - closeIconSize) / 2;
-    int iconY = (TITLE_HEIGHT - closeIconSize) / 2;
-    SDL_RenderLine(m_renderer, iconX, iconY, iconX + closeIconSize, iconY + closeIconSize);
-    SDL_RenderLine(m_renderer, iconX + closeIconSize, iconY, iconX, iconY + closeIconSize);
-
-    int formY = TITLE_HEIGHT + PADDING;
+    int formY = kTitleHeight + PADDING;
     drawText("服务商:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
     formY += INPUT_HEIGHT + PADDING;
 
@@ -476,135 +363,99 @@ void SettingsDialog::render() {
     } else if (m_detailDropdownOpen) {
         drawDropdownOptions(m_detailDropdownRect, m_detailOptions, mx, my);
     }
-
-    SDL_RenderPresent(m_renderer);
 }
 
-void SettingsDialog::handleEvents() {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        switch (event.type) {
-            case SDL_EVENT_QUIT:
-                m_running = false;
-                break;
+bool SettingsDialog::onEvent(const SDL_Event& event) {
+    switch (event.type) {
+        case SDL_EVENT_QUIT:
+            requestClose();
+            return true;
 
-            case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    int mx = static_cast<int>(event.button.x);
-                    int my = static_cast<int>(event.button.y);
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                int mx = static_cast<int>(event.button.x);
+                int my = static_cast<int>(event.button.y);
 
-                    constexpr int closeWidth = 46;
-                    int closeX = m_windowWidth - closeWidth;
-                    if (mx >= closeX && mx <= closeX + closeWidth && my >= 0 && my <= TITLE_HEIGHT) {
-                        m_running = false;
-                        break;
-                    }
-
-                    if (isPointInRect(mx, my, m_saveBtnRect)) {
-                        saveCurrentProviderFields();
-                        if (m_saveCallback) {
-                            m_saveCallback(m_settings);
-                        }
-                        m_running = false;
-                        break;
-                    }
-
-                    if (isPointInRect(mx, my, m_cancelBtnRect)) {
-                        m_running = false;
-                        break;
-                    }
-
-                    if (handleDropdownClick(mx, my)) {
-                        break;
-                    }
-
-                    if (isPointInRect(mx, my, m_apiKeyToggleRect)) {
-                        m_providerDropdownOpen = false;
-                        m_modelDropdownOpen = false;
-                        m_detailDropdownOpen = false;
-                        m_apiKeyVisible = !m_apiKeyVisible;
-                        m_apiKeyInput->setPassword(!m_apiKeyVisible);
-                        m_apiKeyInput->setActive(true);
-                        break;
-                    }
-
-                    m_providerDropdownOpen = false;
-                    m_modelDropdownOpen = false;
-                    m_detailDropdownOpen = false;
-
-                    m_baseUrlInput->handleEvent(event);
-                    m_apiKeyInput->handleEvent(event);
-
-                    if (my < TITLE_HEIGHT) {
-#ifdef _WIN32
-                        SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
-                        HWND hwnd = (HWND)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-                        if (hwnd) {
-                            ReleaseCapture();
-                            SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-                        }
-#else
-                        m_dragging = true;
-                        m_dragOffsetX = mx;
-                        m_dragOffsetY = my;
-#endif
-                    }
-                }
-                break;
-            }
-
-            case SDL_EVENT_MOUSE_BUTTON_UP:
-                m_dragging = false;
-                m_baseUrlInput->handleEvent(event);
-                m_apiKeyInput->handleEvent(event);
-                break;
-
-            case SDL_EVENT_MOUSE_MOTION:
-                if (m_dragging) {
-                    int mx = static_cast<int>(event.motion.x);
-                    int my = static_cast<int>(event.motion.y);
-                    int windowX, windowY;
-                    SDL_GetWindowPosition(m_window, &windowX, &windowY);
-                    SDL_SetWindowPosition(m_window,
-                        windowX + mx - m_dragOffsetX,
-                        windowY + my - m_dragOffsetY);
-                }
-                m_baseUrlInput->handleEvent(event);
-                m_apiKeyInput->handleEvent(event);
-                break;
-
-            case SDL_EVENT_KEY_DOWN: {
-                if (event.key.key == SDLK_ESCAPE) {
-                    if (m_providerDropdownOpen || m_modelDropdownOpen || m_detailDropdownOpen) {
-                        m_providerDropdownOpen = false;
-                        m_modelDropdownOpen = false;
-                        m_detailDropdownOpen = false;
-                    } else {
-                        m_running = false;
-                    }
-                    break;
-                }
-
-                if (event.key.key == SDLK_RETURN) {
+                if (isPointInRect(mx, my, m_saveBtnRect)) {
                     saveCurrentProviderFields();
                     if (m_saveCallback) {
                         m_saveCallback(m_settings);
                     }
-                    m_running = false;
-                    break;
+                    requestClose();
+                    return true;
                 }
 
-                if (m_baseUrlInput->handleEvent(event)) break;
-                if (m_apiKeyInput->handleEvent(event)) break;
-                break;
-            }
+                if (isPointInRect(mx, my, m_cancelBtnRect)) {
+                    requestClose();
+                    return true;
+                }
 
-            case SDL_EVENT_TEXT_INPUT:
+                if (handleDropdownClick(mx, my)) {
+                    return true;
+                }
+
+                if (isPointInRect(mx, my, m_apiKeyToggleRect)) {
+                    m_providerDropdownOpen = false;
+                    m_modelDropdownOpen = false;
+                    m_detailDropdownOpen = false;
+                    m_apiKeyVisible = !m_apiKeyVisible;
+                    m_apiKeyInput->setPassword(!m_apiKeyVisible);
+                    m_apiKeyInput->setActive(true);
+                    return true;
+                }
+
+                m_providerDropdownOpen = false;
+                m_modelDropdownOpen = false;
+                m_detailDropdownOpen = false;
+
                 m_baseUrlInput->handleEvent(event);
                 m_apiKeyInput->handleEvent(event);
-                break;
+                // 不消费：标题栏拖动/关闭按钮交给基类处理
+            }
+            break;
         }
+
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            m_baseUrlInput->handleEvent(event);
+            m_apiKeyInput->handleEvent(event);
+            break;  // 不消费：基类还要清除拖动状态
+
+        case SDL_EVENT_MOUSE_MOTION:
+            m_baseUrlInput->handleEvent(event);
+            m_apiKeyInput->handleEvent(event);
+            break;  // 不消费：基类还要处理标题栏拖动
+
+        case SDL_EVENT_KEY_DOWN: {
+            if (event.key.key == SDLK_ESCAPE) {
+                if (m_providerDropdownOpen || m_modelDropdownOpen || m_detailDropdownOpen) {
+                    m_providerDropdownOpen = false;
+                    m_modelDropdownOpen = false;
+                    m_detailDropdownOpen = false;
+                    return true;
+                }
+                return false;  // 无下拉框时 Esc 交给基类关闭
+            }
+
+            if (event.key.key == SDLK_RETURN) {
+                saveCurrentProviderFields();
+                if (m_saveCallback) {
+                    m_saveCallback(m_settings);
+                }
+                requestClose();
+                return true;
+            }
+
+            if (m_baseUrlInput->handleEvent(event)) return true;
+            if (m_apiKeyInput->handleEvent(event)) return true;
+            break;
+        }
+
+        case SDL_EVENT_TEXT_INPUT:
+            m_baseUrlInput->handleEvent(event);
+            m_apiKeyInput->handleEvent(event);
+            return true;
     }
+    return false;
 }
 
 void SettingsDialog::drawDropdown(const SDL_FRect& rect,
@@ -677,11 +528,6 @@ void SettingsDialog::drawDropdownOptions(const SDL_FRect& rect,
     }
 }
 
-void SettingsDialog::drawText(const std::string& text, int x, int y,
-                              uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    TextRender::drawText(m_renderer, m_font, text, x, y, r, g, b, a);
-}
-
 void SettingsDialog::drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered) {
     if (isHovered) {
         fillRoundRect(m_renderer, rect, 7,
@@ -697,18 +543,6 @@ void SettingsDialog::drawButton(const std::string& text, const SDL_FRect& rect, 
     int textX = static_cast<int>(rect.x) + (static_cast<int>(rect.w) - textWidth) / 2;
     int textY = static_cast<int>(rect.y) + (static_cast<int>(rect.h) - getFontHeight()) / 2;
     drawText(text, textX, textY, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
-}
-
-int SettingsDialog::getTextWidth(const std::string& text) {
-    return TextRender::textWidth(m_font, text);
-}
-
-int SettingsDialog::getFontHeight() {
-    return TextRender::fontHeight(m_font);
-}
-
-bool SettingsDialog::isPointInRect(float x, float y, const SDL_FRect& rect) {
-    return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
 } // namespace VideoPlay

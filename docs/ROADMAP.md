@@ -170,6 +170,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 ## 参考
 
 - [`design/episode-playlist.md`](design/episode-playlist.md)
+- [`design/refactoring.md`](design/refactoring.md) — 重构计划（对话框骨架去重、回调收敛、大文件拆分）
 - `src/core/ffmpegplayer.cpp`
 - `src/renderer/sdlrenderer_ui.cpp`
 - `src/core/settings.h`

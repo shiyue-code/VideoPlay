@@ -1,6 +1,7 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
@@ -100,30 +101,6 @@ size_t timestampTokenLength(const std::string& text, size_t pos) {
     }
 
     return i - pos;
-}
-
-bool parseTimestampMs(std::string text, int& valueMs) {
-    text.erase(std::remove(text.begin(), text.end(), '*'), text.end());
-    while (!text.empty() && !isAsciiDigit(text.front())) {
-        text.erase(text.begin());
-    }
-    while (!text.empty() && !isAsciiDigit(text.back())) {
-        text.pop_back();
-    }
-
-    int h = 0;
-    int m = 0;
-    int s = 0;
-    char tail = '\0';
-    if (std::sscanf(text.c_str(), "%d:%d:%d%c", &h, &m, &s, &tail) == 3) {
-        valueMs = (h * 3600 + m * 60 + s) * 1000;
-        return true;
-    }
-    if (std::sscanf(text.c_str(), "%d:%d%c", &m, &s, &tail) == 2) {
-        valueMs = (m * 60 + s) * 1000;
-        return true;
-    }
-    return false;
 }
 
 } // namespace
@@ -1745,24 +1722,18 @@ void SDLRenderer::renderSearchPanel() {
                     int dy = bubbleY + 10 + cmd.y;
                     if (cmd.isTimestamp) {
                         int parsedValue = 0;
-                        if (parseTimestampMs(cmd.text, parsedValue)) {
-                            drawText(cmd.text, dx, dy, 255, 200, 50, 12);
-                            m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, parsedValue});
-                            continue;
+                        int64_t bracketMs = 0;
+                        bool parsed = parseHmsTimestampMs(cmd.text, parsedValue);
+                        if (!parsed && parseBracketTimestampMs(cmd.text, bracketMs)) {
+                            parsedValue = static_cast<int>(bracketMs);
+                            parsed = true;
                         }
-                        drawText(cmd.text, dx, dy, 255, 200, 50, 12); // 黄色时间戳
-                        int mins = 0, secs = 0;
-                        if (sscanf(cmd.text.c_str(), "[%d:%d]", &mins, &secs) == 2) {
-                            int value = (mins * 60 + secs) * 1000;
-                            m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, value});
+                        if (parsed) {
+                            drawText(cmd.text, dx, dy, 255, 200, 50, 12);
+                            m_controlRects.push_back({dx, dy, cmd.width, lineHeight,
+                                                      ControlType::SearchTimestamp, parsedValue});
                         } else {
-                            int h=0, m=0, s=0;
-                            if (sscanf(cmd.text.c_str(), "[%d:%d:%d]", &h, &m, &s) == 3) {
-                                int value = (h * 3600 + m * 60 + s) * 1000;
-                                m_controlRects.push_back({dx, dy, cmd.width, lineHeight, ControlType::SearchTimestamp, value});
-                            } else {
-                                drawText(cmd.text, dx, dy, 255, 255, 255, 12); // 解析失败，白色
-                            }
+                            drawText(cmd.text, dx, dy, 255, 255, 255, 12); // 解析失败，白色
                         }
                     } else {
                         drawText(cmd.text, dx, dy, 255, 255, 255, 12);

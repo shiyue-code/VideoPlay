@@ -14,6 +14,7 @@
 | [`../AGENTS.md`](../AGENTS.md) | 开发者 / Agent | 架构、目录、代码约定、踩坑、测试 | 用户教程、竞品对比清单 |
 | [`ROADMAP.md`](ROADMAP.md) | 维护者 | 未完成功能、优先级、阶段计划 | 已稳定功能的使用说明 |
 | [`design/episode-playlist.md`](design/episode-playlist.md) | 实现该功能的人 | 剧集 / 播放列表的交互与约束 | 全局架构、其他功能设计 |
+| [`design/refactoring.md`](design/refactoring.md) | 做重构的人 | 剩余重构点、收益/风险、顺序 | 功能需求、缺陷清单 |
 
 根目录另有 [`../LICENSE`](../LICENSE)（GPLv3）。根目录 [`../ROADMAP.md`](../ROADMAP.md) 仅为跳转，内容以本目录为准。
 

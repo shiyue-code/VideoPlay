@@ -50,7 +50,11 @@ src/
 ├── app_playlist.cpp             # 播放列表、剧集、连播
 ├── app_events.cpp               # 菜单、字幕、AI、帮助
 ├── core/
-│   ├── ffmpegplayer.h/cpp       # 解码、滤镜、音视频同步、预缓冲
+│   ├── ffmpegplayer.h/cpp       # 解码、音视频同步、预缓冲
+│   ├── ffmpegplayer_filters.cpp # eq/hue/bwdif/yadif 滤镜链
+│   ├── ffmpegplayer_tracks.cpp  # 轨道扫描/切换、字幕流
+│   ├── ffmpegplayer_preview.cpp # 进度条缩略图预览解码
+│   ├── ffmpegplayer_internal.h  # 拆分文件共享的内部助手
 │   ├── audioplayer.h/cpp        # SDL3 音频
 │   ├── settings.h/cpp           # JSON 配置单例
 │   ├── episodedetector.h/cpp    # 剧集文件名识别
@@ -63,7 +67,9 @@ src/
 │   ├── sdlrenderer_draw.cpp     # 绘图原语
 │   ├── sdlrenderer_internal.h   # 拆分文件共享常量
 │   ├── menu_manager / ui_manager / dialog_manager
-│   ├── settingsdialog / inputfield / custommessagebox
+│   ├── modaldialog.*            # 无边框模态对话框基类
+│   ├── textutils.h              # 独立窗口共享的文本绘制/测量
+│   ├── settingsdialog / inputfield / inputdialog / custommessagebox
 │   └── windowframe*.cpp         # 无边框；Win32 与 Linux 分流编译
 ├── subtitles/subtitleparser.*   # SRT/ASS/VTT
 ├── ai/

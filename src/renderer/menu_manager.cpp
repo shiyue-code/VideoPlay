@@ -1014,16 +1014,16 @@ void MenuManager::executeItemAction(const MenuItemPtr& item) {
         item->onTrigger();
     } else if (item->id != 0) {
         MenuId id = static_cast<MenuId>(item->id);
-        if (id == MenuId::PlaylistRemove && m_renderer->m_playlistRemoveCallback &&
+        if (id == MenuId::PlaylistRemove && m_renderer->m_callbacks.playlistRemove &&
             m_contextPlaylistIndex >= 0) {
-            m_renderer->m_playlistRemoveCallback(static_cast<size_t>(m_contextPlaylistIndex));
-        } else if (id == MenuId::PlaylistClear && m_renderer->m_playlistClearCallback) {
-            m_renderer->m_playlistClearCallback();
-        } else if (id == MenuId::PlaylistPlayItem && m_renderer->m_playlistItemCallback &&
+            m_renderer->m_callbacks.playlistRemove(static_cast<size_t>(m_contextPlaylistIndex));
+        } else if (id == MenuId::PlaylistClear && m_renderer->m_callbacks.playlistClear) {
+            m_renderer->m_callbacks.playlistClear();
+        } else if (id == MenuId::PlaylistPlayItem && m_renderer->m_callbacks.playlistItem &&
                    m_contextPlaylistIndex >= 0) {
-            m_renderer->m_playlistItemCallback(static_cast<size_t>(m_contextPlaylistIndex));
-        } else if (m_renderer->m_menuCallback) {
-            m_renderer->m_menuCallback(id);
+            m_renderer->m_callbacks.playlistItem(static_cast<size_t>(m_contextPlaylistIndex));
+        } else if (m_renderer->m_callbacks.menu) {
+            m_renderer->m_callbacks.menu(id);
         }
     }
 }

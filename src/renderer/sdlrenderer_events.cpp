@@ -169,8 +169,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 
         case SDL_EVENT_DROP_FILE: {
             const char* droppedFile = event.drop.data;
-            if (droppedFile && m_fileDropCallback) {
-                m_fileDropCallback(droppedFile);
+            if (droppedFile && m_callbacks.fileDrop) {
+                m_callbacks.fileDrop(droppedFile);
             }
             break;
         }
@@ -195,7 +195,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             if (pressed) {
                 // Ctrl+O 打开文件
                 if (event.key.key == SDLK_O && (event.key.mod & SDL_KMOD_CTRL)) {
-                    if (m_fileOpenCallback) m_fileOpenCallback();
+                    if (m_callbacks.fileOpen) m_callbacks.fileOpen();
                     break;
                 }
 
@@ -225,8 +225,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         deleteSearchCharAfter();
                         return; // 拦截按键
                     } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
-                        if (!m_searchQuery.empty() && m_searchCallback) {
-                            m_searchCallback(m_searchQuery);
+                        if (!m_searchQuery.empty() && m_callbacks.search) {
+                            m_callbacks.search(m_searchQuery);
                             m_searchQuery.clear(); // 发送后清空
                             clearSearchSelection();
                         }
@@ -243,15 +243,15 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                 }
             }
             
-            if (m_keyCallback) {
-                m_keyCallback(event.key.key, pressed);
+            if (m_callbacks.key) {
+                m_callbacks.key(event.key.key, pressed);
             }
 
             //  内置快捷�?
             if (pressed) {
                 switch (event.key.key) {
                     case SDLK_SPACE:
-                        if (m_playPauseCallback) m_playPauseCallback();
+                        if (m_callbacks.playPause) m_callbacks.playPause();
                         break;
                     case SDLK_ESCAPE:
                         if (m_showSearchPanel) {
@@ -269,29 +269,29 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         toggleFullscreen();
                         break;
                     case SDLK_S:
-                        if (m_stopCallback) m_stopCallback();
+                        if (m_callbacks.stop) m_callbacks.stop();
                         break;
                     case SDLK_LEFT: {
                         bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
                         bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
-                        if (ctrlShift && m_episodePrevCallback) {
-                            m_episodePrevCallback();
-                        } else if (shiftOnly && m_seekCallback) {
-                            m_seekCallback(-30.0); // Shift+左: 后退30秒
-                        } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(-5.0); // 左: 后退5秒
+                        if (ctrlShift && m_callbacks.episodePrev) {
+                            m_callbacks.episodePrev();
+                        } else if (shiftOnly && m_callbacks.seek) {
+                            m_callbacks.seek(-30.0); // Shift+左: 后退30秒
+                        } else if (!ctrlShift && m_callbacks.seek) {
+                            m_callbacks.seek(-5.0); // 左: 后退5秒
                         }
                         break;
                     }
                     case SDLK_RIGHT: {
                         bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
                         bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
-                        if (ctrlShift && m_episodeNextCallback) {
-                            m_episodeNextCallback();
-                        } else if (shiftOnly && m_seekCallback) {
-                            m_seekCallback(30.0);  // Shift+右: 前进30秒
-                        } else if (!ctrlShift && m_seekCallback) {
-                            m_seekCallback(5.0);  // 右: 前进5秒
+                        if (ctrlShift && m_callbacks.episodeNext) {
+                            m_callbacks.episodeNext();
+                        } else if (shiftOnly && m_callbacks.seek) {
+                            m_callbacks.seek(30.0);  // Shift+右: 前进30秒
+                        } else if (!ctrlShift && m_callbacks.seek) {
+                            m_callbacks.seek(5.0);  // 右: 前进5秒
                         }
                         break;
                     }
@@ -300,8 +300,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                             adjustContrast(0.1f);
                         } else if (event.key.mod & SDL_KMOD_CTRL) {
                             adjustBrightness(0.05f);
-                        } else if (m_volumeCallback) {
-                            m_volumeCallback(5);
+                        } else if (m_callbacks.volume) {
+                            m_callbacks.volume(5);
                         }
                         break;
                     case SDLK_DOWN:
@@ -309,8 +309,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                             adjustContrast(-0.1f);
                         } else if (event.key.mod & SDL_KMOD_CTRL) {
                             adjustBrightness(-0.05f);
-                        } else if (m_volumeCallback) {
-                            m_volumeCallback(-5);
+                        } else if (m_callbacks.volume) {
+                            m_callbacks.volume(-5);
                         }
                         break;
                     case SDLK_0:
@@ -328,13 +328,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         toggleVideoControlPanel();
                         break;
                     case SDLK_N:
-                        if (m_nextCallback) m_nextCallback();
+                        if (m_callbacks.next) m_callbacks.next();
                         break;
                     case SDLK_P:
-                        if (m_prevCallback) m_prevCallback();
+                        if (m_callbacks.prev) m_callbacks.prev();
                         break;
                     case SDLK_PERIOD:
-                        if (m_speedCallback) m_speedCallback(0); // 循环速度
+                        if (m_callbacks.speed) m_callbacks.speed(0); // 循环速度
                         break;
                     case SDLK_F12:
                         takeScreenshot();
@@ -343,7 +343,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (!(event.key.mod & SDL_KMOD_CTRL)) {
                             // L 键循环切换循环模式
                             m_loopMode = (m_loopMode + 1) % 3;
-                            if (m_loopModeCallback) m_loopModeCallback(m_loopMode);
+                            if (m_callbacks.loopMode) m_callbacks.loopMode(m_loopMode);
                         }
                         break;
                     case SDLK_A:
@@ -358,38 +358,38 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_B:
                         if (event.key.mod & SDL_KMOD_SHIFT) {
-                            if (m_clearBookmarksCallback) m_clearBookmarksCallback();
+                            if (m_callbacks.clearBookmarks) m_callbacks.clearBookmarks();
                         } else if (event.key.mod & SDL_KMOD_CTRL) {
-                            if (m_addBookmarkCallback) m_addBookmarkCallback();
+                            if (m_callbacks.addBookmark) m_callbacks.addBookmark();
                         }
                         break;
                     case SDLK_G:
                         if (event.key.mod & SDL_KMOD_SHIFT) {
-                            if (m_audioSyncCallback) m_audioSyncCallback(-500);  // 音频提前 0.5s
+                            if (m_callbacks.audioSync) m_callbacks.audioSync(-500);  // 音频提前 0.5s
                         } else {
-                            if (m_subtitleSyncCallback) m_subtitleSyncCallback(-500); // 字幕提前 0.5s
+                            if (m_callbacks.subtitleSync) m_callbacks.subtitleSync(-500); // 字幕提前 0.5s
                         }
                         break;
                     case SDLK_H:
                         if (event.key.mod & SDL_KMOD_SHIFT) {
-                            if (m_audioSyncCallback) m_audioSyncCallback(500);   // 音频延后 0.5s
+                            if (m_callbacks.audioSync) m_callbacks.audioSync(500);   // 音频延后 0.5s
                         } else {
-                            if (m_subtitleSyncCallback) m_subtitleSyncCallback(500);  // 字幕延后 0.5s
+                            if (m_callbacks.subtitleSync) m_callbacks.subtitleSync(500);  // 字幕延后 0.5s
                         }
                         break;
                     case SDLK_LEFTBRACKET:
-                        if (m_abLoopCallback) m_abLoopCallback('a');
+                        if (m_callbacks.abLoop) m_callbacks.abLoop('a');
                         break;
                     case SDLK_RIGHTBRACKET:
-                        if (m_abLoopCallback) m_abLoopCallback('b');
+                        if (m_callbacks.abLoop) m_callbacks.abLoop('b');
                         break;
                     case SDLK_BACKSLASH:
-                        if (m_abLoopCallback) m_abLoopCallback('c');
+                        if (m_callbacks.abLoop) m_callbacks.abLoop('c');
                         break;
                     case SDLK_DELETE:
                         if (m_hoveredControl == ControlType::PlaylistItem &&
-                            m_playlistRemoveCallback && m_hoveredControlValue >= 0) {
-                            m_playlistRemoveCallback(static_cast<size_t>(m_hoveredControlValue));
+                            m_callbacks.playlistRemove && m_hoveredControlValue >= 0) {
+                            m_callbacks.playlistRemove(static_cast<size_t>(m_hoveredControlValue));
                         }
                         break;
                 }
@@ -455,8 +455,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             } else if (overEpisode) {
                 m_episodeScrollOffset -= static_cast<int>(event.wheel.y) * 40;
                 if (m_episodeScrollOffset < 0) m_episodeScrollOffset = 0;
-            } else if (m_volumeCallback) {
-                m_volumeCallback(event.wheel.y > 0.0f ? 5 : -5);
+            } else if (m_callbacks.volume) {
+                m_callbacks.volume(event.wheel.y > 0.0f ? 5 : -5);
             }
             break;
         }
@@ -583,12 +583,12 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     }
     
     // 处理音量拖动
-    if (m_draggingVolume && m_volumeCallback) {
+    if (m_draggingVolume && m_callbacks.volume) {
         for (const auto& rect : m_controlRects) {
             if (rect.type == ControlType::VolumeBar) {
                 float ratio = static_cast<float>(x - rect.x) / rect.w;
                 ratio = std::max(0.0f, std::min(1.0f, ratio));
-                m_volumeCallback(static_cast<int>(ratio * 100) + 1000);
+                m_callbacks.volume(kVolumeAbsoluteBase + static_cast<int>(ratio * 100));
                 break;
             }
         }
@@ -602,7 +602,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 ratio = std::clamp(ratio, 0.0f, 1.0f);
                 m_videoFilterConfig.brightness = -1.0f + ratio * 2.0f;
                 m_videoFilterConfig.enabled = true;
-                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                 break;
             }
         }
@@ -614,7 +614,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 ratio = std::clamp(ratio, 0.0f, 1.0f);
                 m_videoFilterConfig.contrast = ratio * 2.0f;
                 m_videoFilterConfig.enabled = true;
-                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                 break;
             }
         }
@@ -626,7 +626,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 ratio = std::clamp(ratio, 0.0f, 1.0f);
                 m_videoFilterConfig.saturation = ratio * 3.0f;
                 m_videoFilterConfig.enabled = true;
-                if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                 break;
             }
         }
@@ -831,16 +831,16 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
     // 处理控件点击
     switch (m_pressedControl) {
         case ControlType::PlayButton:
-            if (m_playPauseCallback) m_playPauseCallback();
+            if (m_callbacks.playPause) m_callbacks.playPause();
             break;
         case ControlType::StopButton:
-            if (m_stopCallback) m_stopCallback();
+            if (m_callbacks.stop) m_callbacks.stop();
             break;
         case ControlType::PrevButton:
-            if (m_prevCallback) m_prevCallback();
+            if (m_callbacks.prev) m_callbacks.prev();
             break;
         case ControlType::NextButton:
-            if (m_nextCallback) m_nextCallback();
+            if (m_callbacks.next) m_callbacks.next();
             break;
         case ControlType::ProgressBar:
             m_draggingProgress = true;
@@ -854,7 +854,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             }
             break;
         case ControlType::ChapterMarker:
-            if (m_seekCallback && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_chapters.size()) {
+            if (m_callbacks.seek && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_chapters.size()) {
                 int64_t chapterTime = m_chapters[m_pressedControlValue].startTime;
                 logger().info("[Chapter] Clicked chapter " + std::to_string(m_pressedControlValue) + 
                     ", startTime=" + std::to_string(chapterTime) + 
@@ -862,18 +862,18 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                 if (m_lastDuration > 0) {
                     double ratio = static_cast<double>(chapterTime) / static_cast<double>(m_lastDuration);
                     logger().info("[Chapter] ratio=" + std::to_string(ratio) + 
-                        ", seekParam=" + std::to_string(1000.0 + ratio * 1000.0));
-                    m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
+                        ", seekParam=" + std::to_string(kSeekAbsoluteBase + ratio * 1000.0));
+                    m_callbacks.seek(kSeekAbsoluteBase + ratio * 1000.0); // 绝对位置编码
                 }
             }
             break;
         case ControlType::BookmarkMarker:
-            if (m_bookmarkClickCallback && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_bookmarks.size()) {
-                m_bookmarkClickCallback(m_pressedControlValue);
+            if (m_callbacks.bookmarkClick && m_pressedControlValue >= 0 && m_pressedControlValue < (int)m_bookmarks.size()) {
+                m_callbacks.bookmarkClick(m_pressedControlValue);
             }
             break;
         case ControlType::VolumeButton:
-            if (m_muteCallback) m_muteCallback();
+            if (m_callbacks.mute) m_callbacks.mute();
             break;
         case ControlType::VolumeBar:
             m_draggingVolume = true;
@@ -882,13 +882,13 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                 if (rect.type == ControlType::VolumeBar) {
                     float ratio = static_cast<float>(x - rect.x) / rect.w;
                     ratio = std::max(0.0f, std::min(1.0f, ratio));
-                    if (m_volumeCallback) m_volumeCallback(static_cast<int>(ratio * 100) + 1000);
+                    if (m_callbacks.volume) m_callbacks.volume(kVolumeAbsoluteBase + static_cast<int>(ratio * 100));
                     break;
                 }
             }
             break;
         case ControlType::SpeedButton:
-            if (m_speedCallback) m_speedCallback(0);
+            if (m_callbacks.speed) m_callbacks.speed(0);
             break;
         case ControlType::PlaylistButton:
             togglePlaylistPanel();
@@ -910,8 +910,8 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
             } else {
                 m_videoFilterConfig.hdrToneMap = HdrToneMapMode::Auto;
             }
-            if (m_videoFilterConfigCallback) {
-                m_videoFilterConfigCallback(m_videoFilterConfig);
+            if (m_callbacks.videoFilterConfig) {
+                m_callbacks.videoFilterConfig(m_videoFilterConfig);
             }
             std::string msg = "HDR 色调映射: ";
             if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::Auto) msg += "自动";
@@ -928,7 +928,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                     ratio = std::clamp(ratio, 0.0f, 1.0f);
                     m_videoFilterConfig.brightness = -1.0f + ratio * 2.0f;
                     m_videoFilterConfig.enabled = true;
-                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                     break;
                 }
             }
@@ -941,7 +941,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                     ratio = std::clamp(ratio, 0.0f, 1.0f);
                     m_videoFilterConfig.contrast = ratio * 2.0f;
                     m_videoFilterConfig.enabled = true;
-                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                     break;
                 }
             }
@@ -954,7 +954,7 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
                     ratio = std::clamp(ratio, 0.0f, 1.0f);
                     m_videoFilterConfig.saturation = ratio * 3.0f;
                     m_videoFilterConfig.enabled = true;
-                    if (m_videoFilterConfigCallback) m_videoFilterConfigCallback(m_videoFilterConfig);
+                    if (m_callbacks.videoFilterConfig) m_callbacks.videoFilterConfig(m_videoFilterConfig);
                     break;
                 }
             }
@@ -977,14 +977,14 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
 
 void SDLRenderer::handleMouseButtonUp(int x, int y) {
     // 进度条释放时才执行 seek
-    if (m_draggingProgress && m_seekCallback) {
-        m_seekCallback(m_dragProgressRatio * 1000 + 1000); // 传回绝对位置 (1000~2000)
+    if (m_draggingProgress && m_callbacks.seek) {
+        m_callbacks.seek(kSeekAbsoluteBase + m_dragProgressRatio * 1000); // 传回绝对位置 (1000~2000)
     }
 
     if (m_playlistDragging) {
-        if (m_playlistReorderCallback && m_playlistDragFrom >= 0 &&
+        if (m_callbacks.playlistReorder && m_playlistDragFrom >= 0 &&
             m_playlistDragTo >= 0 && m_playlistDragFrom != m_playlistDragTo) {
-            m_playlistReorderCallback(static_cast<size_t>(m_playlistDragFrom),
+            m_callbacks.playlistReorder(static_cast<size_t>(m_playlistDragFrom),
                                       static_cast<size_t>(m_playlistDragTo));
         }
         m_playlistDragging = false;
@@ -1003,23 +1003,23 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
         if (releaseControl == m_pressedControl && releaseValue == m_pressedControlValue) {
             switch (m_pressedControl) {
                 case ControlType::PlaylistItem:
-                    if (m_playlistItemCallback) m_playlistItemCallback(static_cast<size_t>(m_pressedControlValue));
+                    if (m_callbacks.playlistItem) m_callbacks.playlistItem(static_cast<size_t>(m_pressedControlValue));
                     break;
                 case ControlType::EpisodeItem:
                     logger().info("[Episode] Clicked episode item " + std::to_string(m_pressedControlValue));
-                    if (m_episodeItemCallback) m_episodeItemCallback(static_cast<size_t>(m_pressedControlValue));
+                    if (m_callbacks.episodeItem) m_callbacks.episodeItem(static_cast<size_t>(m_pressedControlValue));
                     break;
                 case ControlType::EpisodePrev:
-                    if (m_episodePrevCallback) m_episodePrevCallback();
+                    if (m_callbacks.episodePrev) m_callbacks.episodePrev();
                     break;
                 case ControlType::EpisodeNext:
-                    if (m_episodeNextCallback) m_episodeNextCallback();
+                    if (m_callbacks.episodeNext) m_callbacks.episodeNext();
                     break;
                 case ControlType::SearchTimestamp:
-                    if (m_seekCallback && m_lastDuration > 0) {
+                    if (m_callbacks.seek && m_lastDuration > 0) {
                         double ratio = static_cast<double>(m_pressedControlValue) / static_cast<double>(m_lastDuration);
                         ratio = std::max(0.0, std::min(1.0, ratio));
-                        m_seekCallback(1000.0 + ratio * 1000.0); // 绝对位置编码
+                        m_callbacks.seek(kSeekAbsoluteBase + ratio * 1000.0); // 绝对位置编码
                     }
                     break;
                 case ControlType::SearchMessageCopy:

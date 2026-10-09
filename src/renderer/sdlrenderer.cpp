@@ -257,8 +257,8 @@ void SDLRenderer::toggleFullscreen() {
         m_windowFrame->updateFrame();
     }
     
-    if (m_fullscreenCallback) {
-        m_fullscreenCallback();
+    if (m_callbacks.fullscreen) {
+        m_callbacks.fullscreen();
     }
 }
 
@@ -288,10 +288,6 @@ bool SDLRenderer::isBorderless() const {
     return m_borderless;
 }
 
-void SDLRenderer::setLiveRenderCallback(std::function<void()> callback) {
-    m_liveRenderCallback = std::move(callback);
-}
-
 void SDLRenderer::setupWindowFrameCallbacks() {
     if (!m_windowFrame) return;
 
@@ -312,7 +308,7 @@ void SDLRenderer::setupWindowFrameCallbacks() {
 }
 
 void SDLRenderer::renderLiveFrame() {
-    if (m_inLiveRender || !m_liveRenderCallback || !m_window) return;
+    if (m_inLiveRender || !m_callbacks.liveRender || !m_window) return;
 
     m_inLiveRender = true;
     // 模态循环中 SDL 事件未被处理，需要直接同步窗口尺寸
@@ -322,7 +318,7 @@ void SDLRenderer::renderLiveFrame() {
         m_windowWidth = w;
         m_windowHeight = h;
     }
-    m_liveRenderCallback();
+    m_callbacks.liveRender();
     m_inLiveRender = false;
 }
 
@@ -609,76 +605,14 @@ void SDLRenderer::takeScreenshot() {
     }
 }
 
-void SDLRenderer::setFileDropCallback(FileDropCallback callback) {
-    m_fileDropCallback = callback;
+void SDLRenderer::setCallbacks(RendererCallbacks callbacks) {
+    auto liveRender = std::move(m_callbacks.liveRender);  // liveRender 由单独 setter 管理
+    m_callbacks = std::move(callbacks);
+    if (liveRender) m_callbacks.liveRender = std::move(liveRender);
 }
 
-void SDLRenderer::setFileOpenCallback(FileOpenCallback callback) {
-    m_fileOpenCallback = callback;
-}
-
-void SDLRenderer::setKeyCallback(KeyCallback callback) {
-    m_keyCallback = callback;
-}
-
-void SDLRenderer::setMouseCallback(MouseCallback callback) {
-    m_mouseCallback = callback;
-}
-
-void SDLRenderer::setSeekCallback(SeekCallback callback) {
-    m_seekCallback = callback;
-}
-
-void SDLRenderer::setVolumeCallback(VolumeCallback callback) {
-    m_volumeCallback = callback;
-}
-
-void SDLRenderer::setMuteCallback(UIMuteCallback callback) {
-    m_muteCallback = callback;
-}
-
-void SDLRenderer::setPlayPauseCallback(PlayPauseCallback callback) {
-    m_playPauseCallback = callback;
-}
-
-void SDLRenderer::setStopCallback(StopCallback callback) {
-    m_stopCallback = callback;
-}
-
-void SDLRenderer::setSpeedCallback(SpeedCallback callback) {
-    m_speedCallback = callback;
-}
-
-void SDLRenderer::setPrevCallback(PrevCallback callback) {
-    m_prevCallback = callback;
-}
-
-void SDLRenderer::setNextCallback(NextCallback callback) {
-    m_nextCallback = callback;
-}
-
-void SDLRenderer::setFullscreenCallback(FullscreenCallback callback) {
-    m_fullscreenCallback = callback;
-}
-
-void SDLRenderer::setMenuCallback(MenuCallback callback) {
-    m_menuCallback = callback;
-}
-
-void SDLRenderer::setPlaylistItemCallback(PlaylistItemCallback callback) {
-    m_playlistItemCallback = callback;
-}
-
-void SDLRenderer::setPlaylistRemoveCallback(PlaylistItemCallback callback) {
-    m_playlistRemoveCallback = std::move(callback);
-}
-
-void SDLRenderer::setPlaylistClearCallback(std::function<void()> callback) {
-    m_playlistClearCallback = std::move(callback);
-}
-
-void SDLRenderer::setPlaylistReorderCallback(std::function<void(size_t, size_t)> callback) {
-    m_playlistReorderCallback = std::move(callback);
+void SDLRenderer::setLiveRenderCallback(std::function<void()> callback) {
+    m_callbacks.liveRender = std::move(callback);
 }
 
 void SDLRenderer::refreshAudioOutputDevices() {
@@ -734,62 +668,6 @@ void SDLRenderer::clearPreview() {
         m_previewTexW = 0;
         m_previewTexH = 0;
     }
-}
-
-void SDLRenderer::setEpisodeItemCallback(EpisodeItemCallback callback) {
-    m_episodeItemCallback = callback;
-}
-
-void SDLRenderer::setEpisodePrevCallback(EpisodePrevCallback callback) {
-    m_episodePrevCallback = callback;
-}
-
-void SDLRenderer::setEpisodeNextCallback(EpisodeNextCallback callback) {
-    m_episodeNextCallback = callback;
-}
-
-void SDLRenderer::setLoopModeCallback(LoopModeCallback callback) {
-    m_loopModeCallback = std::move(callback);
-}
-
-void SDLRenderer::setSearchCallback(SearchCallback callback) {
-    m_searchCallback = std::move(callback);
-}
-
-void SDLRenderer::setSubtitleSyncCallback(SubtitleSyncCallback callback) {
-    m_subtitleSyncCallback = callback;
-}
-
-void SDLRenderer::setAudioSyncCallback(AudioSyncCallback callback) {
-    m_audioSyncCallback = callback;
-}
-
-void SDLRenderer::setAddBookmarkCallback(std::function<void()> callback) {
-    m_addBookmarkCallback = callback;
-}
-
-void SDLRenderer::setClearBookmarksCallback(std::function<void()> callback) {
-    m_clearBookmarksCallback = callback;
-}
-
-void SDLRenderer::setBookmarkClickCallback(std::function<void(int)> callback) {
-    m_bookmarkClickCallback = callback;
-}
-
-void SDLRenderer::setABLoopCallback(ABLoopCallback callback) {
-    m_abLoopCallback = callback;
-}
-
-void SDLRenderer::setChapterSeekCallback(ChapterSeekCallback callback) {
-    m_chapterSeekCallback = callback;
-}
-
-void SDLRenderer::setAudioTrackCallback(AudioTrackCallback callback) {
-    m_audioTrackCallback = std::move(callback);
-}
-
-void SDLRenderer::setSubtitleTrackCallback(SubtitleTrackCallback callback) {
-    m_subtitleTrackCallback = std::move(callback);
 }
 
 void SDLRenderer::setAudioTracks(const std::vector<TrackInfo>& tracks, int currentIndex) {
@@ -1020,10 +898,6 @@ void SDLRenderer::setVideoFilterConfig(const VideoFilterConfig& config) {
     m_hdrToneMapAlgorithm = config.hdrAlgorithm;
 }
 
-void SDLRenderer::setVideoFilterConfigCallback(VideoFilterConfigCallback callback) {
-    m_videoFilterConfigCallback = callback;
-}
-
 void SDLRenderer::toggleVideoControlPanel() {
     m_showVideoControlPanel = !m_showVideoControlPanel;
     if (m_showVideoControlPanel) {
@@ -1035,8 +909,8 @@ void SDLRenderer::toggleVideoControlPanel() {
 void SDLRenderer::adjustBrightness(float delta) {
     m_videoFilterConfig.brightness = std::clamp(m_videoFilterConfig.brightness + delta, -1.0f, 1.0f);
     m_videoFilterConfig.enabled = true;
-    if (m_videoFilterConfigCallback) {
-        m_videoFilterConfigCallback(m_videoFilterConfig);
+    if (m_callbacks.videoFilterConfig) {
+        m_callbacks.videoFilterConfig(m_videoFilterConfig);
     }
     int percent = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
     std::string sign = percent > 0 ? "+" : "";
@@ -1047,8 +921,8 @@ void SDLRenderer::adjustBrightness(float delta) {
 void SDLRenderer::adjustContrast(float delta) {
     m_videoFilterConfig.contrast = std::clamp(m_videoFilterConfig.contrast + delta, 0.0f, 2.0f);
     m_videoFilterConfig.enabled = true;
-    if (m_videoFilterConfigCallback) {
-        m_videoFilterConfigCallback(m_videoFilterConfig);
+    if (m_callbacks.videoFilterConfig) {
+        m_callbacks.videoFilterConfig(m_videoFilterConfig);
     }
     int percent = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
     float progress = m_videoFilterConfig.contrast / 2.0f;
@@ -1058,8 +932,8 @@ void SDLRenderer::adjustContrast(float delta) {
 void SDLRenderer::adjustSaturation(float delta) {
     m_videoFilterConfig.saturation = std::clamp(m_videoFilterConfig.saturation + delta, 0.0f, 3.0f);
     m_videoFilterConfig.enabled = true;
-    if (m_videoFilterConfigCallback) {
-        m_videoFilterConfigCallback(m_videoFilterConfig);
+    if (m_callbacks.videoFilterConfig) {
+        m_callbacks.videoFilterConfig(m_videoFilterConfig);
     }
     int percent = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
     float progress = m_videoFilterConfig.saturation / 3.0f;
@@ -1074,8 +948,8 @@ void SDLRenderer::resetVideoFilter() {
     m_videoFilterConfig.deinterlace = deint;
     m_videoFilterConfig.hdrToneMap = hdrMode;
     m_videoFilterConfig.hdrAlgorithm = hdrAlgo;
-    if (m_videoFilterConfigCallback) {
-        m_videoFilterConfigCallback(m_videoFilterConfig);
+    if (m_callbacks.videoFilterConfig) {
+        m_callbacks.videoFilterConfig(m_videoFilterConfig);
     }
     showOSD(OSDType::Info, "画面参数已重置");
 }

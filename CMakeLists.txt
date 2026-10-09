@@ -127,6 +127,9 @@ set(SOURCES
     src/app_playlist.cpp
     src/app_events.cpp
     src/core/ffmpegplayer.cpp
+    src/core/ffmpegplayer_filters.cpp
+    src/core/ffmpegplayer_tracks.cpp
+    src/core/ffmpegplayer_preview.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
     src/core/episodedetector.cpp
@@ -144,6 +147,7 @@ set(SOURCES
     src/renderer/custommessagebox.cpp
     src/renderer/inputfield.cpp
     src/renderer/inputdialog.cpp
+    src/renderer/modaldialog.cpp
     src/renderer/settingsdialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
@@ -164,6 +168,7 @@ endif()
 set(HEADERS
     src/app.h
     src/core/ffmpegplayer.h
+    src/core/ffmpegplayer_internal.h
     src/core/audioplayer.h
     src/core/settings.h
     src/core/common.h
@@ -182,6 +187,7 @@ set(HEADERS
     src/renderer/custommessagebox.h
     src/renderer/inputfield.h
     src/renderer/inputdialog.h
+    src/renderer/modaldialog.h
     src/renderer/textutils.h
     src/renderer/settingsdialog.h
     src/ai/httpclient.h

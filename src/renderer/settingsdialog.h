@@ -2,6 +2,7 @@
 #define SETTINGSDIALOG_H
 
 #include "renderer/inputfield.h"
+#include "renderer/modaldialog.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -26,33 +27,21 @@ struct AISettings {
     std::unordered_map<std::string, AIProviderSettings> providers;
 };
 
-class SettingsDialog {
+class SettingsDialog : public ModalDialog {
 public:
     SettingsDialog(SDL_Window* parentWindow, TTF_Font* font);
-    ~SettingsDialog();
+    ~SettingsDialog() override = default;
 
     using SaveCallback = std::function<void(const AISettings& settings)>;
 
     void show(const AISettings& currentSettings, SaveCallback onSave);
 
 private:
-    SDL_Window* m_parentWindow;
-    SDL_Window* m_window = nullptr;
-    SDL_Renderer* m_renderer = nullptr;
-    TTF_Font* m_font;
-
     AISettings m_settings;
     SaveCallback m_saveCallback;
 
-    bool m_running = false;
-    bool m_dragging = false;
     bool m_apiKeyVisible = false;
-    int m_dragOffsetX = 0;
-    int m_dragOffsetY = 0;
 
-    int m_windowWidth = 500;
-    int m_windowHeight = 420;
-    static constexpr int TITLE_HEIGHT = 32;
     static constexpr int INPUT_HEIGHT = 30;
     static constexpr int PADDING = 15;
 
@@ -93,19 +82,9 @@ private:
     bool dropdownShouldOpenUpward(const SDL_FRect& rect, size_t optionCount) const;
     SDL_FRect dropdownOptionRect(const SDL_FRect& rect, size_t index, size_t optionCount) const;
     void calculateLayout();
-    void render();
-    void handleEvents();
-    void drawText(const std::string& text,
-                  int x,
-                  int y,
-                  uint8_t r,
-                  uint8_t g,
-                  uint8_t b,
-                  uint8_t a = 255);
+    bool onEvent(const SDL_Event& event) override;
+    void renderContent() override;
     void drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered);
-    int getTextWidth(const std::string& text);
-    int getFontHeight();
-    bool isPointInRect(float x, float y, const SDL_FRect& rect);
 };
 
 } // namespace VideoPlay

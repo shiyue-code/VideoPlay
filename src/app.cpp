@@ -152,7 +152,8 @@ bool VideoPlayerApp::initialize() {
     });
 
     // 设置渲染器回调
-    m_renderer->setFileDropCallback([this](const std::string& path) {
+    RendererCallbacks cb;
+    cb.fileDrop = ([this](const std::string& path) {
         // 拖入字幕文件时加载为当前视频的外挂字幕，而非当媒体打开
         std::string ext;
         size_t dotPos = path.find_last_of('.');
@@ -170,79 +171,79 @@ bool VideoPlayerApp::initialize() {
         }
         openFile(path);
     });
-    m_renderer->setFileOpenCallback([this]() {
+    cb.fileOpen = ([this]() {
         openFileDialog();
     });
-    m_renderer->setPlayPauseCallback([this]() {
+    cb.playPause = ([this]() {
         togglePlayPause();
     });
-    m_renderer->setStopCallback([this]() {
+    cb.stop = ([this]() {
         stop();
     });
-    m_renderer->setPrevCallback([this]() {
+    cb.prev = ([this]() {
         playPrevious();
     });
-    m_renderer->setNextCallback([this]() {
+    cb.next = ([this]() {
         playNext();
     });
-    m_renderer->setSeekCallback([this](double pos) {
-        // pos < 1000 表示相对跳转（秒），否则是绝对位置
-        if (pos < 1000) {
+    cb.seek = ([this](double pos) {
+        // < kSeekAbsoluteBase 为相对跳转（秒），否则是绝对位置编码
+        if (pos < kSeekAbsoluteBase) {
             seek(pos * 1000); // 转换为毫秒
         } else {
-            seekTo((pos - 1000) / 1000); // 绝对位置
+            seekTo((pos - kSeekAbsoluteBase) / 1000); // 绝对位置
         }
     });
-    m_renderer->setVolumeCallback([this](int delta) {
-        // >=1000 表示绝对值（value-1000），否则是相对增量
-        if (delta >= 1000) {
-            setVolumeTo(delta - 1000);
+    cb.volume = ([this](int delta) {
+        // >= kVolumeAbsoluteBase 为绝对音量，否则是相对增量
+        if (delta >= kVolumeAbsoluteBase) {
+            setVolumeTo(delta - kVolumeAbsoluteBase);
         } else {
             setVolume(delta);
         }
     });
-    m_renderer->setMuteCallback([this]() {
+    cb.mute = ([this]() {
         toggleMute();
     });
-    m_renderer->setSpeedCallback([this](double speed) {
+    cb.speed = ([this](double speed) {
         if (speed == 0) {
             cycleSpeed();
         } else {
             setSpeed(speed);
         }
     });
-    m_renderer->setFullscreenCallback([this]() {
+    cb.fullscreen = ([this]() {
         // 全屏切换由渲染器处理
     });
-    m_renderer->setPlaylistItemCallback([this](size_t index) {
+    cb.playlistItem = ([this](size_t index) {
         playFromPlaylist(index);
     });
-    m_renderer->setPlaylistRemoveCallback([this](size_t index) {
+    cb.playlistRemove = ([this](size_t index) {
         removeFromPlaylist(index);
     });
-    m_renderer->setPlaylistClearCallback([this]() {
+    cb.playlistClear = ([this]() {
         clearPlaylist();
     });
-    m_renderer->setPlaylistReorderCallback([this](size_t from, size_t to) {
+    cb.playlistReorder = ([this](size_t from, size_t to) {
         reorderPlaylist(from, to);
     });
-    m_renderer->setEpisodeItemCallback([this](size_t index) {
+    cb.episodeItem = ([this](size_t index) {
         playEpisode(index);
     });
-    m_renderer->setEpisodePrevCallback([this]() {
+    cb.episodePrev = ([this]() {
         playPreviousEpisode();
     });
-    m_renderer->setEpisodeNextCallback([this]() {
+    cb.episodeNext = ([this]() {
         playNextEpisode();
     });
-    m_renderer->setLoopModeCallback([this](int mode) {
+    cb.loopMode = ([this](int mode) {
         Settings::instance().setLoopMode(static_cast<LoopMode>(mode));
         m_renderer->setLoopMode(mode);
     });
-    m_renderer->setSearchCallback([this](const std::string& query) {
+    cb.search = ([this](const std::string& query) {
         handleSearch(query);
     });
-    m_renderer->setSubtitleSyncCallback([this](int deltaMs) {
+    cb.subtitleSync = ([this](int deltaMs) {
         if (m_subtitleParser && m_subtitleParser->isLoaded()) {
             m_subtitleParser->adjustOffset(deltaMs);
             int64_t offset = m_subtitleParser->offset();
@@ -251,7 +252,7 @@ bool VideoPlayerApp::initialize() {
             m_renderer->showOSD(OSDType::Info, "字幕同步 " + sign + std::to_string(offset) + "ms");
         }
     });
-    m_renderer->setAudioSyncCallback([this](int deltaMs) {
+    cb.audioSync = ([this](int deltaMs) {
         if (m_player) {
             m_player->adjustAudioSync(deltaMs);
             int64_t offset = m_player->audioSyncOffsetMs();
@@ -261,17 +262,17 @@ bool VideoPlayerApp::initialize() {
             m_renderer->showOSD(OSDType::Info, "音频同步 " + direction + std::to_string(absolute) + "ms");
         }
     });
-    m_renderer->setAddBookmarkCallback([this]() { addBookmark(); });
-    m_renderer->setClearBookmarksCallback([this]() { clearBookmarks(); });
-    m_renderer->setBookmarkClickCallback([this](int index) { jumpToBookmark(index); });
-    m_renderer->setABLoopCallback([this](char action) {
+    cb.addBookmark = ([this]() { addBookmark(); });
+    cb.clearBookmarks = ([this]() { clearBookmarks(); });
+    cb.bookmarkClick = ([this](int index) { jumpToBookmark(index); });
+    cb.abLoop = ([this](char action) {
         switch (action) {
             case 'a': setLoopPointA(); break;
             case 'b': setLoopPointB(); break;
             case 'c': clearLoop(); break;
         }
     });
-    m_renderer->setVideoFilterConfigCallback([this](const VideoFilterConfig& config) {
+    cb.videoFilterConfig = ([this](const VideoFilterConfig& config) {
         Settings::instance().setVideoFilterConfig(config);
         Settings::instance().save();
         if (m_player) {
@@ -283,10 +284,10 @@ bool VideoPlayerApp::initialize() {
             m_renderer->setHdrToneMapAlgorithm(config.hdrAlgorithm);
         }
     });
-    m_renderer->setMenuCallback([this](MenuId menuId) {
+    cb.menu = ([this](MenuId menuId) {
         handleMenu(menuId);
     });
-    m_renderer->setAudioTrackCallback([this](int trackIndex) {
+    cb.audioTrack = ([this](int trackIndex) {
         if (m_player) {
             if (m_player->setAudioTrack(trackIndex)) {
                 if (m_renderer) {
@@ -297,7 +298,7 @@ bool VideoPlayerApp::initialize() {
             }
         }
     });
-    m_renderer->setSubtitleTrackCallback([this](int trackIndex) {
+    cb.subtitleTrack = ([this](int trackIndex) {
         if (m_player) {
             if (m_player->setSubtitleTrack(trackIndex)) {
                 if (m_renderer) {
@@ -341,7 +342,7 @@ bool VideoPlayerApp::initialize() {
     if (windowConfig.maximized) {
         m_renderer->maximizeWindow();
     }
-    m_renderer->setKeyCallback([this](int key, bool pressed) {
+    cb.key = ([this](int key, bool pressed) {
         if (!pressed) return;
         
         switch (key) {
@@ -378,6 +379,7 @@ bool VideoPlayerApp::initialize() {
                 break;
         }
     });
+    m_renderer->setCallbacks(std::move(cb));
 
     // 创建字幕解析器
     m_subtitleParser = std::make_unique<SubtitleParser>();
