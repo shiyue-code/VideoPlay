@@ -95,14 +95,17 @@ void VideoPlayerApp::seekTo(double position) {
 }
 
 void VideoPlayerApp::setVolume(int delta) {
-    m_volume += delta;
-    m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
+    setVolumeTo(m_volume + delta);
+}
+
+void VideoPlayerApp::setVolumeTo(int value) {
+    m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, value));
     Settings::instance().setVolume(m_volume);
 
     if (m_player) {
         m_player->setVolume(m_volume);
     }
-    
+
     logger().info("Volume set to: {}", m_volume);
     if (m_renderer) {
         m_renderer->showOSD(OSDType::Volume, "音量 " + std::to_string(m_volume) + "%",

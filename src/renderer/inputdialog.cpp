@@ -1,5 +1,6 @@
 #include "renderer/inputdialog.h"
 #include "renderer/inputfield.h"
+#include "renderer/textutils.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <utility>
@@ -293,32 +294,15 @@ void InputDialog::render() {
 
 void InputDialog::drawText(const std::string& text, int x, int y,
                            uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    if (!m_renderer || text.empty() || !m_font) return;
-
-    SDL_Color color = {r, g, b, a};
-    SDL_Surface* surface = TTF_RenderText_Blended(m_font, text.c_str(), 0, color);
-    if (!surface) return;
-
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-    if (texture) {
-        SDL_FRect dstRect = {static_cast<float>(x), static_cast<float>(y),
-                             static_cast<float>(surface->w), static_cast<float>(surface->h)};
-        SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
-        SDL_DestroyTexture(texture);
-    }
-    SDL_DestroySurface(surface);
+    TextRender::drawText(m_renderer, m_font, text, x, y, r, g, b, a);
 }
 
 int InputDialog::getTextWidth(const std::string& text) {
-    if (text.empty() || !m_font) return 0;
-    int w = 0;
-    TTF_GetStringSize(m_font, text.c_str(), 0, &w, nullptr);
-    return w;
+    return TextRender::textWidth(m_font, text);
 }
 
 int InputDialog::getFontHeight() {
-    if (!m_font) return 0;
-    return TTF_GetFontHeight(m_font);
+    return TextRender::fontHeight(m_font);
 }
 
 } // namespace VideoPlay

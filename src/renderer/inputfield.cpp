@@ -1,4 +1,5 @@
 #include "renderer/inputfield.h"
+#include "renderer/textutils.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <cmath>
@@ -426,34 +427,15 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
 
 void InputField::drawText(SDL_Renderer* renderer, const std::string& text, int x, int y,
                           uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    if (!renderer || text.empty() || !m_font) return;
-
-    SDL_Color color = {r, g, b, a};
-    SDL_Surface* surface = TTF_RenderText_Blended(m_font, text.c_str(), 0, color);
-    if (!surface) return;
-
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (texture) {
-        SDL_FRect dstRect = {static_cast<float>(x), static_cast<float>(y),
-                             static_cast<float>(surface->w), static_cast<float>(surface->h)};
-        SDL_RenderTexture(renderer, texture, nullptr, &dstRect);
-        SDL_DestroyTexture(texture);
-    }
-
-    SDL_DestroySurface(surface);
+    TextRender::drawText(renderer, m_font, text, x, y, r, g, b, a);
 }
 
 int InputField::getTextWidth(const std::string& text) const {
-    if (text.empty() || !m_font) return 0;
-
-    int w = 0;
-    TTF_GetStringSize(m_font, text.c_str(), 0, &w, nullptr);
-    return w;
+    return TextRender::textWidth(m_font, text);
 }
 
 int InputField::getFontHeight() const {
-    if (!m_font) return 0;
-    return TTF_GetFontHeight(m_font);
+    return TextRender::fontHeight(m_font);
 }
 
 std::string InputField::maskPassword(const std::string& text) const {

@@ -1,4 +1,5 @@
 ﻿#include "renderer/custommessagebox.h"
+#include "renderer/textutils.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <cstdio>
@@ -25,27 +26,6 @@ namespace {
 Logger& logger() {
     static auto logger = Logger::get("renderer.dialog");
     return *logger;
-}
-
-size_t utf8CharLength(const std::string& text, size_t pos) {
-    if (pos >= text.size()) {
-        return 0;
-    }
-
-    unsigned char ch = static_cast<unsigned char>(text[pos]);
-    if (ch < 0x80) {
-        return 1;
-    }
-    if ((ch & 0xE0) == 0xC0) {
-        return (pos + 1 < text.size()) ? 2 : 1;
-    }
-    if ((ch & 0xF0) == 0xE0) {
-        return (pos + 2 < text.size()) ? 3 : 1;
-    }
-    if ((ch & 0xF8) == 0xF0) {
-        return (pos + 3 < text.size()) ? 4 : 1;
-    }
-    return 1;
 }
 
 bool parseTimestampMs(const std::string& text, int64_t& timestampMs) {
@@ -190,39 +170,7 @@ void CustomMessageBox::calculateSize() {
 }
 
 std::vector<std::string> CustomMessageBox::wrapText(const std::string& text, int maxWidth) {
-    std::vector<std::string> lines;
-    std::string currentLine;
-
-    for (size_t i = 0; i < text.length();) {
-        if (text[i] == '\r') {
-            ++i;
-            continue;
-        }
-        if (text[i] == '\n') {
-            lines.push_back(currentLine);
-            currentLine.clear();
-            ++i;
-            continue;
-        }
-
-        size_t charLen = utf8CharLength(text, i);
-        std::string nextChar = text.substr(i, charLen);
-        i += charLen;
-
-        std::string candidate = currentLine + nextChar;
-        if (!currentLine.empty() && getTextWidth(candidate) > maxWidth) {
-            lines.push_back(currentLine);
-            currentLine = nextChar;
-        } else {
-            currentLine = candidate;
-        }
-    }
-
-    if (!currentLine.empty()) {
-        lines.push_back(currentLine);
-    }
-
-    return lines;
+    return TextRender::wrapText(m_font, text, maxWidth);
 }
 
 void CustomMessageBox::render() {
@@ -432,34 +380,15 @@ void CustomMessageBox::handleEvents() {
 }
 
 void CustomMessageBox::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    if (!m_renderer || text.empty() || !m_font) return;
-
-    SDL_Color color = {r, g, b, a};
-    SDL_Surface* surface = TTF_RenderText_Blended(m_font, text.c_str(), 0, color);
-    if (!surface) return;
-
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-    if (texture) {
-        SDL_FRect dstRect = {static_cast<float>(x), static_cast<float>(y),
-                             static_cast<float>(surface->w), static_cast<float>(surface->h)};
-        SDL_RenderTexture(m_renderer, texture, nullptr, &dstRect);
-        SDL_DestroyTexture(texture);
-    }
-
-    SDL_DestroySurface(surface);
+    TextRender::drawText(m_renderer, m_font, text, x, y, r, g, b, a);
 }
 
 int CustomMessageBox::getTextWidth(const std::string& text) {
-    if (text.empty() || !m_font) return 0;
-
-    int w = 0;
-    TTF_GetStringSize(m_font, text.c_str(), 0, &w, nullptr);
-    return w;
+    return TextRender::textWidth(m_font, text);
 }
 
 int CustomMessageBox::getFontHeight() {
-    if (!m_font) return 0;
-    return TTF_GetFontHeight(m_font);
+    return TextRender::fontHeight(m_font);
 }
 
 } // namespace VideoPlay

@@ -77,9 +77,7 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             m_renderer->togglePlaylistPanel();
             break;
         case MenuId::PlaylistRemove:
-            if (m_renderer) {
-                // 由列表右键菜单的回调处理；此处给播放菜单兜底
-            }
+            // 删除项由 menu_manager 的 m_playlistRemoveCallback 直接处理
             break;
         case MenuId::PlaylistClear:
             clearPlaylist();

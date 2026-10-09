@@ -182,6 +182,7 @@ set(HEADERS
     src/renderer/custommessagebox.h
     src/renderer/inputfield.h
     src/renderer/inputdialog.h
+    src/renderer/textutils.h
     src/renderer/settingsdialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h

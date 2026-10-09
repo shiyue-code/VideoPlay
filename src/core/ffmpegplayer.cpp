@@ -26,8 +26,6 @@ Logger& logger() {
 
 
 namespace {
-    const double CLOCK_SYNC_THRESHOLD = 0.01;
-    const double VIDEO_FRAME_TOLERANCE = 0.005;
     const int AUDIO_QUEUE_SIZE = 100;
 
 
@@ -864,8 +862,6 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     
     m_position = positionMs;
     m_audioBaseMs = positionMs;
-    m_audioClock = positionMs / 1000.0;
-    m_frameTimer = av_gettime() / 1000000.0;
     // 回退时钟重新从 seek 点起算（无音轨文件）
     if (m_fallbackClockRunning.load()) {
         m_fallbackClockStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -952,8 +948,6 @@ bool FFmpegPlayer::checkPreloadComplete() {
 
 void FFmpegPlayer::decodeLoop() {
     logger().debug("Decode thread started");
-
-    m_frameTimer = av_gettime() / 1000000.0;
 
     // Allocate packet and frames once, reuse throughout the loop
     AVPacket* packet = av_packet_alloc();
@@ -1143,10 +1137,6 @@ void FFmpegPlayer::decodeLoop() {
                     auto audioData = processAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
-                        if (aframe->pts != AV_NOPTS_VALUE) {
-                            int64_t startTime = m_audioCtx.stream->start_time != AV_NOPTS_VALUE ? m_audioCtx.stream->start_time : 0;
-                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (aframe->pts - startTime);
-                        }
                         auto t4 = HRClock::now();
                         m_audioPlayer->enqueue(audioData);
                         aframeCount++;
@@ -1167,10 +1157,6 @@ void FFmpegPlayer::decodeLoop() {
                     auto audioData = processAudioFrame(aframe);
                     double dtResample = elapsedMs(t3);
                     if (!audioData.empty() && m_audioPlayer) {
-                        if (aframe->pts != AV_NOPTS_VALUE) {
-                            int64_t startTime = m_audioCtx.stream->start_time != AV_NOPTS_VALUE ? m_audioCtx.stream->start_time : 0;
-                            m_audioClock = av_q2d(m_audioCtx.stream->time_base) * (aframe->pts - startTime);
-                        }
                         auto t4 = HRClock::now();
                         m_audioPlayer->enqueue(audioData);
                         aframeCount++;
@@ -1543,41 +1529,6 @@ std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
     return result;
 }
 
-void FFmpegPlayer::synchronizeVideo(double pts) {
-    double delay = pts - m_videoClock;
-    if (delay <= 0 || delay >= 1.0) {
-        delay = m_videoClock > 0 ? 0 : 0.04;
-    }
-    
-    m_videoClock = pts;
-    
-    // 音频同步偏移：正值让音频延后（视频提前），负值让音频提前（视频延后）
-    double syncClock = m_audioClock + (m_audioSyncOffsetMs.load() / 1000.0);
-    double diff = m_videoClock - syncClock;
-    
-    if (std::abs(diff) < 10.0) {
-        double speed = m_playbackSpeed.load();
-        
-        if (diff <= -CLOCK_SYNC_THRESHOLD) {
-            delay = 0;
-        } else if (diff >= CLOCK_SYNC_THRESHOLD) {
-            delay *= 2.0;
-        }
-        
-        delay /= speed;
-        
-        m_frameTimer += delay;
-        
-        double currentTime = av_gettime() / 1000000.0;
-        double actualDelay = m_frameTimer - currentTime;
-        
-        if (actualDelay > VIDEO_FRAME_TOLERANCE && actualDelay < 0.1) {
-            std::this_thread::sleep_for(
-                std::chrono::microseconds(static_cast<int>(actualDelay * 1000000)));
-        }
-    }
-}
-
 PlaybackState FFmpegPlayer::state() const {
     return m_state.load();
 }
@@ -1595,8 +1546,10 @@ int64_t FFmpegPlayer::audioPositionMs() const {
     if (m_state.load() == PlaybackState::Stopped) {
         return 0;
     }
+    // 音频同步偏移（Shift+G/H）：加到显示位置上，等效于音频相对视频偏移
+    const int64_t syncOffset = m_audioSyncOffsetMs.load();
     if (m_audioPlayer) {
-        return m_audioBaseMs.load() + m_audioPlayer->playedMs();
+        return m_audioBaseMs.load() + m_audioPlayer->playedMs() + syncOffset;
     }
     // 无音轨文件：挂钟回退，保证进度条与视频帧正常前进
     int64_t base = m_audioBaseMs.load();
@@ -1605,9 +1558,9 @@ int64_t FFmpegPlayer::audioPositionMs() const {
         double elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now().time_since_epoch() -
             std::chrono::nanoseconds(startNs)).count();
-        return base + static_cast<int64_t>(elapsed * m_playbackSpeed.load());
+        return base + static_cast<int64_t>(elapsed * m_playbackSpeed.load()) + syncOffset;
     }
-    return base;
+    return base + syncOffset;
 }
 
 void FFmpegPlayer::startFallbackClock() {

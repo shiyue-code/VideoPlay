@@ -40,8 +40,7 @@ namespace {
     const char* APP_TITLE = "VideoPlay - FFmpeg + SDL";
     const int DEFAULT_WIDTH = 1280;
     const int DEFAULT_HEIGHT = 720;
-    const int MIN_VOLUME = 0;
-    const int MAX_VOLUME = 100;
+
 
 
     std::string displayNameForSource(const std::string& path) {
@@ -195,21 +194,12 @@ bool VideoPlayerApp::initialize() {
         }
     });
     m_renderer->setVolumeCallback([this](int delta) {
+        // >=1000 表示绝对值（value-1000），否则是相对增量
         if (delta >= 1000) {
-            m_volume = delta - 1000;
+            setVolumeTo(delta - 1000);
         } else {
-            m_volume += delta;
+            setVolume(delta);
         }
-        m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
-        Settings::instance().setVolume(m_volume);
-        if (m_player) {
-            m_player->setVolume(m_volume);
-        }
-        if (m_renderer) {
-            m_renderer->showOSD(OSDType::Volume, "音量 " + std::to_string(m_volume) + "%",
-                                m_volume / 100.0f);
-        }
-        logger().info("Volume set to: " + std::to_string(m_volume));
     });
     m_renderer->setMuteCallback([this]() {
         toggleMute();

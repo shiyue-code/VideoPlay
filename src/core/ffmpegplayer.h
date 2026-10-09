@@ -161,7 +161,6 @@ private:
     std::vector<float> resampleAudioFrame(AVFrame* frame);
     std::vector<float> processAudioFrame(AVFrame* frame);
     void handleSeek(int64_t positionMs);
-    void synchronizeVideo(double pts);
     void startFallbackClock();
     void stopFallbackClock();
     bool setupHardwareDecoder(const AVCodec* codec);
@@ -249,9 +248,6 @@ private:
     std::atomic<bool> m_preloading{false};
     std::chrono::steady_clock::time_point m_preloadStartTime;
     
-    double m_audioClock = 0.0;
-    double m_videoClock = 0.0;
-    double m_frameTimer = 0.0;
     std::atomic<int64_t> m_audioSyncOffsetMs{0};  // 音频同步偏移：正值=音频延后
 
     // Video frame queue with PTS ordering

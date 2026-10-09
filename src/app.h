@@ -50,6 +50,7 @@ private:
     void seek(double deltaMs);       // 相对跳转 (毫秒)
     void seekTo(double position);    // 绝对位置 (0-1)
     void setVolume(int delta);
+    void setVolumeTo(int value);
     void toggleMute();
     void setSpeed(double speed);
     void cycleSpeed();
