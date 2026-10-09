@@ -498,6 +498,11 @@ void SDLRenderer::showMessageBox(const std::string& title, const std::string& me
     m_dialogManager->showMessageBox(title, message, isError, std::move(timestampCallback));
 }
 
+void SDLRenderer::showInputDialog(const std::string& title, const std::string& placeholder,
+                                  std::function<void(const std::string&)> callback) {
+    m_dialogManager->showInputDialog(title, placeholder, std::move(callback));
+}
+
 void SDLRenderer::setLoopMode(int mode) {
     if (mode >= 0 && mode <= 2) {
         m_loopMode = mode;

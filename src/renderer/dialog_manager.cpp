@@ -23,6 +23,15 @@ void DialogManager::showMessageBox(const std::string& title, const std::string& 
     m_messageBox->show(title, message, isError, std::move(timestampCallback));
 }
 
+void DialogManager::showInputDialog(const std::string& title, const std::string& placeholder,
+                                    std::function<void(const std::string&)> callback) {
+    if (!m_inputDialog) {
+        m_inputDialog = std::make_unique<InputDialog>(m_sdlRenderer->getWindow(),
+                                                      m_sdlRenderer->getFont());
+    }
+    m_inputDialog->show(title, placeholder, "", std::move(callback));
+}
+
 void DialogManager::openSubtitleDialog(std::function<void(const std::string&)> callback) {
     {
         std::lock_guard<std::mutex> lock(m_dialogMutex);

@@ -143,6 +143,7 @@ set(SOURCES
     src/renderer/windowframe.cpp
     src/renderer/custommessagebox.cpp
     src/renderer/inputfield.cpp
+    src/renderer/inputdialog.cpp
     src/renderer/settingsdialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
@@ -180,6 +181,7 @@ set(HEADERS
     src/renderer/windowframe.h
     src/renderer/custommessagebox.h
     src/renderer/inputfield.h
+    src/renderer/inputdialog.h
     src/renderer/settingsdialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h

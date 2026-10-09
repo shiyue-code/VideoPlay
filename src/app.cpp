@@ -154,6 +154,21 @@ bool VideoPlayerApp::initialize() {
 
     // 设置渲染器回调
     m_renderer->setFileDropCallback([this](const std::string& path) {
+        // 拖入字幕文件时加载为当前视频的外挂字幕，而非当媒体打开
+        std::string ext;
+        size_t dotPos = path.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            ext = path.substr(dotPos);
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+        }
+        static const char* kSubtitleExts[] = {".srt", ".ass", ".ssa", ".vtt"};
+        for (const char* e : kSubtitleExts) {
+            if (ext == e) {
+                loadSubtitleFile(path);
+                return;
+            }
+        }
         openFile(path);
     });
     m_renderer->setFileOpenCallback([this]() {
@@ -343,6 +358,11 @@ bool VideoPlayerApp::initialize() {
             case SDLK_O:
                 if (SDL_GetModState() & SDL_KMOD_CTRL) {
                     openFileDialog();
+                }
+                break;
+            case SDLK_U:
+                if (SDL_GetModState() & SDL_KMOD_CTRL) {
+                    openUrlDialog();
                 }
                 break;
             case SDLK_M:
@@ -944,6 +964,27 @@ void VideoPlayerApp::openFileDialog() {
             logger().info("File dialog cancelled");
         }
     });
+}
+
+void VideoPlayerApp::openUrlDialog() {
+    if (!m_renderer) return;
+
+    m_renderer->showInputDialog("打开 URL", "http(s):// 或 rtsp:// 地址",
+        [this](const std::string& url) {
+            // 取消返回空串；去掉首尾空白后必须是 URL 形式
+            std::string trimmed = url;
+            auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+            trimmed.erase(trimmed.begin(),
+                          std::find_if(trimmed.begin(), trimmed.end(), notSpace));
+            trimmed.erase(std::find_if(trimmed.rbegin(), trimmed.rend(), notSpace).base(),
+                          trimmed.end());
+            if (trimmed.empty()) return;
+            if (!isNetworkUrl(trimmed)) {
+                m_renderer->showMessageBox("打开 URL", "不是有效的网络地址:\n" + trimmed, true);
+                return;
+            }
+            openFile(trimmed);
+        });
 }
 
 void VideoPlayerApp::openFolderDialog() {

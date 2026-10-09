@@ -32,6 +32,7 @@ void MenuManager::initMenus() {
     // 1. 文件菜单
     auto fileMenu = MenuItem::create("文件");
     fileMenu->addChild(MenuItem::create(MenuId::OpenFile, "打开文件...", nullptr, "Ctrl+O"));
+    fileMenu->addChild(MenuItem::create(MenuId::OpenUrl, "打开 URL...", nullptr, "Ctrl+U"));
     fileMenu->addChild(MenuItem::create(MenuId::OpenFolder, "打开文件夹.."));
     fileMenu->addChild(MenuItem::create(MenuId::RecentFiles, "最近播放"));
     fileMenu->addChild(MenuItem::separator());

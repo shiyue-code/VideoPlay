@@ -35,6 +35,7 @@ enum class MenuId : int {
     ImportSubtitle = 4,
     RecentFiles = 5,
     MediaInfo = 6,
+    OpenUrl = 7,
     Exit = 3,
 
     // 播放菜单
@@ -387,6 +388,8 @@ public:
 
     // 打开文件对话框（异步回调）
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
+    void showInputDialog(const std::string& title, const std::string& placeholder,
+                         std::function<void(const std::string&)> callback);
     void openSubtitleDialog(std::function<void(const std::string&)> callback);
     void openFolderDialog(std::function<void(const std::string&)> callback);
 

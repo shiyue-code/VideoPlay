@@ -52,6 +52,9 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         case MenuId::OpenFolder: // 打开文件夹
             openFolderDialog();
             break;
+        case MenuId::OpenUrl: // 打开 URL
+            openUrlDialog();
+            break;
         case MenuId::ImportSubtitle: // 导入字幕
             openSubtitleDialog();
             break;
@@ -470,12 +473,18 @@ void VideoPlayerApp::loadSubtitleFile(const std::string& path) {
     if (m_subtitleParser->loadFile(path)) {
         m_currentSubtitle = path;
         logger().info("Loaded subtitle: " + path);
+        if (m_renderer) {
+            m_renderer->showOSD(OSDType::Info, "已加载字幕", -1.0f);
+        }
         if (m_searchEngine) {
             m_searchEngine->addSubtitleEntries(m_subtitleParser->entries());
         }
     } else {
         logger().error("Failed to load subtitle: " + path);
         m_currentSubtitle.clear();
+        if (m_renderer) {
+            m_renderer->showMessageBox("加载字幕失败", "无法解析字幕文件:\n" + path, true);
+        }
     }
 }
 
@@ -516,6 +525,7 @@ void VideoPlayerApp::showHelp() {
         "Ctrl+L        - 切换播放列表\n"
         "Ctrl+F        - 搜索内容\n"
         "Ctrl+O        - 打开文件\n"
+        "Ctrl+U        - 打开 URL\n"
         "Delete        - 删除选中的播放列表项\n"
         "F1            - 显示帮助\n"
         "Esc           - 退出全屏/关闭菜单\n\n"
