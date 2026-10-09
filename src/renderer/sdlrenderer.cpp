@@ -554,6 +554,15 @@ void SDLRenderer::takeScreenshot() {
         return;
     }
 
+    // 统一转成 RGBA32 字节序，保证 stb_write_png 按 4 通道写出正确 PNG
+    SDL_Surface* rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
+    surface = rgba;
+    if (!surface) {
+        logger().error("Failed to convert screenshot surface");
+        return;
+    }
+
     // 构造保存路径：桌面 / VideoPlay_Screenshot_YYYYMMDD_HHMMSS.png
     std::string savePath;
 #ifdef _WIN32
@@ -582,8 +591,7 @@ void SDLRenderer::takeScreenshot() {
         << ".png";
     savePath += oss.str();
 
-    int result = stbi_write_png(savePath.c_str(), surface->w, surface->h,
-                                surface->format == SDL_PIXELFORMAT_BGRA32 ? 4 : 4,
+    int result = stbi_write_png(savePath.c_str(), surface->w, surface->h, 4,
                                 surface->pixels, surface->pitch);
     SDL_DestroySurface(surface);
 

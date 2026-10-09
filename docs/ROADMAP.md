@@ -2,7 +2,7 @@
 
 > **读者**：维护者、贡献者  
 > **状态**：现行  
-> **更新**：2026-08-23
+> **更新**：2026-10-09
 
 对照 PotPlayer 的常用能力，列出本项目还缺什么、先做什么。已稳定的用法见 [`../README.md`](../README.md)。实现约束见 [`../AGENTS.md`](../AGENTS.md)。
 
@@ -62,6 +62,8 @@
 |------|--------|------|------|
 | 自动加载同名字幕 | P0 | 已完成 | |
 | 在线字幕搜索/下载 | P1 | 未开始 | OpenSubtitles / 射手网 |
+| ~~外挂字幕编码探测~~ | P1 | 已完成 | `decodeToUtf8`：UTF-8 BOM / UTF-16 LE/BE（含无 BOM 探测）/ GBK→UTF-8 |
+| 字幕样式设置 | P1 | 未开始 | `SubtitleStyle` 配置已存在但无 UI，渲染写死 16px 白字黑底 |
 | 双语字幕同时显示 | P2 | 未开始 | |
 
 ### 播放交互
@@ -75,6 +77,9 @@
 | 播放列表持久化 | P1 | 已完成 | 写入 `VideoPlay.json` 的 `playlist` |
 | 播放列表拖拽排序 | P1 | 已完成 | 列表项拖拽调整顺序 |
 | 睡眠定时 | P2 | 未开始 | |
+| 逐帧步进 | P1 | 未开始 | 需先修「暂停时 seek 不生效」 |
+| 跳转时间对话框 | P1 | 未开始 | 输入 hh:mm:ss 定位 |
+| 打开 URL 对话框 | P1 | 未开始 | 网络流只能命令行传入，无 UI 入口 |
 | 缩略图导航视图 | P3 | 未开始 | |
 
 ### 网络
@@ -121,8 +126,34 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 
 ## 建议顺序
 
-1. 给 `EpisodeDetector`、Settings、ASS 补测试
-2. 修正 F1 帮助文本与 `autoAnalyze`
+1. ~~修三个播放正确性问题：无音轨定格、暂停 seek、内封字幕标签/时长~~ ✅ 已修
+2. ~~外挂字幕编码探测（GBK/UTF-16）；内封文本字幕走 `removeFormatting`~~ ✅ 已修
+3. ~~半成品功能接线：音量/窗口尺寸持久化、`MenuId::Borderless`、help 文本~~ ✅ 已修（字幕样式 UI 未做）
+4. 给 `EpisodeDetector`、Settings、ASS 补测试（字幕解析测试已补 7 例）
+5. 打开 URL 对话框、逐帧步进、跳转时间、截图到剪贴板等低成本交互项
+
+## 已知缺陷（2026-10-09 审核）
+
+| 缺陷 | 位置 | 说明 |
+|------|------|------|
+| ~~无音轨视频定格~~ ✅ | `ffmpegplayer.cpp` `audioPositionMs()` | 已加挂钟回退时钟（`m_fallbackClock*`），pause/resume/seek/stop 均正确冻结与重置 |
+| ~~暂停时 seek 挂起~~ ✅ | `ffmpegplayer.cpp` `decodeLoop` | 暂停态唤醒处理 seek，补解码上限 4096 包直到目标帧入队（`back().pts >= 目标`） |
+| ~~内封字幕标签未剥离~~ ✅ | `ffmpegplayer.cpp` 字幕包解码 | 走 `SubtitleParser::embeddedTextToPlain()`：提取 Dialogue 文本、剥 ASS/HTML 标签、`\N` 转换行 |
+| ~~内封字幕时长写死~~ ✅ | `app.cpp` 字幕回调 | 回调签名改为 `(startMs, endMs, text)`，优先 `end_display_time`，其次 packet duration，兜底 5 秒 |
+| 截图通道数假设 | `sdlrenderer.cpp` `takeScreenshot` | ✅ 已修：统一 `SDL_ConvertSurface(RGBA32)` 再写 PNG。遗留：截的是整个渲染输出（含 UI/OSD）而非视频帧 |
+| ~~解码错误无 UI 反馈~~ ✅ | `app.cpp` `onError` | 错误经 `m_pendingError` 队列到主线程弹「播放错误」对话框 |
+| 播放时钟是挂钟 | `audioplayer.cpp` `playedMs()` | 按 wall-clock × speed 估算，不是实际消耗的采样数；音频欠载时 UI 位置超前真实播放点 |
+
+## 半成品功能（声明但未接线）
+
+| 项 | 现状 |
+|----|------|
+| ~~窗口尺寸/位置记忆~~ ✅ | 启动恢复 w/h 与 x/y；退出时非最大化才记录普通态尺寸 |
+| ~~音量/静音/倍速持久化~~ ✅ | 启动从 Settings 恢复；setVolume/toggleMute/setSpeed 变更即写盘 |
+| 字幕样式 | `SubtitleStyle` 结构完整（字体/字号/颜色/描边），渲染层写死 16px 白字黑底，无 UI |
+| ~~`MenuId::Borderless`~~ ✅ | 视频菜单新增「无边框窗口」勾选项 |
+| `MenuId::PlaylistRemove` | handler 为空壳 |
+| positions/bookmarks 等 map | JSON 中无限增长，已删文件的记录不清理 |
 
 ## 工程债（非功能）
 
@@ -133,7 +164,8 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | 证书校验关闭 | WinHTTP `SECURITY_FLAG_IGNORE_*` |
 | CI | 只构建 Windows |
 | 测试 | 9 个用例，核心模块覆盖不足 |
-| 帮助文本 | 应用内 F1 仍把 `[` `]` 写成调速，与真实按键不符 |
+| ~~帮助文本~~ ✅ | F1 已补齐 Shift+G/H、Ctrl+B/Shift+B、Ctrl+F、C/F6、Ctrl(±Shift)+方向键、Ctrl+0、Delete |
+| 渲染循环 | 固定 ~60FPS 上限且无 vsync；>60fps 视频受限，空闲时仍占满一帧循环 |
 
 ## 参考
 

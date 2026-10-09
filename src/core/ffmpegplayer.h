@@ -42,8 +42,8 @@ using MuteCallback = std::function<void(bool)>;
 using VideoFrameCallback = std::function<void(VideoFrame)>;
 using NetworkStateCallback = std::function<void(NetworkState)>;
 
-// 内封字幕回调：ptsMs=字幕开始时间(毫秒)，text=字幕文本
-using SubtitleTextCallback = std::function<void(int64_t ptsMs, const std::string& text)>;
+// 内封字幕回调：startMs/endMs=字幕显示区间(毫秒)，text=纯文本(已剥离标签)
+using SubtitleTextCallback = std::function<void(int64_t startMs, int64_t endMs, const std::string& text)>;
 
 class FFmpegPlayer {
 public:
@@ -162,6 +162,8 @@ private:
     std::vector<float> processAudioFrame(AVFrame* frame);
     void handleSeek(int64_t positionMs);
     void synchronizeVideo(double pts);
+    void startFallbackClock();
+    void stopFallbackClock();
     bool setupHardwareDecoder(const AVCodec* codec);
     void releaseHardwareDecoder();
     static AVPixelFormat selectHardwareFormat(AVCodecContext* ctx, const AVPixelFormat* pixFmts);
@@ -227,6 +229,10 @@ private:
     std::mutex m_subtitleBitmapMutex;
     std::deque<SubtitleBitmap> m_subtitleBitmapQueue;
     std::atomic<int64_t> m_position{0};
+    // 无音轨文件的主时钟回退：以 m_audioBaseMs 为基准，叠加挂钟流逝×倍速。
+    // 起点的 steady_clock 纳秒数存为原子量，解码/渲染线程都会读写
+    std::atomic<int64_t> m_fallbackClockStartNs{0};
+    std::atomic<bool> m_fallbackClockRunning{false};
     std::atomic<double> m_playbackSpeed{1.0};
     std::atomic<int> m_volume{100};
     std::atomic<bool> m_muted{false};

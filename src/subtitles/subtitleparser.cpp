@@ -6,6 +6,19 @@
 #include <algorithm>
 #include <cctype>
 #include <regex>
+#include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__has_include)
+#if __has_include(<iconv.h>)
+#include <iconv.h>
+#define VIDEOPLAY_HAVE_ICONV 1
+#endif
+#endif
 
 namespace VideoPlay {
 
@@ -13,6 +26,151 @@ namespace {
 Logger& logger() {
     static auto instance = Logger::get("subtitle");
     return *instance;
+}
+
+bool isValidUtf8(const std::string& s) {
+    const auto* p = reinterpret_cast<const unsigned char*>(s.data());
+    size_t n = s.size();
+    for (size_t i = 0; i < n; ) {
+        unsigned char c = p[i];
+        if (c < 0x80) { ++i; continue; }
+        int need;
+        uint32_t cp;
+        if ((c & 0xE0) == 0xC0) { need = 1; cp = c & 0x1F; if (cp < 2) return false; }
+        else if ((c & 0xF0) == 0xE0) { need = 2; cp = c & 0x0F; }
+        else if ((c & 0xF8) == 0xF0) { need = 3; cp = c & 0x07; }
+        else return false;
+        if (i + static_cast<size_t>(need) >= n) return false;
+        for (int k = 1; k <= need; ++k) {
+            if ((p[i + k] & 0xC0) != 0x80) return false;
+            cp = (cp << 6) | (p[i + k] & 0x3F);
+        }
+        if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        if ((need == 2 && cp < 0x800) || (need == 3 && cp < 0x10000)) return false;
+        i += need + 1;
+    }
+    return true;
+}
+
+void appendUtf8(std::string& out, uint32_t cp) {
+    if (cp < 0x80) out.push_back(static_cast<char>(cp));
+    else if (cp < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+std::string utf16ToUtf8(const char* data, size_t size, bool bigEndian) {
+    std::string out;
+    out.reserve(size);
+    size_t i = 0;
+    while (i + 1 < size) {
+        uint16_t w = bigEndian
+            ? static_cast<uint16_t>((static_cast<unsigned char>(data[i]) << 8) |
+                                    static_cast<unsigned char>(data[i + 1]))
+            : static_cast<uint16_t>(static_cast<unsigned char>(data[i]) |
+                                    (static_cast<unsigned char>(data[i + 1]) << 8));
+        i += 2;
+        uint32_t cp = w;
+        if (w >= 0xD800 && w <= 0xDBFF && i + 1 < size) {
+            uint16_t lo = bigEndian
+                ? static_cast<uint16_t>((static_cast<unsigned char>(data[i]) << 8) |
+                                        static_cast<unsigned char>(data[i + 1]))
+                : static_cast<uint16_t>(static_cast<unsigned char>(data[i]) |
+                                        (static_cast<unsigned char>(data[i + 1]) << 8));
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                cp = 0x10000u + ((w - 0xD800u) << 10) + (lo - 0xDC00u);
+                i += 2;
+            }
+        }
+        appendUtf8(out, cp);
+    }
+    return out;
+}
+
+std::string gbkToUtf8(const std::string& gbk) {
+#if defined(_WIN32)
+    int wideLen = MultiByteToWideChar(936 /*CP_GBK*/, 0, gbk.data(),
+                                      static_cast<int>(gbk.size()), nullptr, 0);
+    if (wideLen <= 0) return {};
+    std::vector<wchar_t> wide(static_cast<size_t>(wideLen));
+    MultiByteToWideChar(936, 0, gbk.data(), static_cast<int>(gbk.size()),
+                        wide.data(), wideLen);
+    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen,
+                                      nullptr, 0, nullptr, nullptr);
+    if (utf8Len <= 0) return {};
+    std::string utf8(static_cast<size_t>(utf8Len), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen,
+                        utf8.data(), utf8Len, nullptr, nullptr);
+    return utf8;
+#elif defined(VIDEOPLAY_HAVE_ICONV)
+    iconv_t cd = iconv_open("UTF-8", "GB18030");
+    if (cd == reinterpret_cast<iconv_t>(-1)) return {};
+    size_t inLeft = gbk.size();
+    size_t outCap = gbk.size() * 3 + 16;
+    std::string out(outCap, '\0');
+    char* inBuf = const_cast<char*>(gbk.data());
+    char* outBuf = out.data();
+    size_t outLeft = outCap;
+    if (iconv(cd, &inBuf, &inLeft, &outBuf, &outLeft) == static_cast<size_t>(-1)) {
+        iconv_close(cd);
+        return {};
+    }
+    iconv_close(cd);
+    out.resize(outCap - outLeft);
+    return out;
+#else
+    return {};
+#endif
+}
+
+// 把字幕文件原始字节转成 UTF-8 文本：UTF-8 BOM / UTF-16(带或不带 BOM) / GBK
+std::string decodeToUtf8(std::string content) {
+    if (content.empty()) return content;
+    const auto* p = reinterpret_cast<const unsigned char*>(content.data());
+
+    if (content.size() >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) {
+        return content.substr(3); // UTF-8 BOM
+    }
+    if (content.size() >= 2 && p[0] == 0xFF && p[1] == 0xFE) {
+        return utf16ToUtf8(content.data() + 2, content.size() - 2, false);
+    }
+    if (content.size() >= 2 && p[0] == 0xFE && p[1] == 0xFF) {
+        return utf16ToUtf8(content.data() + 2, content.size() - 2, true);
+    }
+    // 无 BOM UTF-16：按 NUL 字节的奇偶分布判断
+    if (content.size() >= 8) {
+        size_t evenZero = 0, oddZero = 0;
+        size_t probe = std::min<size_t>(content.size(), 512) & ~size_t(1);
+        for (size_t i = 0; i < probe; i += 2) {
+            if (p[i] == 0) ++evenZero;
+            if (p[i + 1] == 0) ++oddZero;
+        }
+        if (oddZero > evenZero * 4 && oddZero > probe / 8) {
+            return utf16ToUtf8(content.data(), content.size(), false);
+        }
+        if (evenZero > oddZero * 4 && evenZero > probe / 8) {
+            return utf16ToUtf8(content.data(), content.size(), true);
+        }
+    }
+    if (isValidUtf8(content)) return content;
+
+    std::string converted = gbkToUtf8(content);
+    if (!converted.empty()) {
+        logger().info("Subtitle decoded as GBK/GB18030");
+        return converted;
+    }
+    logger().warning("Subtitle encoding not recognized, using raw bytes");
+    return content;
 }
 }
 
@@ -34,19 +192,13 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
         return false;
     }
     
-    // 读取文件内容
+    // 读取文件内容并统一转成 UTF-8（UTF-8 BOM / UTF-16 / GBK）
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     file.close();
-    
-    // 检测 BOM 并移除
-    if (content.size() >= 3 && 
-        static_cast<unsigned char>(content[0]) == 0xEF &&
-        static_cast<unsigned char>(content[1]) == 0xBB &&
-        static_cast<unsigned char>(content[2]) == 0xBF) {
-        content = content.substr(3);
-    }
-    
+
+    content = decodeToUtf8(std::move(content));
+
     // 根据扩展名选择解析器
     std::string ext;
     size_t dotPos = filePath.find_last_of('.');
@@ -79,35 +231,42 @@ bool SubtitleParser::loadFile(const std::string& filePath) {
     }
     
     if (success) {
+        // subtitleAt 用二分查找，要求条目按开始时间有序（ASS 事件顺序不保证）
+        std::sort(m_entries.begin(), m_entries.end(),
+                  [](const SubtitleEntry& a, const SubtitleEntry& b) {
+                      return a.startTime < b.startTime;
+                  });
         m_filePath = filePath;
         m_loaded = true;
-        logger().info("Loaded subtitle: " + filePath + 
+        logger().info("Loaded subtitle: " + filePath +
                                " (" + std::to_string(m_entries.size()) + " entries)");
     }
-    
+
     return success;
 }
 
 std::string SubtitleParser::subtitleAt(int64_t ms) const {
     if (m_entries.empty()) return "";
-    
+
     int64_t adjustedMs = ms - m_offset;
-    
-    // Binary search: find the first entry whose startTime > adjustedMs
-    auto it = std::lower_bound(m_entries.begin(), m_entries.end(), adjustedMs,
-        [](const SubtitleEntry& entry, int64_t time) {
-            return entry.startTime <= time;
+
+    // 二分定位最后一个 startTime <= adjustedMs 的条目，再向前回看覆盖重叠对白。
+    // 回看上限 64 条：正常字幕重叠极少，病态长字幕不至于拖慢每帧调用
+    auto it = std::upper_bound(m_entries.begin(), m_entries.end(), adjustedMs,
+        [](int64_t time, const SubtitleEntry& entry) {
+            return time < entry.startTime;
         });
-    
-    // Check the entry before (if exists) - it's the most likely candidate
-    if (it != m_entries.begin()) {
+
+    std::string result;
+    int scanned = 0;
+    while (it != m_entries.begin() && scanned++ < 64) {
         --it;
         if (adjustedMs >= it->startTime && adjustedMs <= it->endTime) {
-            return it->text;
+            result = result.empty() ? it->text : (it->text + "\n" + result);
         }
     }
-    
-    return "";
+
+    return result;
 }
 
 std::vector<SubtitleEntry> SubtitleParser::entries() const {
@@ -166,6 +325,61 @@ std::string SubtitleParser::removeFormatting(const std::string& text) {
     }
     
     return result;
+}
+
+std::string SubtitleParser::extractAssDialogueText(const std::string& line) {
+    // 标准 Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+    // （Text 前共 9 个逗号）；MKV 内封包可能缺 Layer 前缀字段（8 个逗号）。
+    // 识别方式：第 2、3 个字段若形如时间码（H:MM:SS.CC）则视为标准布局。
+    std::string s = trim(line);
+    if (s.size() >= 9 &&
+        (s.compare(0, 9, "Dialogue:") == 0 || s.compare(0, 9, "dialogue:") == 0)) {
+        s = trim(s.substr(9));
+    }
+
+    // 定位第 8 和第 9 个逗号
+    size_t comma8 = std::string::npos, comma9 = std::string::npos, pos = 0;
+    int commas = 0;
+    while (commas < 9 && (pos = s.find(',', pos)) != std::string::npos) {
+        ++commas;
+        ++pos;
+        if (commas == 8) comma8 = pos;
+        else if (commas == 9) comma9 = pos;
+    }
+    if (comma8 == std::string::npos) {
+        return s; // 不足 8 个逗号，视为纯文本
+    }
+
+    auto looksLikeTimecode = [](const std::string& field) {
+        std::string f = trim(field);
+        return f.size() >= 7 && f.find(':') != std::string::npos &&
+               std::isdigit(static_cast<unsigned char>(f[0]));
+    };
+
+    // 标准布局：fields[1]/fields[2] 为 Start/End 时间码
+    size_t c1 = s.find(',');
+    if (comma9 != std::string::npos && c1 != std::string::npos) {
+        size_t c2 = s.find(',', c1 + 1);
+        if (c2 != std::string::npos &&
+            looksLikeTimecode(s.substr(c1 + 1, c2 - c1 - 1))) {
+            return trim(s.substr(comma9));
+        }
+    }
+    return trim(s.substr(comma8));
+}
+
+std::string SubtitleParser::embeddedTextToPlain(const std::string& raw) {
+    std::string text = removeFormatting(extractAssDialogueText(raw));
+    // \N / \n 转换行
+    for (size_t pos = 0; (pos = text.find("\\N", pos)) != std::string::npos; ) {
+        text.replace(pos, 2, "\n");
+        ++pos;
+    }
+    for (size_t pos = 0; (pos = text.find("\\n", pos)) != std::string::npos; ) {
+        text.replace(pos, 2, "\n");
+        ++pos;
+    }
+    return trim(text);
 }
 
 int64_t SubtitleParser::parseTimecode(const std::string& timecode) {

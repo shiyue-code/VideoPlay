@@ -97,7 +97,8 @@ void VideoPlayerApp::seekTo(double position) {
 void VideoPlayerApp::setVolume(int delta) {
     m_volume += delta;
     m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
-    
+    Settings::instance().setVolume(m_volume);
+
     if (m_player) {
         m_player->setVolume(m_volume);
     }
@@ -111,7 +112,8 @@ void VideoPlayerApp::setVolume(int delta) {
 
 void VideoPlayerApp::toggleMute() {
     m_isMuted = !m_isMuted;
-    
+    Settings::instance().setMuted(m_isMuted);
+
     if (m_player) {
         m_player->setMuted(m_isMuted);
     }
@@ -126,7 +128,8 @@ void VideoPlayerApp::toggleMute() {
 
 void VideoPlayerApp::setSpeed(double speed) {
     m_speed = std::max(0.25, std::min(4.0, speed));
-    
+    Settings::instance().setPlaybackSpeed(m_speed);
+
     if (m_player) {
         m_player->setPlaybackSpeed(m_speed);
     }

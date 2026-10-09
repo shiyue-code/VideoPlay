@@ -200,6 +200,8 @@ void MenuManager::initMenus() {
     videoMenu->addChild(MenuItem::create(MenuId::Screenshot, "截图", nullptr, "F12"));
     videoMenu->addChild(MenuItem::create(MenuId::AlwaysOnTop, "始终置顶", nullptr, "T")
         ->setChecked([this]{ return m_renderer && m_renderer->m_alwaysOnTop; }));
+    videoMenu->addChild(MenuItem::create(MenuId::Borderless, "无边框窗口")
+        ->setChecked([this]{ return m_renderer && m_renderer->m_borderless; }));
     videoMenu->addChild(MenuItem::create(MenuId::Fullscreen, "全屏", nullptr, "F")
         ->setChecked([this]{ return m_renderer && m_renderer->m_fullscreen; }));
     m_topMenus.push_back(videoMenu);

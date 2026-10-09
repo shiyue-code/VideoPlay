@@ -150,6 +150,10 @@ private:
     std::atomic<bool> m_isManualOperation{false};
     std::atomic<bool> m_pendingAutoAdvance{false};
 
+    // 解码线程传来的待显示错误，主循环消费后弹窗
+    std::mutex m_pendingErrorMutex;
+    std::string m_pendingError;
+
     // 自动恢复：会话状态定期保存（每 5 秒）
     uint64_t m_lastSessionSaveTime = 0;
 

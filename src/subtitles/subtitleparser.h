@@ -29,12 +29,18 @@ public:
     int64_t offset() const;
     void adjustOffset(int64_t deltaMs);
 
+    // 剥离 ASS/SSA {\...} 覆盖标签与 HTML <...> 标签（含 HTML 实体解码）
+    static std::string removeFormatting(const std::string& text);
+    // 从内封 ASS Dialogue 行中提取 Text 字段；不是 Dialogue 结构时原样返回
+    static std::string extractAssDialogueText(const std::string& line);
+    // 内封 ASS/SRT 文本转纯文本：提取 Text 字段、剥标签、\N 转换行
+    static std::string embeddedTextToPlain(const std::string& raw);
+
 private:
     bool parseSRT(const std::string& content);
     bool parseASS(const std::string& content);
     bool parseVTT(const std::string& content);
     int64_t parseTimecode(const std::string& timecode);
-    std::string removeFormatting(const std::string& text);
 
     std::vector<SubtitleEntry> m_entries;
     std::string m_filePath;

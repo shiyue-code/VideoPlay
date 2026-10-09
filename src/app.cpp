@@ -69,15 +69,19 @@ bool VideoPlayerApp::initialize() {
     Logger::root().configure(Settings::instance().logConfig());
     logger().info("Initializing VideoPlayerApp...");
 
+    // 恢复上次窗口尺寸，非法值退回默认
+    auto windowConfigInit = Settings::instance().windowConfig();
+    int initWidth = windowConfigInit.width > 0 ? windowConfigInit.width : DEFAULT_WIDTH;
+    int initHeight = windowConfigInit.height > 0 ? windowConfigInit.height : DEFAULT_HEIGHT;
+
     // 创建渲染器
     m_renderer = std::make_unique<SDLRenderer>();
-    if (!m_renderer->initialize(APP_TITLE, DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+    if (!m_renderer->initialize(APP_TITLE, initWidth, initHeight)) {
         logger().error("Failed to initialize SDL renderer");
         return false;
     }
 
     // 根据设置恢复无边框模式
-    auto windowConfigInit = Settings::instance().windowConfig();
     if (windowConfigInit.borderless) {
         m_renderer->toggleBorderless();
     }
@@ -86,6 +90,12 @@ bool VideoPlayerApp::initialize() {
     if (m_renderer->getWindow()) {
         SDL_ShowWindow(m_renderer->getWindow());
         SDL_RaiseWindow(m_renderer->getWindow());
+        // 恢复上次窗口位置（未最大化时）
+        if (!windowConfigInit.maximized &&
+            windowConfigInit.x > -32000 && windowConfigInit.y > -32000) {
+            SDL_SetWindowPosition(m_renderer->getWindow(),
+                                  windowConfigInit.x, windowConfigInit.y);
+        }
     }
 
     // 创建播放器
@@ -110,6 +120,14 @@ bool VideoPlayerApp::initialize() {
     }
     m_player->setAudioOutputDevice(outputDevice);
     m_renderer->setAudioOutputDeviceName(savedAudioDevice);
+
+    // 恢复音量/静音/倍速
+    m_volume = Settings::instance().volume();
+    m_isMuted = Settings::instance().isMuted();
+    m_speed = Settings::instance().playbackSpeed();
+    m_player->setVolume(m_volume);
+    m_player->setMuted(m_isMuted);
+    m_player->setPlaybackSpeed(m_speed);
     auto videoFilterConfig = Settings::instance().videoFilterConfig();
     m_player->setVideoFilterConfig(videoFilterConfig);
     m_renderer->setVideoFilterConfig(videoFilterConfig);
@@ -168,6 +186,7 @@ bool VideoPlayerApp::initialize() {
             m_volume += delta;
         }
         m_volume = std::max(MIN_VOLUME, std::min(MAX_VOLUME, m_volume));
+        Settings::instance().setVolume(m_volume);
         if (m_player) {
             m_player->setVolume(m_volume);
         }
@@ -290,13 +309,12 @@ bool VideoPlayerApp::initialize() {
         }
     });
 
-    // 内封字幕回调：保存当前字幕文本供 render() 渲染
-    m_player->setSubtitleTextCallback([this](int64_t ptsMs, const std::string& text) {
+    // 内封字幕回调：保存当前字幕文本与显示区间供 render() 渲染
+    m_player->setSubtitleTextCallback([this](int64_t startMs, int64_t endMs, const std::string& text) {
         std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
         m_embeddedSubtitleText = text;
-        m_embeddedSubtitleStartMs = ptsMs;
-        // 未提供结束时间，默认显示 5 秒；下一条字幕会覆盖
-        m_embeddedSubtitleEndMs = ptsMs + 5000;
+        m_embeddedSubtitleStartMs = startMs;
+        m_embeddedSubtitleEndMs = endMs;
     });
 
     // 恢复循环模式设置
@@ -377,6 +395,18 @@ void VideoPlayerApp::shutdown() {
         auto config = Settings::instance().windowConfig();
         config.maximized = m_renderer->isMaximized();
         config.borderless = m_renderer->isBorderless();
+        // 只在非最大化时记录普通态位置/尺寸，下次退出最大化后能还原正确大小
+        if (!config.maximized && m_renderer->getWindow()) {
+            int w = 0, h = 0, x = 0, y = 0;
+            SDL_GetWindowSize(m_renderer->getWindow(), &w, &h);
+            SDL_GetWindowPosition(m_renderer->getWindow(), &x, &y);
+            if (w > 0 && h > 0) {
+                config.width = w;
+                config.height = h;
+                config.x = x;
+                config.y = y;
+            }
+        }
         Settings::instance().setWindowConfig(config);
     }
 
@@ -517,6 +547,18 @@ void VideoPlayerApp::render() {
     }
     if (m_pendingAutoAdvance.exchange(false)) {
         autoAdvanceAfterStop();
+    }
+
+    // 消费解码线程投递的错误，弹窗提示
+    {
+        std::string pendingError;
+        {
+            std::lock_guard<std::mutex> lock(m_pendingErrorMutex);
+            pendingError.swap(m_pendingError);
+        }
+        if (!pendingError.empty() && m_renderer) {
+            m_renderer->showMessageBox("播放错误", pendingError, true);
+        }
     }
 
     auto t0 = HRClock::now();
@@ -1048,6 +1090,9 @@ void VideoPlayerApp::onStateChanged(PlaybackState state) {
 
 void VideoPlayerApp::onError(const std::string& error) {
     logger().error("Player error: " + error);
+    // 回调可能来自解码线程，消息队列化后由主循环弹窗
+    std::lock_guard<std::mutex> lock(m_pendingErrorMutex);
+    m_pendingError = error;
 }
 
 } // namespace VideoPlay

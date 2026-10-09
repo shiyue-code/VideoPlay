@@ -1,5 +1,6 @@
 #include "core/ffmpegplayer.h"
 #include "core/audioplayer.h"
+#include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
 
 #include <algorithm>
@@ -719,9 +720,11 @@ void FFmpegPlayer::play() {
     }
     
     if (wasPaused) {
-        // 暂停恢复：直接启动音频
+        // 暂停恢复：直接启动音频；无音轨时启动回退时钟
         if (m_audioPlayer) {
             m_audioPlayer->play();
+        } else {
+            startFallbackClock();
         }
         if (m_sourceType == SourceType::NetworkStream) {
             setNetworkState(NetworkState::Playing);
@@ -753,6 +756,8 @@ void FFmpegPlayer::pause() {
     
     if (m_audioPlayer) {
         m_audioPlayer->pause();
+    } else {
+        stopFallbackClock();
     }
     
     m_condition.notify_all();
@@ -783,6 +788,7 @@ void FFmpegPlayer::stop() {
     }
 
     m_preloading = false;
+    m_fallbackClockRunning = false;
 
     if (m_audioPlayer) {
         m_audioPlayer->stop();
@@ -860,6 +866,11 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     m_audioBaseMs = positionMs;
     m_audioClock = positionMs / 1000.0;
     m_frameTimer = av_gettime() / 1000000.0;
+    // 回退时钟重新从 seek 点起算（无音轨文件）
+    if (m_fallbackClockRunning.load()) {
+        m_fallbackClockStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     
     if (m_positionCallback) {
         m_positionCallback(positionMs);
@@ -902,6 +913,8 @@ bool FFmpegPlayer::checkPreloadComplete() {
         m_preloading = false;
         if (m_audioPlayer) {
             m_audioPlayer->play();
+        } else {
+            startFallbackClock();
         }
         if (m_sourceType == SourceType::NetworkStream) {
             setNetworkState(NetworkState::Playing);
@@ -960,11 +973,15 @@ void FFmpegPlayer::decodeLoop() {
     int vframeCount = 0;
     int aframeCount = 0;
     int consecutiveReadErrors = 0;
+    // 暂停态下允许补解码的包数：seek 后让新位置的帧入队，随后回到暂停等待
+    int pausedBurstPackets = 0;
+    int64_t pausedSeekTargetMs = 0;
 
     while (!m_abortRequest) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        while (m_state == PlaybackState::Paused && !m_abortRequest) {
+        while (m_state == PlaybackState::Paused && !m_abortRequest &&
+               !m_seekRequested && pausedBurstPackets <= 0) {
             m_condition.wait(lock);
         }
 
@@ -975,7 +992,27 @@ void FFmpegPlayer::decodeLoop() {
             handleSeek(m_seekPosition.load());
             lock.lock();
             m_seekRequested = false;
+            if (m_state == PlaybackState::Paused) {
+                // handleSeek 里会重启音频流，暂停态需要压回去；
+                // 并允许补解码若干包，让 seek 目标位置的帧进入显示队列
+                if (m_audioPlayer) {
+                    m_audioPlayer->pause();
+                }
+                // 上限要覆盖长 GOP：关键帧间隔长的文件可能要解几百个包才到目标帧
+                pausedBurstPackets = 4096;
+                pausedSeekTargetMs = m_seekPosition.load();
+            }
             continue;
+        }
+
+        // 补解码到目标帧就位即停（seek 后首帧常是关键帧，pts 会早于目标，
+        // 需继续解到 pts >= 目标才停），避免暂停态持续解码
+        if (pausedBurstPackets > 0) {
+            std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
+            if (!m_videoFrameQueue.empty() &&
+                m_videoFrameQueue.back().pts >= pausedSeekTargetMs) {
+                pausedBurstPackets = 0;
+            }
         }
 
         if (!m_formatContext) {
@@ -1156,6 +1193,18 @@ void FFmpegPlayer::decodeLoop() {
                 int64_t pktPts = packet->pts != AV_NOPTS_VALUE ? packet->pts : (packet->dts != AV_NOPTS_VALUE ? packet->dts : 0);
                 int64_t ptsMs = av_rescale_q(pktPts - m_subtitleCtx.startTime,
                                              m_subtitleCtx.stream->time_base, {1, 1000});
+                // 文本字幕的显示区间：优先取解码器给出的 end_display_time，
+                // 其次用包 duration，都没有才退到 5 秒兜底
+                int64_t startMs = ptsMs + sub.start_display_time;
+                int64_t endMs;
+                if (sub.end_display_time > 0) {
+                    endMs = startMs + sub.end_display_time;
+                } else if (packet->duration > 0) {
+                    endMs = startMs + av_rescale_q(packet->duration,
+                                                   m_subtitleCtx.stream->time_base, {1, 1000});
+                } else {
+                    endMs = startMs + 5000;
+                }
                 for (unsigned i = 0; i < sub.num_rects; i++) {
                     AVSubtitleRect* rect = sub.rects[i];
                     if (!rect) continue;
@@ -1188,10 +1237,12 @@ void FFmpegPlayer::decodeLoop() {
                             }
                         }
                     } else if (rect->ass && m_subtitleTextCallback) {
-                        // ASS/SRT/SSA 等通常以 ass 字符串形式返回
-                        m_subtitleTextCallback(ptsMs + sub.start_display_time, std::string(rect->ass));
+                        // ASS/SSA：rect->ass 是整行 Dialogue，需要提取 Text 并剥标签
+                        m_subtitleTextCallback(startMs, endMs,
+                            SubtitleParser::embeddedTextToPlain(rect->ass));
                     } else if (rect->text && m_subtitleTextCallback) {
-                        m_subtitleTextCallback(ptsMs + sub.start_display_time, std::string(rect->text));
+                        m_subtitleTextCallback(startMs, endMs,
+                            SubtitleParser::removeFormatting(rect->text));
                     }
                 }
                 avsubtitle_free(&sub);
@@ -1199,6 +1250,10 @@ void FFmpegPlayer::decodeLoop() {
         }
 
         av_packet_unref(packet);
+
+        if (pausedBurstPackets > 0) {
+            --pausedBurstPackets;
+        }
 
         if (elapsedMs(reportStart) >= 1000.0) {
             logger().debug("[PERF] decodeLoop pkt/s=" + std::to_string(pktCount) +
@@ -1543,7 +1598,35 @@ int64_t FFmpegPlayer::audioPositionMs() const {
     if (m_audioPlayer) {
         return m_audioBaseMs.load() + m_audioPlayer->playedMs();
     }
-    return m_audioBaseMs.load();
+    // 无音轨文件：挂钟回退，保证进度条与视频帧正常前进
+    int64_t base = m_audioBaseMs.load();
+    if (m_fallbackClockRunning.load()) {
+        int64_t startNs = m_fallbackClockStartNs.load();
+        double elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch() -
+            std::chrono::nanoseconds(startNs)).count();
+        return base + static_cast<int64_t>(elapsed * m_playbackSpeed.load());
+    }
+    return base;
+}
+
+void FFmpegPlayer::startFallbackClock() {
+    if (m_fallbackClockRunning.load()) return;
+    m_fallbackClockStartNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    m_fallbackClockRunning = true;
+}
+
+void FFmpegPlayer::stopFallbackClock() {
+    if (!m_fallbackClockRunning.load()) return;
+    // 把已流逝时间并入基准，冻结时钟
+    int64_t startNs = m_fallbackClockStartNs.load();
+    double elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch() -
+        std::chrono::nanoseconds(startNs)).count();
+    m_audioBaseMs = m_audioBaseMs.load() +
+        static_cast<int64_t>(elapsed * m_playbackSpeed.load());
+    m_fallbackClockRunning = false;
 }
 
 void FFmpegPlayer::setPlaybackSpeed(double speed) {
