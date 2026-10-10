@@ -546,11 +546,14 @@ void VideoPlayerApp::runMainLoop() {
         // 渲染
         render();
 
-        // 控制帧率 (~60 FPS)，仅在提前完成时补延迟
+        // 控制帧率：vsync 开启时 present 已限帧，仅在提前返回时补到 4ms
+        // （最小化/被遮挡时 present 不阻塞）；无 vsync 保持 ~60 FPS
+        const auto minFrameNs = std::chrono::nanoseconds(
+            (m_renderer && m_renderer->isVSyncEnabled() ? 4 : 16) * 1000000);
         auto frameEnd = HRClock::now();
-        auto frameElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart).count();
-        if (frameElapsed < 16) {
-            SDL_Delay(static_cast<Uint32>(16 - frameElapsed));
+        auto frameElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(frameEnd - frameStart);
+        if (frameElapsed < minFrameNs) {
+            SDL_DelayPrecise(static_cast<Uint64>((minFrameNs - frameElapsed).count()));
         }
         frameStart = HRClock::now();
     }

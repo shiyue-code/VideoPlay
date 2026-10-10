@@ -430,6 +430,9 @@ public:
     void toggleAlwaysOnTop();
     bool isAlwaysOnTop() const;
 
+    // 渲染垂直同步是否已启用
+    bool isVSyncEnabled() const { return m_vsyncEnabled; }
+
     // 窗口最大化状态
     bool isMaximized() const;
     void maximizeWindow();
@@ -625,6 +628,7 @@ private:
     AspectMode m_aspectMode = AspectMode::Original;
     VideoTransform m_videoTransform;
     bool m_alwaysOnTop = false;
+    bool m_vsyncEnabled = false;
     std::vector<float> m_episodeProgress;
     std::vector<float> m_playlistProgress;
     const std::vector<EpisodeInfo>* m_episodeData = nullptr;

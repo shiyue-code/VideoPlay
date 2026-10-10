@@ -77,8 +77,10 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
     // 开启 OpenGL 多重采样（若后端是 OpenGL 则生效）
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 16);
 
-    // 调试 D3D11 渲染后端（仅在调试时有用）
+    // 调试 D3D11 渲染后端（仅在调试构建启用）
+#ifndef NDEBUG
     SDL_SetHint(SDL_HINT_RENDER_DIRECT3D11_DEBUG, "1");
+#endif
 
 #ifdef HAS_SDL_TTF
     // 初始化 SDL_ttf
@@ -138,6 +140,12 @@ bool SDLRenderer::initialize(const std::string& title, int width, int height) {
             return false;
         }
     }
+
+    // 开启垂直同步，由渲染后端在 present 时限帧
+    m_vsyncEnabled = SDL_SetRenderVSync(m_renderer, 1);
+    logger().info(std::string("Render VSync: ") +
+                  (m_vsyncEnabled ? "enabled" : "unavailable (" +
+                                      std::string(SDL_GetError()) + ")"));
 
     // 启用 alpha 混合，确保半透明效果正常
     SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
