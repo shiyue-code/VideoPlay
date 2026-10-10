@@ -186,8 +186,10 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
     renderNetworkState();
     renderAIAnalysisOverlay();
 
-    if (m_showMediaInfoPanel) {
+    if (m_infoPanel == InfoPanelKind::MediaInfo) {
         renderInfoPanel("媒体信息", buildMediaInfoRows());
+    } else if (m_infoPanel == InfoPanelKind::About) {
+        renderInfoPanel(m_aboutContent.title, m_aboutContent.rows);
     }
 
     if (m_showVideoControlPanel) {
@@ -1071,8 +1073,17 @@ void SDLRenderer::renderInfoPanel(const std::string& title,
                   255, 255, 255, 60);
     fillRoundRect(panelX, panelY, panelW, panelH, radius, 24, 26, 32, 238);
 
+    m_infoPanelRect = {panelX, panelY, panelW, panelH, ControlType::None, 0};
+
     drawText(title, panelX + padding, panelY + padding,
              255, 255, 255, titleFont);
+
+    // 右上角关闭按钮，与标题垂直居中对齐
+    int closeSize = 28;
+    int closeX = panelX + panelW - closeSize - 16;
+    int closeY = panelY + padding + (getFontHeight(titleFont) - closeSize) / 2;
+    drawPanelCloseButton(closeX, closeY, closeSize, ControlType::InfoPanelClose,
+                         m_hoveredControl == ControlType::InfoPanelClose, 6, 9, 200, 230, 190);
 
     int y = panelY + padding + getFontHeight(titleFont) + 14;
     int labelW = 78;

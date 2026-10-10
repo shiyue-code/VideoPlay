@@ -256,6 +256,8 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     case SDLK_ESCAPE:
                         if (m_showSearchPanel) {
                             toggleSearchPanel();
+                        } else if (m_infoPanel != InfoPanelKind::None) {
+                            closeInfoPanel();
                         } else if (m_fullscreen) {
                             toggleFullscreen();
                         }
@@ -468,6 +470,19 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     ControlType lastHovered = m_hoveredControl;
     m_hoveredControl = getControlAt(x, y, &m_hoveredControlValue);
 
+    // 信息面板模态：打开期间遮罩下方控件不可悬停，只保留关闭按钮
+    if (m_infoPanel != InfoPanelKind::None) {
+        m_hoveredControl = ControlType::None;
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::InfoPanelClose &&
+                x >= rect.x && x <= rect.x + rect.w &&
+                y >= rect.y && y <= rect.y + rect.h) {
+                m_hoveredControl = ControlType::InfoPanelClose;
+                break;
+            }
+        }
+    }
+
     // Tooltip 更新（所有可交互控件）
     if (lastHovered != m_hoveredControl) {
         m_tooltipTime = SDL_GetTicks();
@@ -536,6 +551,9 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
                 break;
             case ControlType::SearchMessageCopy:
                 m_tooltip = "复制回答";
+                break;
+            case ControlType::InfoPanelClose:
+                m_tooltip = "关闭";
                 break;
             default:
                 m_tooltip.clear();
@@ -827,7 +845,28 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         m_pressedControl = ControlType::None;
         return;
     }
-    
+
+    // 信息面板模态：× 或面板外点击关闭面板；面板内点击只吞掉事件，
+    // 不透传给遮罩下的控制栏/进度条（m_pressedControl 置空避免松开时误触发）
+    if (m_infoPanel != InfoPanelKind::None) {
+        bool onClose = false;
+        for (const auto& rect : m_controlRects) {
+            if (rect.type == ControlType::InfoPanelClose &&
+                x >= rect.x && x <= rect.x + rect.w &&
+                y >= rect.y && y <= rect.y + rect.h) {
+                onClose = true;
+                break;
+            }
+        }
+        bool inPanel = x >= m_infoPanelRect.x && x <= m_infoPanelRect.x + m_infoPanelRect.w &&
+                       y >= m_infoPanelRect.y && y <= m_infoPanelRect.y + m_infoPanelRect.h;
+        if (onClose || !inPanel) {
+            closeInfoPanel();
+        }
+        m_pressedControl = ControlType::None;
+        return;
+    }
+
     // 处理控件点击
     switch (m_pressedControl) {
         case ControlType::PlayButton:
@@ -994,6 +1033,11 @@ void SDLRenderer::handleMouseButtonUp(int x, int y) {
         m_draggingVolume = false;
         m_pressedControl = ControlType::None;
         return;
+    }
+
+    // 信息面板模态期间，释�?不透传给遮罩下的控件（按下在面板打开前的残留状态也清掉�?
+    if (m_infoPanel != InfoPanelKind::None) {
+        m_pressedControl = ControlType::None;
     }
 
     // 列表/面板项的单击操作在鼠标释放时触发（按下和释放需在同一个控件上）

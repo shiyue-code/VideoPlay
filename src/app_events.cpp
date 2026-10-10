@@ -537,21 +537,30 @@ void VideoPlayerApp::showHelp() {
 }
 
 void VideoPlayerApp::showAbout() {
-    const char* aboutText = 
-        "VideoPlay v" APP_VERSION "\n\n"
-        "基于 FFmpeg + SDL3 的视频播放器\n\n"
-        "功能特性：\n"
-        "- 支持多种视频格式\n"
-        "- 变速播放 (0.25x - 4x)\n"
-        "- 字幕支持 (SRT/ASS/VTT)\n"
-        "- 播放列表管理\n"
-        "- AI 视频摘要与章节自动划分\n"
-        "- 智能内容搜索\n\n"
-        "License: GPLv3";
-    
-    if (m_renderer) {
-        m_renderer->showMessageBox("关于", aboutText, false);
+    if (!m_renderer) {
+        return;
     }
+
+    int sdlVersion = SDL_GetVersion();
+    std::string sdlVersionStr = std::to_string(SDL_VERSIONNUM_MAJOR(sdlVersion)) + "." +
+                                std::to_string(SDL_VERSIONNUM_MINOR(sdlVersion)) + "." +
+                                std::to_string(SDL_VERSIONNUM_MICRO(sdlVersion));
+
+    // 窗口最小宽 480 时面板宽 400、值列约 256px，各值需单行放得下
+    InfoPanelContent content;
+    content.title = "关于";
+    content.rows.push_back({"版本", "VideoPlay v" APP_VERSION});
+    content.rows.push_back({"简介", "基于 FFmpeg + SDL3 的视频播放器"});
+    content.rows.push_back({"FFmpeg", FFmpegPlayer::ffmpegVersion()});
+    content.rows.push_back({"SDL", sdlVersionStr});
+    content.rows.push_back({"功能", "多格式解码、硬件解码"});
+    content.rows.push_back({"", "变速 0.25x–4x（保持音高）"});
+    content.rows.push_back({"", "字幕 SRT/ASS/VTT/PGS"});
+    content.rows.push_back({"", "播放列表与剧集连播"});
+    content.rows.push_back({"", "AI 视频摘要、章节划分与内容搜索"});
+    content.rows.push_back({"许可证", "GPLv3"});
+
+    m_renderer->showAboutPanel(std::move(content));
 }
 
 void VideoPlayerApp::startAIAnalysis() {

@@ -127,6 +127,7 @@ VideoPlayerApp
 - 渲染已开 vsync（`SDL_SetRenderVSync`）；vsync 生效时主循环最小帧间隔降到 4ms，只在 present 未阻塞（最小化/遮挡）时补睡 `SDL_DelayPrecise`，否则保持 16ms
 - 截图走 `VideoPlayerApp::takeScreenshot`：对 `m_displayFrame` 按与渲染一致的「裁剪 → 翻转 → 顺时针旋转」顺序变换后写 PNG（依 `SDL_RenderTextureRotated` 语义，先翻转后旋转），不含 UI/OSD
 - 字幕样式取自 `setSubtitleStyle` 缓存的 `SubtitleStyle`（字号/颜色/描边生效，`fontFamily` 暂不支持）；有描边时不画背景框、按偏移叠加描边层
+- 媒体信息与「关于」共用 `renderInfoPanel`：模态遮罩，点背板/Esc/右上角 × 关闭；命中在 `getControlAt` 分发前拦截，只有 `InfoPanelClose` 可悬停
 - 章节来自 `AVFormatContext::chapters`；进度条书签独立命中 `ControlType::ChapterMarker`
 - 绝对 seek 回调编码：`1000.0 + ratio * 1000.0`
 

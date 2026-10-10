@@ -274,7 +274,8 @@ enum class ControlType {
     VideoPanelContrastBar,
     VideoPanelSaturationBar,
     VideoPanelReset,
-    VideoPanelHdrToggle
+    VideoPanelHdrToggle,
+    InfoPanelClose
 };
 
 // 无边框窗口 resize 模式
@@ -294,6 +295,19 @@ enum class ResizeMode {
 struct ChatMessage {
     bool isUser;
     std::string text;
+};
+
+// 信息面板种类：媒体信息与「关于」共用同一渲染，互斥显示
+enum class InfoPanelKind {
+    None,
+    MediaInfo,
+    About
+};
+
+// 信息面板内容：标题 + 标签/值行（标签为空表示上一行的续行）
+struct InfoPanelContent {
+    std::string title;
+    std::vector<std::pair<std::string, std::string>> rows;
 };
 
 class SDLRenderer {
@@ -374,6 +388,8 @@ public:
     void toggleSearchPanel();
     void addChatMessage(bool isUser, const std::string& text);
     void toggleMediaInfoPanel();
+    void showAboutPanel(InfoPanelContent content);
+    void closeInfoPanel();
     void setMediaInfo(const MediaInfo& info);
     void showOSD(const std::string& text);
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
@@ -613,7 +629,8 @@ private:
     bool m_showPlaylistPanel = true;
     bool m_showEpisodePanel = false;
     bool m_showSearchPanel = false;
-    bool m_showMediaInfoPanel = false;
+    InfoPanelKind m_infoPanel = InfoPanelKind::None;
+    InfoPanelContent m_aboutContent;
     int m_playlistScrollOffset = 0;
     bool m_playlistDragging = false;
     int m_playlistDragFrom = -1;
@@ -695,6 +712,8 @@ private:
         int value;
     };
     std::vector<ControlRect> m_controlRects;
+    // 当前打开的信息面板矩形（模态遮罩点击命中用）
+    ControlRect m_infoPanelRect{0, 0, 0, 0, ControlType::None, 0};
     
     std::vector<ChapterInfo> m_chapters;
     std::vector<Bookmark> m_bookmarks;

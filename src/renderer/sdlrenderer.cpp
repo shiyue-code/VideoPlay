@@ -784,8 +784,22 @@ void SDLRenderer::addChatMessage(bool isUser, const std::string& text) {
 }
 
 void SDLRenderer::toggleMediaInfoPanel() {
-    m_showMediaInfoPanel = !m_showMediaInfoPanel;
-    showOSD(m_showMediaInfoPanel ? "媒体信息" : "关闭媒体信息");
+    if (m_infoPanel == InfoPanelKind::MediaInfo) {
+        m_infoPanel = InfoPanelKind::None;
+        showOSD("关闭媒体信息");
+    } else {
+        m_infoPanel = InfoPanelKind::MediaInfo;
+        showOSD("媒体信息");
+    }
+}
+
+void SDLRenderer::showAboutPanel(InfoPanelContent content) {
+    m_aboutContent = std::move(content);
+    m_infoPanel = InfoPanelKind::About;
+}
+
+void SDLRenderer::closeInfoPanel() {
+    m_infoPanel = InfoPanelKind::None;
 }
 
 void SDLRenderer::setMediaInfo(const MediaInfo& info) {

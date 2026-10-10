@@ -1672,6 +1672,10 @@ MediaInfo FFmpegPlayer::mediaInfo() const {
     return m_mediaInfo;
 }
 
+std::string FFmpegPlayer::ffmpegVersion() {
+    return std::string(av_version_info());
+}
+
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
     if (m_videoFrameQueue.empty()) {

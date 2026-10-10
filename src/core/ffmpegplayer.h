@@ -116,6 +116,9 @@ public:
     void setChapters(const std::vector<ChapterInfo>& chapters);
     MediaInfo mediaInfo() const;
 
+    // FFmpeg 运行时版本串（av_version_info）
+    static std::string ffmpegVersion();
+
     // 多音轨/多字幕轨支持
     const std::vector<TrackInfo>& audioTracks() const { return m_audioTracks; }
     const std::vector<TrackInfo>& subtitleTracks() const { return m_subtitleTracks; }
