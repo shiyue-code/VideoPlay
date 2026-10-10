@@ -62,6 +62,14 @@ target_include_directories(test_audioclock PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS
 target_link_libraries(test_audioclock PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_audioclock)
 
+add_executable(test_frame_image
+    test_frame_image_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/frame_image.cpp
+)
+target_include_directories(test_frame_image PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_frame_image PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_frame_image)
+
 add_executable(test_settings_maintenance
     test_settings_maintenance_gtest.cpp
     ${CMAKE_SOURCE_DIR}/src/core/settings_maintenance.cpp

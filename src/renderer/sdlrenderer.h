@@ -220,6 +220,7 @@ struct RendererCallbacks {
     AudioTrackCallback audioTrack;
     SubtitleTrackCallback subtitleTrack;
     VideoFilterConfigCallback videoFilterConfig;
+    std::function<void()> screenshot;   // 截图请求（由 app 截取当前视频帧）
     std::function<void()> liveRender;  // 系统拖动/缩放模态循环期间实时重绘
 };
 
@@ -433,9 +434,6 @@ public:
     bool isMaximized() const;
     void maximizeWindow();
     void restoreWindow();
-
-    // 截图并保存到桌面
-    void takeScreenshot();
 
 private:
     friend class MenuManager;

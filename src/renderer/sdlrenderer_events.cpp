@@ -337,7 +337,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_callbacks.speed) m_callbacks.speed(0); // 循环速度
                         break;
                     case SDLK_F12:
-                        takeScreenshot();
+                        if (m_callbacks.screenshot) m_callbacks.screenshot();
                         break;
                     case SDLK_L:
                         if (!(event.key.mod & SDL_KMOD_CTRL)) {

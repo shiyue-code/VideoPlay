@@ -159,6 +159,7 @@ set(SOURCES
     src/ai/mimo_client.cpp
     src/ai/searchengine.cpp
     src/utils/subprocess_runner.cpp
+    src/utils/frame_image.cpp
 )
 
 if(WIN32)
@@ -181,6 +182,7 @@ set(HEADERS
     src/utils/logger.h
     src/utils/string_utils.h
     src/utils/subprocess_runner.h
+    src/utils/frame_image.h
     src/renderer/sdlrenderer.h
     src/renderer/sdlrenderer_internal.h
     src/renderer/menu_manager.h

@@ -55,6 +55,7 @@ private:
     void setSpeed(double speed);
     void cycleSpeed();
     void toggleAlwaysOnTop();
+    void takeScreenshot();
     void setLoopPointA();
     void setLoopPointB();
     void clearLoop();

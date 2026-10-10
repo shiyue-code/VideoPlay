@@ -31,8 +31,6 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "utils/stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "utils/stb_image_write.h"
 
 namespace {
     std::string getExecutableDir() {
@@ -545,65 +543,6 @@ void SDLRenderer::updateRecentFilesMenu() {
 }
 
 
-
-void SDLRenderer::takeScreenshot() {
-    if (!m_renderer || !m_window) return;
-
-    SDL_Surface* surface = SDL_RenderReadPixels(m_renderer, nullptr);
-    if (!surface) {
-        logger().error("Failed to read pixels for screenshot");
-        return;
-    }
-
-    // 统一转成 RGBA32 字节序，保证 stb_write_png 按 4 通道写出正确 PNG
-    SDL_Surface* rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(surface);
-    surface = rgba;
-    if (!surface) {
-        logger().error("Failed to convert screenshot surface");
-        return;
-    }
-
-    // 构造保存路径：桌面 / VideoPlay_Screenshot_YYYYMMDD_HHMMSS.png
-    std::string savePath;
-#ifdef _WIN32
-    const char* userProfile = getenv("USERPROFILE");
-    if (userProfile) {
-        savePath = std::string(userProfile) + "/Desktop/";
-    } else {
-        savePath = "./";
-    }
-#else
-    const char* home = getenv("HOME");
-    savePath = home ? std::string(home) + "/Desktop/" : "./";
-#endif
-
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm{};
-#ifdef _WIN32
-    localtime_s(&tm, &t);
-#else
-    localtime_r(&t, &tm);
-#endif
-    std::ostringstream oss;
-    oss << "VideoPlay_Screenshot_"
-        << std::put_time(&tm, "%Y%m%d_%H%M%S")
-        << ".png";
-    savePath += oss.str();
-
-    int result = stbi_write_png(savePath.c_str(), surface->w, surface->h, 4,
-                                surface->pixels, surface->pitch);
-    SDL_DestroySurface(surface);
-
-    if (result) {
-        logger().info("Screenshot saved: " + savePath);
-        showMessageBox("截图已保存", "截图已保存到:\n" + savePath, false);
-    } else {
-        logger().error("Failed to save screenshot");
-        showMessageBox("截图失败", "无法保存截图", true);
-    }
-}
 
 void SDLRenderer::setCallbacks(RendererCallbacks callbacks) {
     auto liveRender = std::move(m_callbacks.liveRender);  // liveRender 由单独 setter 管理

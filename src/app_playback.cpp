@@ -2,9 +2,14 @@
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
+#include "utils/frame_image.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
+#include <chrono>
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 namespace {
     const int MIN_VOLUME = 0;
@@ -157,6 +162,63 @@ void VideoPlayerApp::cycleSpeed() {
     
     // 回到第一个
     setSpeed(speeds[0]);
+}
+
+void VideoPlayerApp::takeScreenshot() {
+    if (!m_renderer) return;
+
+    // 截取当前显示的视频帧（不含 UI/OSD），套用与渲染一致的画面变换
+    if (m_displayFrame.data.empty() ||
+        m_displayFrame.width <= 0 || m_displayFrame.height <= 0) {
+        m_renderer->showMessageBox("截图失败", "当前没有可截取的视频画面", true);
+        return;
+    }
+
+    const VideoTransform transform = m_renderer->videoTransform();
+    VideoFrame shot = transformFrame(m_displayFrame, transform.rotation,
+                                     transform.flipHorizontal, transform.flipVertical,
+                                     transform.cropPercent);
+    if (shot.data.empty()) {
+        logger().error("Failed to transform frame for screenshot");
+        m_renderer->showMessageBox("截图失败", "无法保存截图", true);
+        return;
+    }
+
+    // 构造保存路径：桌面 / VideoPlay_Screenshot_YYYYMMDD_HHMMSS.png
+    std::string savePath;
+#ifdef _WIN32
+    const char* userProfile = getenv("USERPROFILE");
+    if (userProfile) {
+        savePath = std::string(userProfile) + "/Desktop/";
+    } else {
+        savePath = "./";
+    }
+#else
+    const char* home = getenv("HOME");
+    savePath = home ? std::string(home) + "/Desktop/" : "./";
+#endif
+
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    std::ostringstream oss;
+    oss << "VideoPlay_Screenshot_"
+        << std::put_time(&tm, "%Y%m%d_%H%M%S")
+        << ".png";
+    savePath += oss.str();
+
+    if (saveFramePng(shot, savePath)) {
+        logger().info("Screenshot saved: " + savePath);
+        m_renderer->showMessageBox("截图已保存", "截图已保存到:\n" + savePath, false);
+    } else {
+        logger().error("Failed to save screenshot");
+        m_renderer->showMessageBox("截图失败", "无法保存截图", true);
+    }
 }
 
 void VideoPlayerApp::setLoopPointA() {

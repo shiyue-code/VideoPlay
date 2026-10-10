@@ -2,6 +2,7 @@
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
+#include "utils/frame_image.h"
 #include "utils/logger.h"
 #include "subtitles/subtitleparser.h"
 #include "core/episodedetector.h"
@@ -235,6 +236,9 @@ bool VideoPlayerApp::initialize() {
     });
     cb.episodeNext = ([this]() {
         playNextEpisode();
+    });
+    cb.screenshot = ([this]() {
+        takeScreenshot();
     });
     cb.loopMode = ([this](int mode) {
         Settings::instance().setLoopMode(static_cast<LoopMode>(mode));

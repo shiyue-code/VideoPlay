@@ -192,9 +192,7 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
             break;
         case MenuId::Screenshot: // 截图
-            if (m_renderer) {
-                m_renderer->takeScreenshot();
-            }
+            takeScreenshot();
             break;
         case MenuId::ABLoopSetA: // AB循环: 设置A点
             setLoopPointA();
