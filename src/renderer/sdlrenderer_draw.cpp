@@ -1,5 +1,6 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
+#include "renderer/ui_draw.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -188,68 +189,7 @@ void SDLRenderer::fillRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uin
 }
 
 void SDLRenderer::fillRoundRect(int x, int y, int w, int h, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {
-    if (!m_renderer || w <= 0 || h <= 0) return;
-    if (radius <= 0) {
-        fillRect(x, y, w, h, red, green, blue, a);
-        return;
-    }
-    int r = std::min(radius, std::min(w / 2, h / 2));
-
-    // Reuse static buffers to avoid per-frame allocations
-    static thread_local std::vector<SDL_Vertex> vertices;
-    static thread_local std::vector<int> indices;
-    vertices.clear();
-    indices.clear();
-
-    auto addPoint = [&](float px, float py) {
-        SDL_Vertex v;
-        v.position.x = px;
-        v.position.y = py;
-        v.color.r = red / 255.0f;
-        v.color.g = green / 255.0f;
-        v.color.b = blue / 255.0f;
-        v.color.a = a / 255.0f;
-        v.tex_coord.x = 0;
-        v.tex_coord.y = 0;
-        vertices.push_back(v);
-    };
-
-    // center point
-    addPoint(x + w / 2.0f, y + h / 2.0f);
-
-    const float PI = 3.14159265f;
-    const int segments = 32; // Reduced from 64 to 32 for better performance
-    // top-left arc
-    for (int i = 0; i <= segments; ++i) {
-        float angle = PI + PI / 2.0f * i / segments;
-        addPoint(x + r + r * std::cos(angle), y + r + r * std::sin(angle));
-    }
-    // top-right arc
-    for (int i = 0; i <= segments; ++i) {
-        float angle = PI * 1.5f + PI / 2.0f * i / segments;
-        addPoint(x + w - r + r * std::cos(angle), y + r + r * std::sin(angle));
-    }
-    // bottom-right arc
-    for (int i = 0; i <= segments; ++i) {
-        float angle = 0.0f + PI / 2.0f * i / segments;
-        addPoint(x + w - r + r * std::cos(angle), y + h - r + r * std::sin(angle));
-    }
-    // bottom-left arc
-    for (int i = 0; i <= segments; ++i) {
-        float angle = PI / 2.0f + PI / 2.0f * i / segments;
-        addPoint(x + r + r * std::cos(angle), y + h - r + r * std::sin(angle));
-    }
-
-    // Generate triangle list indices for a fan from center
-    size_t boundaryCount = vertices.size() - 1;
-    indices.reserve(boundaryCount * 3);
-    for (size_t i = 0; i < boundaryCount; ++i) {
-        indices.push_back(0);
-        indices.push_back(static_cast<int>(1 + i));
-        indices.push_back(static_cast<int>(1 + ((i + 1) % boundaryCount)));
-    }
-
-    SDL_RenderGeometry(m_renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), indices.data(), static_cast<int>(indices.size()));
+    UiDraw::fillRoundRect(m_renderer, x, y, w, h, radius, red, green, blue, a);
 }
 
 void SDLRenderer::fillCircle(int cx, int cy, int radius, uint8_t red, uint8_t green, uint8_t blue, uint8_t a) {

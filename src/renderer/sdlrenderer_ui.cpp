@@ -1,5 +1,6 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
+#include "renderer/ui_style.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
 #include <SDL3/SDL.h>
@@ -989,9 +990,13 @@ void SDLRenderer::drawPanelCloseButton(int x, int y, int size, ControlType type,
                                        uint8_t lineShade, uint8_t lineAlpha) {
     bool pressed = (m_pressedControl == type);
     if (pressed) {
-        fillRoundRect(x, y, size, size, radius, 80, 85, 95, 220);
+        fillRoundRect(x, y, size, size, radius,
+                      UiStyle::kClosePressedBg[0], UiStyle::kClosePressedBg[1],
+                      UiStyle::kClosePressedBg[2], UiStyle::kClosePressedBg[3]);
     } else if (hovered) {
-        fillRoundRect(x, y, size, size, radius, 70, 75, 85, hoverAlpha);
+        fillRoundRect(x, y, size, size, radius,
+                      UiStyle::kCloseHoverBg[0], UiStyle::kCloseHoverBg[1],
+                      UiStyle::kCloseHoverBg[2], static_cast<uint8_t>(hoverAlpha));
     }
     SDL_SetRenderDrawColor(m_renderer, lineShade, lineShade, lineShade, hovered ? 255 : lineAlpha);
     SDL_RenderLine(m_renderer,
@@ -1056,41 +1061,52 @@ void SDLRenderer::renderInfoPanel(const std::string& title,
     int panelW = std::min(560, std::max(320, m_windowWidth - 80));
     int panelX = (m_windowWidth - panelW) / 2;
     int panelY = std::max(m_menuBarHeight + 30, (m_windowHeight - 360) / 2);
-    int radius = 12;
+    int radius = UiStyle::kPanelRadius;
 
-    const int titleFont = 18;
-    const int rowFont = 12;
-    const int padding = 24;
-    const int rowH = 24;
+    const int titleFont = UiStyle::kTitleFontSize;
+    const int rowFont = UiStyle::kRowFontSize;
+    const int padding = UiStyle::kPanelPadding;
+    const int rowH = UiStyle::kRowHeight;
     int panelH = padding * 2 + getFontHeight(titleFont) + 14 +
                  static_cast<int>(rows.size()) * rowH;
     if (panelY + panelH > m_windowHeight - 24) {
         panelY = std::max(m_menuBarHeight + 12, m_windowHeight - panelH - 24);
     }
 
-    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 100);
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius,
+                  UiStyle::kPanelShadow[0], UiStyle::kPanelShadow[1],
+                  UiStyle::kPanelShadow[2], UiStyle::kPanelShadow[3]);
     fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1,
-                  255, 255, 255, 60);
-    fillRoundRect(panelX, panelY, panelW, panelH, radius, 24, 26, 32, 238);
+                  UiStyle::kPanelBorder[0], UiStyle::kPanelBorder[1],
+                  UiStyle::kPanelBorder[2], UiStyle::kPanelBorder[3]);
+    fillRoundRect(panelX, panelY, panelW, panelH, radius,
+                  UiStyle::kPanelBg[0], UiStyle::kPanelBg[1],
+                  UiStyle::kPanelBg[2], UiStyle::kPanelBg[3]);
 
     m_infoPanelRect = {panelX, panelY, panelW, panelH, ControlType::None, 0};
 
     drawText(title, panelX + padding, panelY + padding,
-             255, 255, 255, titleFont);
+             UiStyle::kTitleColor[0], UiStyle::kTitleColor[1],
+             UiStyle::kTitleColor[2], titleFont);
 
     // 右上角关闭按钮，与标题垂直居中对齐
-    int closeSize = 28;
+    int closeSize = UiStyle::kCloseSize;
     int closeX = panelX + panelW - closeSize - 16;
     int closeY = panelY + padding + (getFontHeight(titleFont) - closeSize) / 2;
     drawPanelCloseButton(closeX, closeY, closeSize, ControlType::InfoPanelClose,
-                         m_hoveredControl == ControlType::InfoPanelClose, 6, 9, 200, 230, 190);
+                         m_hoveredControl == ControlType::InfoPanelClose,
+                         UiStyle::kCloseRadius, UiStyle::kCloseInset,
+                         UiStyle::kCloseHoverAlpha, UiStyle::kCloseLineShade,
+                         UiStyle::kCloseLineAlpha);
 
     int y = panelY + padding + getFontHeight(titleFont) + 14;
     int labelW = 78;
     int valueX = panelX + padding + labelW + 18;
     int valueMaxW = panelW - padding * 2 - labelW - 18;
     for (const auto& row : rows) {
-        drawText(row.first, panelX + padding, y, 160, 168, 178, rowFont);
+        drawText(row.first, panelX + padding, y,
+                 UiStyle::kLabelColor[0], UiStyle::kLabelColor[1],
+                 UiStyle::kLabelColor[2], rowFont);
 
         std::string value = row.second;
         int valueW = getTextWidth(value, rowFont);
@@ -1102,7 +1118,9 @@ void SDLRenderer::renderInfoPanel(const std::string& title,
             }
             value += ellipsis;
         }
-        drawText(value, valueX, y, 235, 238, 242, rowFont);
+        drawText(value, valueX, y,
+                 UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                 UiStyle::kValueColor[2], rowFont);
         y += rowH;
     }
 }

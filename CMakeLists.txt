@@ -144,6 +144,7 @@ set(SOURCES
     src/renderer/sdlrenderer_draw.cpp
     src/renderer/menu_manager.cpp
     src/renderer/ui_manager.cpp
+    src/renderer/ui_draw.cpp
     src/renderer/dialog_manager.cpp
     src/renderer/windowframe.cpp
     src/renderer/custommessagebox.cpp
@@ -188,6 +189,8 @@ set(HEADERS
     src/renderer/menu_manager.h
     src/renderer/menu_item.h
     src/renderer/ui_manager.h
+    src/renderer/ui_style.h
+    src/renderer/ui_draw.h
     src/renderer/dialog_manager.h
     src/renderer/windowframe.h
     src/renderer/custommessagebox.h
