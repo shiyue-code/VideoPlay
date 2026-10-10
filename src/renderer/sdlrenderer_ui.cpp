@@ -187,7 +187,7 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
     renderAIAnalysisOverlay();
 
     if (m_showMediaInfoPanel) {
-        renderMediaInfoPanel();
+        renderInfoPanel("媒体信息", buildMediaInfoRows());
     }
 
     if (m_showVideoControlPanel) {
@@ -982,14 +982,26 @@ void SDLRenderer::renderAIAnalysisOverlay() {
     }
 }
 
-void SDLRenderer::renderMediaInfoPanel() {
-    fillRect(0, 0, m_windowWidth, m_windowHeight, 0, 0, 0, 95);
+void SDLRenderer::drawPanelCloseButton(int x, int y, int size, ControlType type, bool hovered,
+                                       int radius, int inset, int hoverAlpha,
+                                       uint8_t lineShade, uint8_t lineAlpha) {
+    bool pressed = (m_pressedControl == type);
+    if (pressed) {
+        fillRoundRect(x, y, size, size, radius, 80, 85, 95, 220);
+    } else if (hovered) {
+        fillRoundRect(x, y, size, size, radius, 70, 75, 85, hoverAlpha);
+    }
+    SDL_SetRenderDrawColor(m_renderer, lineShade, lineShade, lineShade, hovered ? 255 : lineAlpha);
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(x + inset), static_cast<float>(y + inset),
+                   static_cast<float>(x + size - inset), static_cast<float>(y + size - inset));
+    SDL_RenderLine(m_renderer,
+                   static_cast<float>(x + size - inset), static_cast<float>(y + inset),
+                   static_cast<float>(x + inset), static_cast<float>(y + size - inset));
+    m_controlRects.push_back({x, y, size, size, type, 0});
+}
 
-    int panelW = std::min(560, std::max(320, m_windowWidth - 80));
-    int panelX = (m_windowWidth - panelW) / 2;
-    int panelY = std::max(m_menuBarHeight + 30, (m_windowHeight - 360) / 2);
-    int radius = 12;
-
+std::vector<std::pair<std::string, std::string>> SDLRenderer::buildMediaInfoRows() const {
     std::vector<std::pair<std::string, std::string>> rows;
     rows.push_back({"来源", m_mediaInfo.source.empty() ? "N/A" : m_mediaInfo.source});
     rows.push_back({"类型", m_mediaInfo.sourceType == SourceType::NetworkStream ? "网络流" : "本地文件"});
@@ -1032,6 +1044,17 @@ void SDLRenderer::renderMediaInfoPanel() {
                                 std::to_string(m_mediaInfo.channels) : "N/A"});
         rows.push_back({"音频码率", formatBitrate(m_mediaInfo.audioBitrate)});
     }
+    return rows;
+}
+
+void SDLRenderer::renderInfoPanel(const std::string& title,
+                                  const std::vector<std::pair<std::string, std::string>>& rows) {
+    fillRect(0, 0, m_windowWidth, m_windowHeight, 0, 0, 0, 95);
+
+    int panelW = std::min(560, std::max(320, m_windowWidth - 80));
+    int panelX = (m_windowWidth - panelW) / 2;
+    int panelY = std::max(m_menuBarHeight + 30, (m_windowHeight - 360) / 2);
+    int radius = 12;
 
     const int titleFont = 18;
     const int rowFont = 12;
@@ -1048,7 +1071,7 @@ void SDLRenderer::renderMediaInfoPanel() {
                   255, 255, 255, 60);
     fillRoundRect(panelX, panelY, panelW, panelH, radius, 24, 26, 32, 238);
 
-    drawText("媒体信息", panelX + padding, panelY + padding,
+    drawText(title, panelX + padding, panelY + padding,
              255, 255, 255, titleFont);
 
     int y = panelY + padding + getFontHeight(titleFont) + 14;
@@ -1591,20 +1614,8 @@ void SDLRenderer::renderSearchPanel() {
     int closeY = panelY + 10;
     bool closeHovered = (m_mouseX >= closeX && m_mouseX <= closeX + closeSize &&
                          m_mouseY >= closeY && m_mouseY <= closeY + closeSize);
-    bool closePressed = (m_pressedControl == ControlType::SearchCloseButton);
-    if (closePressed) {
-        fillRoundRect(closeX, closeY, closeSize, closeSize, 6, 80, 85, 95, 220);
-    } else if (closeHovered) {
-        fillRoundRect(closeX, closeY, closeSize, closeSize, 6, 70, 75, 85, 200);
-    }
-    SDL_SetRenderDrawColor(m_renderer, 230, 230, 230, closeHovered ? 255 : 190);
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(closeX + 9), static_cast<float>(closeY + 9),
-                   static_cast<float>(closeX + closeSize - 9), static_cast<float>(closeY + closeSize - 9));
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(closeX + closeSize - 9), static_cast<float>(closeY + 9),
-                   static_cast<float>(closeX + 9), static_cast<float>(closeY + closeSize - 9));
-    m_controlRects.push_back({closeX, closeY, closeSize, closeSize, ControlType::SearchCloseButton, 0});
+    drawPanelCloseButton(closeX, closeY, closeSize, ControlType::SearchCloseButton,
+                         closeHovered, 6, 9, 200, 230, 190);
 
     // 历史消息列表渲染区 (支持滚动)
     int inputH = 46;
@@ -1886,21 +1897,8 @@ void SDLRenderer::renderVideoControlPanel() {
     int closeSize = 22;
     int closeX = panelX + panelW - closeSize - 14;
     int closeY = panelY + 14;
-    bool closeHovered = (m_hoveredControl == ControlType::VideoPanelClose);
-    bool closePressed = (m_pressedControl == ControlType::VideoPanelClose);
-    if (closePressed) {
-        fillRoundRect(closeX, closeY, closeSize, closeSize, 4, 80, 85, 95, 220);
-    } else if (closeHovered) {
-        fillRoundRect(closeX, closeY, closeSize, closeSize, 4, 70, 75, 85, 180);
-    }
-    SDL_SetRenderDrawColor(m_renderer, 220, 220, 220, closeHovered ? 255 : 180);
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(closeX + 6), static_cast<float>(closeY + 6),
-                   static_cast<float>(closeX + closeSize - 6), static_cast<float>(closeY + closeSize - 6));
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(closeX + closeSize - 6), static_cast<float>(closeY + 6),
-                   static_cast<float>(closeX + 6), static_cast<float>(closeY + closeSize - 6));
-    m_controlRects.push_back({closeX, closeY, closeSize, closeSize, ControlType::VideoPanelClose, 0});
+    drawPanelCloseButton(closeX, closeY, closeSize, ControlType::VideoPanelClose,
+                         m_hoveredControl == ControlType::VideoPanelClose, 4, 6, 180, 220, 180);
 
     // 滑块参数
     int startY = panelY + 48;

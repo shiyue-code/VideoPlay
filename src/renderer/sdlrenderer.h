@@ -505,7 +505,13 @@ private:
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
     void renderOSD();
-    void renderMediaInfoPanel();
+    void renderInfoPanel(const std::string& title,
+                         const std::vector<std::pair<std::string, std::string>>& rows);
+    std::vector<std::pair<std::string, std::string>> buildMediaInfoRows() const;
+    // 面板右上角「×」按钮：悬停/按下半透明底色 + 交叉线，热区注册进 m_controlRects
+    void drawPanelCloseButton(int x, int y, int size, ControlType type, bool hovered,
+                              int radius, int inset, int hoverAlpha,
+                              uint8_t lineShade, uint8_t lineAlpha);
     void renderVideoControlPanel();
     void renderNetworkState();
     void renderAIAnalysisOverlay();
