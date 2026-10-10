@@ -634,11 +634,14 @@ void SDLRenderer::renderSubtitle(const std::string& subtitle) {
     }
     if (lines.empty()) return;
 
-    int fontSize = 16;
+    // 字号与颜色来自缓存的字幕样式（setSubtitleStyle），无需每帧读 Settings
+    const int fontSize = m_subtitleFontSize;
+    TTF_Font* subFont = ensureSubtitleFont();
+
     int maxWidth = 0;
-    int lineHeight = getFontHeight(fontSize);
+    int lineHeight = getFontHeight(fontSize, subFont);
     for (const auto& line : lines) {
-        int w = getTextWidth(line, fontSize);
+        int w = getTextWidth(line, fontSize, subFont);
         if (w > maxWidth) maxWidth = w;
     }
 
@@ -653,15 +656,31 @@ void SDLRenderer::renderSubtitle(const std::string& subtitle) {
     int y = m_windowHeight - bottomMargin - totalHeight;
     if (y < m_menuBarHeight + 10) y = m_menuBarHeight + 10;
 
-    // 绘制半透明背景
-    fillRoundRect(x, y, totalWidth, totalHeight, 8, 0, 0, 0, 180);
+    // 无描边时保留半透明圆角背景；有描边时直接画字
+    if (!m_subtitleHasOutline) {
+        fillRoundRect(x, y, totalWidth, totalHeight, 8, 0, 0, 0, 180);
+    }
 
-    //  绘制字幕文字（白色带轻微描边效果通过背景实现�?
+    //  绘制字幕文字
+    const int ow = m_subtitleHasOutline ? m_subtitleOutlineWidth : 0;
     int textY = y + paddingY;
     for (const auto& line : lines) {
-        int textW = getTextWidth(line, fontSize);
+        int textW = getTextWidth(line, fontSize, subFont);
         int textX = x + (totalWidth - textW) / 2;
-        drawText(line, textX, textY, 255, 255, 255, fontSize);
+        if (ow > 0) {
+            // 四周偏移画描边层（TTF_SetFontOutline 只能渲染单色空心边框，
+            // 无法做到「描边色 + 字体色」双色，故用偏移叠加实现）
+            for (int dy = -ow; dy <= ow; ++dy) {
+                for (int dx = -ow; dx <= ow; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    drawText(line, textX + dx, textY + dy,
+                             m_subtitleOutlineColor[0], m_subtitleOutlineColor[1],
+                             m_subtitleOutlineColor[2], fontSize, 255, subFont);
+                }
+            }
+        }
+        drawText(line, textX, textY, m_subtitleFontColor[0], m_subtitleFontColor[1],
+                 m_subtitleFontColor[2], fontSize, 255, subFont);
         textY += lineHeight;
     }
 #endif

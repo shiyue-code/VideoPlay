@@ -61,14 +61,20 @@ void SDLRenderer::closeFont() {
         TTF_CloseFont(m_fontLarge);
         m_fontLarge = nullptr;
     }
+    if (m_subtitleFont) {
+        TTF_CloseFont(m_subtitleFont);
+        m_subtitleFont = nullptr;
+        m_subtitleFontOpenedSize = 0;
+    }
 #endif
 }
 
-void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize, uint8_t alpha) {
+void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize, uint8_t alpha, TTF_Font* fontOverride) {
 #ifdef HAS_SDL_TTF
     if (!m_font || !m_renderer || text.empty()) return;
 
-    std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b) + "," + std::to_string(alpha);
+    // fontOverride 时 key 带 "|o" 区分，避免与同字号 UI 文字串缓存
+    std::string cacheKey = text + "|" + std::to_string(fontSize) + "|" + std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b) + "," + std::to_string(alpha) + (fontOverride ? "|o" : "");
     auto it = m_textCache.find(cacheKey);
     if (it != m_textCache.end()) {
         SDL_FRect dstRect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(it->second.width), static_cast<float>(it->second.height) };
@@ -76,11 +82,12 @@ void SDLRenderer::drawText(const std::string& text, int x, int y, uint8_t r, uin
         return;
     }
 
-    TTF_Font* font = m_font;
-    if (fontSize > 0) {
+    TTF_Font* font = fontOverride ? fontOverride : m_font;
+    if (!fontOverride && fontSize > 0) {
         if (fontSize <= 10 && m_fontSmall) font = m_fontSmall;
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
+    if (!font) return;
 
     SDL_Color color = { r, g, b, alpha };
     SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), 0, color);
@@ -130,16 +137,17 @@ void SDLRenderer::pruneTextCache(size_t maxEntries) {
     }
 }
 
-int SDLRenderer::getTextWidth(const std::string& text, int fontSize) {
+int SDLRenderer::getTextWidth(const std::string& text, int fontSize, TTF_Font* fontOverride) {
 #ifdef HAS_SDL_TTF
     if (!m_font) return text.length() * 8;
-    
-    TTF_Font* font = m_font;
-    if (fontSize > 0) {
+
+    TTF_Font* font = fontOverride ? fontOverride : m_font;
+    if (!fontOverride && fontSize > 0) {
         if (fontSize <= 10 && m_fontSmall) font = m_fontSmall;
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
-    
+    if (!font) return text.length() * 8;
+
     int w, h;
     if (TTF_GetStringSize(font, text.c_str(), 0, &w, &h)) {
         return w;
@@ -148,16 +156,17 @@ int SDLRenderer::getTextWidth(const std::string& text, int fontSize) {
     return text.length() * 8;
 }
 
-int SDLRenderer::getFontHeight(int fontSize) {
+int SDLRenderer::getFontHeight(int fontSize, TTF_Font* fontOverride) {
 #ifdef HAS_SDL_TTF
     if (!m_font) return 14;
-    
-    TTF_Font* font = m_font;
-    if (fontSize > 0) {
+
+    TTF_Font* font = fontOverride ? fontOverride : m_font;
+    if (!fontOverride && fontSize > 0) {
         if (fontSize <= 10 && m_fontSmall) font = m_fontSmall;
         else if (fontSize >= 18 && m_fontLarge) font = m_fontLarge;
     }
-    
+    if (!font) return 14;
+
     return TTF_GetFontHeight(font);
 #else
     return 14;

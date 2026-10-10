@@ -335,6 +335,7 @@ bool VideoPlayerApp::initialize() {
     auto aspectMode = Settings::instance().aspectMode();
     m_renderer->setAspectMode(aspectMode);
     m_renderer->setVideoTransform(Settings::instance().videoTransform());
+    m_renderer->setSubtitleStyle(Settings::instance().subtitleStyle());
 
     // 恢复窗口置顶状态
     if (Settings::instance().alwaysOnTop()) {

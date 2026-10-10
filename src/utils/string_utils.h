@@ -35,6 +35,34 @@ inline bool endsWith(const std::string& value, const std::string& suffix) {
            std::equal(suffix.rbegin(), suffix.rend(), value.rbegin());
 }
 
+// 解析 "#RRGGBB" 或 "RRGGBB"（大小写均可），失败返回 false
+inline bool parseHexColor(const std::string& s, uint8_t& r, uint8_t& g, uint8_t& b) {
+    std::string hex = s;
+    if (!hex.empty() && hex.front() == '#') {
+        hex.erase(hex.begin());
+    }
+    if (hex.size() != 6) {
+        return false;
+    }
+    const auto hexDigit = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    int v[6];
+    for (int i = 0; i < 6; ++i) {
+        v[i] = hexDigit(hex[i]);
+        if (v[i] < 0) {
+            return false;
+        }
+    }
+    r = static_cast<uint8_t>(v[0] * 16 + v[1]);
+    g = static_cast<uint8_t>(v[2] * 16 + v[3]);
+    b = static_cast<uint8_t>(v[4] * 16 + v[5]);
+    return true;
+}
+
 // 解析 AI 分析文本里的括号时间戳 "[mm:ss]" / "[hh:mm:ss]"（毫秒）
 inline bool parseBracketTimestampMs(const std::string& text, int64_t& timestampMs) {
     int first = 0;

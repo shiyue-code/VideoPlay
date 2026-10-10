@@ -519,6 +519,47 @@ void SDLRenderer::setVideoTransform(const VideoTransform& transform) {
     m_videoTransform = transform;
 }
 
+void SDLRenderer::setSubtitleStyle(const SubtitleStyle& style) {
+    m_subtitleFontSize = std::clamp(style.fontSize, 10, 96);
+
+    uint8_t r = 255, g = 255, b = 255;
+    if (parseHexColor(style.fontColor, r, g, b)) {
+        m_subtitleFontColor[0] = r;
+        m_subtitleFontColor[1] = g;
+        m_subtitleFontColor[2] = b;
+    } else {
+        m_subtitleFontColor[0] = m_subtitleFontColor[1] = m_subtitleFontColor[2] = 255;
+    }
+
+    m_subtitleHasOutline = style.hasOutline;
+    r = 0; g = 0; b = 0;
+    if (parseHexColor(style.outlineColor, r, g, b)) {
+        m_subtitleOutlineColor[0] = r;
+        m_subtitleOutlineColor[1] = g;
+        m_subtitleOutlineColor[2] = b;
+    } else {
+        m_subtitleOutlineColor[0] = m_subtitleOutlineColor[1] = m_subtitleOutlineColor[2] = 0;
+    }
+    m_subtitleOutlineWidth = std::clamp(style.outlineWidth, 0, 6);
+}
+
+TTF_Font* SDLRenderer::ensureSubtitleFont() {
+#ifdef HAS_SDL_TTF
+    if (m_fontPath.empty()) return nullptr;
+    if (!m_subtitleFont || m_subtitleFontOpenedSize != m_subtitleFontSize) {
+        if (m_subtitleFont) {
+            TTF_CloseFont(m_subtitleFont);
+            m_subtitleFont = nullptr;
+        }
+        m_subtitleFont = TTF_OpenFont(m_fontPath.c_str(), m_subtitleFontSize);
+        m_subtitleFontOpenedSize = m_subtitleFont ? m_subtitleFontSize : 0;
+    }
+    return m_subtitleFont;
+#else
+    return nullptr;
+#endif
+}
+
 AspectMode SDLRenderer::aspectMode() const {
     return m_aspectMode;
 }

@@ -70,6 +70,13 @@ target_include_directories(test_frame_image PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIR
 target_link_libraries(test_frame_image PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_frame_image)
 
+add_executable(test_string_utils
+    test_string_utils_gtest.cpp
+)
+target_include_directories(test_string_utils PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_string_utils PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_string_utils)
+
 add_executable(test_settings_maintenance
     test_settings_maintenance_gtest.cpp
     ${CMAKE_SOURCE_DIR}/src/core/settings_maintenance.cpp

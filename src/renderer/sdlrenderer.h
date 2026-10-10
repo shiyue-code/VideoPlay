@@ -27,6 +27,8 @@ typedef struct SDL_Cursor SDL_Cursor;
 
 namespace VideoPlay {
 
+struct SubtitleStyle;
+
 // 菜单项 ID（静态菜单；动态范围保留为 100-109 / 200-249 / 400-449 / 450-499）
 enum class MenuId : int {
     // 文件菜单
@@ -423,6 +425,7 @@ public:
     // 设置画面比例
     void setAspectMode(AspectMode mode);
     void setVideoTransform(const VideoTransform& transform);
+    void setSubtitleStyle(const SubtitleStyle& style);
     VideoTransform videoTransform() const { return m_videoTransform; }
     AspectMode aspectMode() const;
 
@@ -530,9 +533,11 @@ private:
     // 字体和文字渲染
     bool loadFont(const std::string& fontPath, int fontSize);
     void closeFont();
-    void drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b, int fontSize = 0, uint8_t alpha = 255);
-    int getTextWidth(const std::string& text, int fontSize = 0);
-    int getFontHeight(int fontSize = 0);
+    // fontOverride 非空时直接用它渲染（字幕专用字体），缓存 key 会区分
+    void drawText(const std::string& text, int x, int y, uint8_t r, uint8_t g, uint8_t b,
+                  int fontSize = 0, uint8_t alpha = 255, TTF_Font* fontOverride = nullptr);
+    int getTextWidth(const std::string& text, int fontSize = 0, TTF_Font* fontOverride = nullptr);
+    int getFontHeight(int fontSize = 0, TTF_Font* fontOverride = nullptr);
 
     // 图标纹理
     void loadIconTextures();
@@ -562,6 +567,17 @@ private:
     TTF_Font* m_fontSmall = nullptr;
     TTF_Font* m_fontLarge = nullptr;
     std::string m_fontPath;
+
+    // 字幕样式（setSubtitleStyle 缓存，渲染时不再读 Settings）
+    int m_subtitleFontSize = 24;
+    uint8_t m_subtitleFontColor[3] = {255, 255, 255};
+    bool m_subtitleHasOutline = true;
+    uint8_t m_subtitleOutlineColor[3] = {0, 0, 0};
+    int m_subtitleOutlineWidth = 2;
+    // 按样式字号独立打开的字幕字体（懒加载，字号变化时重开）
+    TTF_Font* m_subtitleFont = nullptr;
+    int m_subtitleFontOpenedSize = 0;
+    TTF_Font* ensureSubtitleFont();
 
     // 子系统管理器
     friend class MenuManager;
