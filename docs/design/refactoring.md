@@ -6,7 +6,9 @@
 
 第一轮已完成：共享文本工具 `TextRender`、删除 `synchronizeVideo` 死代码并把音频同步偏移接到 `audioPositionMs()`、音量逻辑去重为 `setVolumeTo()`。
 
-第二轮已完成（2026-10-09）：`parseTimestampMs` 归位并改名、回调绝对值编码常量化、`ModalDialog` 基类落地、`RendererCallbacks` 收敛、`ffmpegplayer.cpp` 拆出 filters/tracks/preview 三个子文件。下表为剩余项。
+第二轮已完成（2026-10-09）：`parseTimestampMs` 归位并改名、回调绝对值编码常量化、`ModalDialog` 基类落地、`RendererCallbacks` 收敛、`ffmpegplayer.cpp` 拆出 filters/tracks/preview 三个子文件。
+
+第三轮已完成（2026-10-10）：`decodeLoop` 拆分为私有方法 `waitForDecodeSlot` / `handleReadFailure` / `decodeVideoPacket` / `decodeAudioPacket` / `decodeSubtitlePacket` / `receiveVideoFrames` / `receiveAudioFrames`；新增可独立单测的纯逻辑模块 `AudioClock`（`core/audioclock.*`）、`settings_maintenance`（`core/settings_maintenance.*`）、`frame_image`（`utils/frame_image.*`）。下表为剩余项。
 
 ## 原则
 
@@ -43,7 +45,7 @@
 
 ### 4. ~~`ffmpegplayer.cpp` 2612 行拆分~~ ✅ 部分
 
-已拆出 `ffmpegplayer_filters.cpp`（音频/视频滤镜链）、`ffmpegplayer_tracks.cpp`（轨道扫描与切换、字幕流）、`ffmpegplayer_preview.cpp`（进度条缩略图预览解码线程），主文件降至 ~1560 行。共享助手在 `ffmpegplayer_internal.h`。剩余可再拆：`decodeLoop`（300+ 行）与网络重连。
+已拆出 `ffmpegplayer_filters.cpp`（音频/视频滤镜链）、`ffmpegplayer_tracks.cpp`（轨道扫描与切换、字幕流）、`ffmpegplayer_preview.cpp`（进度条缩略图预览解码线程）。共享助手在 `ffmpegplayer_internal.h`。`decodeLoop` 已拆成辅助方法（见第三轮）。剩余可再拆：网络重连。
 
 ### 5. ~~`sdlrenderer.h` 回调收敛~~ ✅
 
@@ -75,5 +77,5 @@ JSON 读写单体。可按「播放列表 / 窗口 / AI / 键位」分域拆函�
 2. ~~`>=1000` 魔法值常量化~~ ✅
 3. ~~模态对话框基类~~ ✅（`ModalDialog`，三个对话框已改为子类）
 4. ~~`RendererCallbacks` 收敛~~ ✅
-5. ~~`ffmpegplayer.cpp` 拆分~~ ✅（filters/tracks/preview；decodeLoop 暂缓）
+5. ~~`ffmpegplayer.cpp` 拆分~~ ✅（filters/tracks/preview + `decodeLoop` 拆辅助方法）
 6. UI 面板拆分（最后，纯文件组织）

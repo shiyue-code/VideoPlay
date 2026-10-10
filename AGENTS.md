@@ -2,7 +2,7 @@
 
 > **读者**：开发者、Agent  
 > **状态**：现行  
-> **更新**：2026-08-23
+> **更新**：2026-10-10
 
 给改代码的人看。用户功能与快捷键见 [`README.md`](README.md)。未完成功能见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。文档怎么写见 [`docs/README.md`](docs/README.md)。
 
@@ -36,9 +36,11 @@ cmake --build build --config Release --target VideoPlay
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+生成器用 VS 2019 或更新版本均可，本机实测 `Visual Studio 18 2026` 可用。
+
 FFmpeg 默认指向 `3rdparty/FFmpeg/`。输出在 `build/bin/<Config>/`。添加源文件必须改根目录 `CMakeLists.txt` 的 `SOURCES` / `HEADERS`，不要用 `file(GLOB)`。
 
-当前测试 9 个：`tests/test_playbackcontroller_gtest.cpp`、`tests/test_subtitleparser_gtest.cpp`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT。剧集识别、Settings、ASS 尚无单测。
+当前测试 8 个 gtest 目标、共 53 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_ffmpegplayer_playback`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。剧集识别、Settings 读写、ASS 尚无单测。
 
 ## 源码结构
 
@@ -55,8 +57,10 @@ src/
 │   ├── ffmpegplayer_tracks.cpp  # 轨道扫描/切换、字幕流
 │   ├── ffmpegplayer_preview.cpp # 进度条缩略图预览解码
 │   ├── ffmpegplayer_internal.h  # 拆分文件共享的内部助手
+│   ├── audioclock.h/cpp         # 音频媒体时钟（按入队采样推算位置）
 │   ├── audioplayer.h/cpp        # SDL3 音频
 │   ├── settings.h/cpp           # JSON 配置单例
+│   ├── settings_maintenance.*   # 配置中失效本地文件条目的清理
 │   ├── episodedetector.h/cpp    # 剧集文件名识别
 │   └── common.h                 # 枚举、VideoFrame、轨道标签
 ├── renderer/
@@ -81,6 +85,7 @@ src/
 └── utils/
     ├── logger.*                 # Logger::root() / Logger::get(name)
     ├── subprocess_runner.*
+    ├── frame_image.*            # 帧裁剪/翻转/旋转与 PNG 写出（截图用）
     ├── string_utils.h
     └── stb_image*.h
 ```
@@ -103,11 +108,15 @@ VideoPlayerApp
 
 - 视频：`avcodec_send_packet` / `avcodec_receive_frame`
 - 音频：`SwrContext` → F32LE；主时钟是音频时钟
-- 变速：重采样率与播放速度一起调
-- Seek：异步请求，解码线程处理
+- 变速：音频滤镜链末尾追加 `atempo`（保持音高），速度 <0.5 时拆成多级串联
+- 音频时钟不是挂钟：`AudioClock` 记录每段入队采样的媒体 pts 与单帧媒体时长，按 SDL 未取走的帧数推算当前媒体位置
+- 时间戳统一经 `streamPtsToMs` 以容器 `start_time` 为基准（视频/音频/内封字幕）
+- Seek：异步请求，解码线程处理；解码出的目标位置之前的音频/视频帧会被裁剪
 - 预缓冲：`play()` 设 `m_preloading = true`，主循环每帧调 `checkPreloadComplete()`。视频队列 ≥1 帧且音频缓冲 ≥40ms 才启动音频；超时 1 秒强制开播
+- 背压：音视频队列满时解码线程阻塞等待（暂停态补解码例外，音频满仍丢包）
+- EOF：先给解码器 send NULL 收完尾帧，再等视频队列与音频缓冲排空才置 Stopped；排空期间 abort 直接退出、不再发 Stopped 回调
 - 画面参数走 FFmpeg `eq` / `hue` 滤镜；去隔行走 `bwdif` / `yadif`（硬解帧先转到软件再滤）
-- 音频滤镜走 `avfilter`
+- 音频滤镜走 `avfilter`；FFmpeg 8 下 `abuffer`/`abuffersink` 必须 `avfilter_graph_alloc_filter` → `av_buffersrc_parameters_set` → `avfilter_init_dict`，不能直接用 `avfilter_graph_create_filter`
 
 ### 渲染与交互
 
@@ -115,6 +124,9 @@ VideoPlayerApp
 - 控件全是坐标命中，没有原生控件
 - 进度条只在鼠标释放时 seek，拖动只更新 `m_dragProgressRatio`
 - 画面旋转/翻转/中心裁剪在 `SDLRenderer::renderFrame` 用 `SDL_RenderTextureRotated` 完成，不要改成 FFmpeg `transpose`（硬解路径过不去）
+- 渲染已开 vsync（`SDL_SetRenderVSync`）；vsync 生效时主循环最小帧间隔降到 4ms，只在 present 未阻塞（最小化/遮挡）时补睡 `SDL_DelayPrecise`，否则保持 16ms
+- 截图走 `VideoPlayerApp::takeScreenshot`：对 `m_displayFrame` 按与渲染一致的「裁剪 → 翻转 → 顺时针旋转」顺序变换后写 PNG（依 `SDL_RenderTextureRotated` 语义，先翻转后旋转），不含 UI/OSD
+- 字幕样式取自 `setSubtitleStyle` 缓存的 `SubtitleStyle`（字号/颜色/描边生效，`fontFamily` 暂不支持）；有描边时不画背景框、按偏移叠加描边层
 - 章节来自 `AVFormatContext::chapters`；进度条书签独立命中 `ControlType::ChapterMarker`
 - 绝对 seek 回调编码：`1000.0 + ratio * 1000.0`
 
@@ -152,7 +164,7 @@ Linux 仍是自绘拖动，`usesNativeResize()` 为 false。
 - 对象用 `unique_ptr`；线程要 `join`；SDL/FFmpeg 走显式 `shutdown()` / `stop()`
 - 状态与错误用回调：`setStateCallback`、`setErrorCallback`；FFmpeg 错误用 `av_err2str`
 
-配置单例 `Settings`（`src/core/settings.h`），文件 `%APPDATA%/VideoPlay/VideoPlay.json`。
+配置单例 `Settings`（`src/core/settings.h`），文件 `%APPDATA%/VideoPlay/VideoPlay.json`。写入为原子替换（先写 `.tmp` 再 rename）；解析失败时坏文件备份为 `VideoPlay.json.broken`。启动时 `positions`/`bookmarks`/`seriesProgress` 中本地文件已不存在的条目会被清理（URL 与 UNC 路径跳过，父目录不存在的条目保留）。
 
 ## 已知约束
 

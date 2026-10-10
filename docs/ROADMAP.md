@@ -2,7 +2,7 @@
 
 > **读者**：维护者、贡献者  
 > **状态**：现行  
-> **更新**：2026-10-09
+> **更新**：2026-10-10
 
 对照 PotPlayer 的常用能力，列出本项目还缺什么、先做什么。已稳定的用法见 [`../README.md`](../README.md)。实现约束见 [`../AGENTS.md`](../AGENTS.md)。
 
@@ -53,7 +53,7 @@
 | 音频同步 | P0 | 已完成 | Shift+G / Shift+H |
 | 输出设备选择 | P1 | 已完成 | 播放菜单「音频输出」，按设备名持久化 |
 | 声道映射 | P1 | 未开始 | 单声道、左右交换 |
-| 保持音高的变调 | P2 | 未开始 | |
+| 保持音高的变调 | P2 | 已完成 | 音频滤镜链末尾追加 `atempo` |
 | Bitstreaming | P3 | 已取消 | |
 
 ### 字幕
@@ -63,7 +63,7 @@
 | 自动加载同名字幕 | P0 | 已完成 | |
 | 在线字幕搜索/下载 | P1 | 未开始 | OpenSubtitles / 射手网 |
 | ~~外挂字幕编码探测~~ | P1 | 已完成 | `decodeToUtf8`：UTF-8 BOM / UTF-16 LE/BE（含无 BOM 探测）/ GBK→UTF-8 |
-| 字幕样式设置 | P1 | 未开始 | `SubtitleStyle` 配置已存在但无 UI，渲染写死 16px 白字黑底 |
+| 字幕样式设置 | P1 | 部分完成 | 渲染已按 `SubtitleStyle` 配置（字号/颜色/描边），无设置 UI，`fontFamily` 不支持 |
 | 双语字幕同时显示 | P2 | 未开始 | |
 
 ### 播放交互
@@ -140,9 +140,12 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | ~~暂停时 seek 挂起~~ ✅ | `ffmpegplayer.cpp` `decodeLoop` | 暂停态唤醒处理 seek，补解码上限 4096 包直到目标帧入队（`back().pts >= 目标`） |
 | ~~内封字幕标签未剥离~~ ✅ | `ffmpegplayer.cpp` 字幕包解码 | 走 `SubtitleParser::embeddedTextToPlain()`：提取 Dialogue 文本、剥 ASS/HTML 标签、`\N` 转换行 |
 | ~~内封字幕时长写死~~ ✅ | `app.cpp` 字幕回调 | 回调签名改为 `(startMs, endMs, text)`，优先 `end_display_time`，其次 packet duration，兜底 5 秒 |
-| 截图通道数假设 | `sdlrenderer.cpp` `takeScreenshot` | ✅ 已修：统一 `SDL_ConvertSurface(RGBA32)` 再写 PNG。遗留：截的是整个渲染输出（含 UI/OSD）而非视频帧 |
+| ~~截图通道数假设~~ ✅ | `VideoPlayerApp::takeScreenshot` | 已修：截图改取 `m_displayFrame`，按与渲染一致的裁剪/翻转/旋转变换后写 PNG，不再包含 UI/OSD |
 | ~~解码错误无 UI 反馈~~ ✅ | `app.cpp` `onError` | 错误经 `m_pendingError` 队列到主线程弹「播放错误」对话框 |
-| 播放时钟是挂钟 | `audioplayer.cpp` `playedMs()` | 按 wall-clock × speed 估算，不是实际消耗的采样数；音频欠载时 UI 位置超前真实播放点 |
+| ~~播放时钟是挂钟~~ ✅ | `audioplayer.cpp` / `audioclock.cpp` | `AudioClock` 记录每段入队采样的媒体 pts 与单帧媒体时长，按 SDL 未取走帧数推算媒体位置；欠载时停在队尾 |
+| ~~倍速未作用到音频~~ ✅ | `ffmpegplayer_filters.cpp` / `audioplayer.cpp` | 音频滤镜链末尾追加 `atempo`；修复前音频按 1x 消耗而解码按倍速推进，队列满后直接丢弃音频包 |
+| ~~长 GOP seek 后音画错位~~ ✅ | `ffmpegplayer.cpp` `handleSeek` | `av_seek_frame(BACKWARD)` 落在目标前关键帧，解码出的目标前音频/视频帧按 `m_audioTrimBeforeMs`/`m_videoTrimBeforeMs` 裁剪 |
+| ~~EOF 截尾~~ ✅ | `ffmpegplayer.cpp` `drainEndOfStream` | EOF 先 send NULL flush 解码器，再等视频队列与音频缓冲排空才置 Stopped，不再丢弃最后约 1 秒 |
 
 ## 半成品功能（声明但未接线）
 
@@ -150,10 +153,10 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 |----|------|
 | ~~窗口尺寸/位置记忆~~ ✅ | 启动恢复 w/h 与 x/y；退出时非最大化才记录普通态尺寸 |
 | ~~音量/静音/倍速持久化~~ ✅ | 启动从 Settings 恢复；setVolume/toggleMute/setSpeed 变更即写盘 |
-| 字幕样式 | `SubtitleStyle` 结构完整（字体/字号/颜色/描边），渲染层写死 16px 白字黑底，无 UI |
+| 字幕样式 | 渲染已按 `SubtitleStyle` 配置（字号/颜色/描边），仍无设置 UI，`fontFamily` 暂不支持 |
 | ~~`MenuId::Borderless`~~ ✅ | 视频菜单新增「无边框窗口」勾选项 |
-| `MenuId::PlaylistRemove` | handler 为空壳 |
-| positions/bookmarks 等 map | JSON 中无限增长，已删文件的记录不清理 |
+| ~~`MenuId::PlaylistRemove`~~ ✅ | `menu_manager.cpp` 删除项直接调 `playlistRemove` 回调；`app_events.cpp` 的空 case 为有意保留 |
+| ~~positions/bookmarks 等 map~~ ✅ | 启动时清理本地文件已不存在的条目（URL/UNC 跳过，父目录不存在的保留） |
 
 ## 工程债（非功能）
 
@@ -163,9 +166,9 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | `autoAnalyze` | 配置有字段，打开文件不会自动分析 |
 | 证书校验关闭 | WinHTTP `SECURITY_FLAG_IGNORE_*` |
 | CI | 只构建 Windows |
-| 测试 | 9 个用例，核心模块覆盖不足 |
+| 测试 | 8 个目标 53 个用例；Settings 读写、ASS、剧集识别仍无单测 |
 | ~~帮助文本~~ ✅ | F1 已补齐 Shift+G/H、Ctrl+B/Shift+B、Ctrl+F、C/F6、Ctrl(±Shift)+方向键、Ctrl+0、Delete |
-| 渲染循环 | 固定 ~60FPS 上限且无 vsync；>60fps 视频受限，空闲时仍占满一帧循环 |
+| ~~渲染循环~~ ✅ | 已开 vsync（`SDL_SetRenderVSync`）；vsync 下最小帧间隔 4ms，present 未阻塞时补睡 |
 
 ## 参考
 
