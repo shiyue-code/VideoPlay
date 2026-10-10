@@ -1678,6 +1678,10 @@ std::string FFmpegPlayer::ffmpegVersion() {
 
 bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+    // seek 请求未处理前，队列里仍是旧位置帧，不能取
+    if (m_seekRequested.load()) {
+        return false;
+    }
     if (m_videoFrameQueue.empty()) {
         return false;
     }
