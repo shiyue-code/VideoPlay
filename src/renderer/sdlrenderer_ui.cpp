@@ -1,6 +1,7 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "renderer/ui_style.h"
+#include "renderer/ui_draw.h"
 #include "renderer/textutils.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
@@ -992,23 +993,8 @@ void SDLRenderer::renderAIAnalysisOverlay() {
 void SDLRenderer::drawPanelCloseButton(int x, int y, int size, ControlType type, bool hovered,
                                        int radius, int inset, int hoverAlpha,
                                        uint8_t lineShade, uint8_t lineAlpha) {
-    bool pressed = (m_pressedControl == type);
-    if (pressed) {
-        fillRoundRect(x, y, size, size, radius,
-                      UiStyle::kClosePressedBg[0], UiStyle::kClosePressedBg[1],
-                      UiStyle::kClosePressedBg[2], UiStyle::kClosePressedBg[3]);
-    } else if (hovered) {
-        fillRoundRect(x, y, size, size, radius,
-                      UiStyle::kCloseHoverBg[0], UiStyle::kCloseHoverBg[1],
-                      UiStyle::kCloseHoverBg[2], static_cast<uint8_t>(hoverAlpha));
-    }
-    SDL_SetRenderDrawColor(m_renderer, lineShade, lineShade, lineShade, hovered ? 255 : lineAlpha);
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(x + inset), static_cast<float>(y + inset),
-                   static_cast<float>(x + size - inset), static_cast<float>(y + size - inset));
-    SDL_RenderLine(m_renderer,
-                   static_cast<float>(x + size - inset), static_cast<float>(y + inset),
-                   static_cast<float>(x + inset), static_cast<float>(y + size - inset));
+    UiDraw::drawCloseButton(m_renderer, x, y, size, hovered, m_pressedControl == type,
+                            radius, inset, hoverAlpha, lineShade, lineAlpha);
     m_controlRects.push_back({x, y, size, size, type, 0});
 }
 

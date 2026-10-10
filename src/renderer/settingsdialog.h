@@ -29,7 +29,7 @@ struct AISettings {
 
 class SettingsDialog : public ModalDialog {
 public:
-    SettingsDialog(SDL_Window* parentWindow, TTF_Font* font);
+    SettingsDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont);
     ~SettingsDialog() override = default;
 
     using SaveCallback = std::function<void(const AISettings& settings)>;
@@ -43,7 +43,8 @@ private:
     bool m_apiKeyVisible = false;
 
     static constexpr int INPUT_HEIGHT = 30;
-    static constexpr int PADDING = 15;
+    // 表单边距与信息面板一致
+    static constexpr int PADDING = UiStyle::kPanelPadding;
 
     std::vector<std::string> m_providerOptions;
     std::vector<std::string> m_modelOptions;
@@ -84,7 +85,6 @@ private:
     void calculateLayout();
     bool onEvent(const SDL_Event& event) override;
     void renderContent() override;
-    void drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered);
 };
 
 } // namespace VideoPlay

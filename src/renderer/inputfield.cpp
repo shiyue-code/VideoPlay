@@ -1,61 +1,12 @@
 #include "renderer/inputfield.h"
 #include "renderer/textutils.h"
+#include "renderer/ui_draw.h"
+#include "renderer/ui_style.h"
 #include "utils/logger.h"
 #include <algorithm>
 #include <cmath>
 
 namespace VideoPlay {
-
-namespace {
-void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
-                   uint8_t r, uint8_t g, uint8_t b, uint8_t a)
-{
-    if (!renderer) return;
-
-    const int x = static_cast<int>(rect.x);
-    const int y = static_cast<int>(rect.y);
-    const int w = static_cast<int>(rect.w);
-    const int h = static_cast<int>(rect.h);
-    const int rr = std::max(0, std::min(static_cast<int>(radius), std::min(w, h) / 2));
-
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
-    SDL_FRect center = {static_cast<float>(x + rr), static_cast<float>(y),
-                        static_cast<float>(w - 2 * rr), static_cast<float>(h)};
-    SDL_RenderFillRect(renderer, &center);
-    SDL_FRect middle = {static_cast<float>(x), static_cast<float>(y + rr),
-                        static_cast<float>(w), static_cast<float>(h - 2 * rr)};
-    SDL_RenderFillRect(renderer, &middle);
-
-    auto drawCornerPixel = [&](int px, int py, float coverage) {
-        if (coverage <= 0.0f) return;
-        uint8_t alpha = static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * a);
-        SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
-        SDL_RenderPoint(renderer, static_cast<float>(px), static_cast<float>(py));
-    };
-
-    for (int dy = 0; dy < rr; ++dy) {
-        for (int dx = 0; dx < rr; ++dx) {
-            float cx = static_cast<float>(rr - dx) - 0.5f;
-            float cy = static_cast<float>(rr - dy) - 0.5f;
-            float distance = std::sqrt(cx * cx + cy * cy);
-            float coverage = static_cast<float>(rr) + 0.5f - distance;
-
-            drawCornerPixel(x + dx, y + dy, coverage);
-            drawCornerPixel(x + w - 1 - dx, y + dy, coverage);
-            drawCornerPixel(x + dx, y + h - 1 - dy, coverage);
-            drawCornerPixel(x + w - 1 - dx, y + h - 1 - dy, coverage);
-        }
-    }
-}
-}
-
-// 颜色常量
-static constexpr uint8_t COLOR_INPUT_BG[4] = {50, 50, 50, 255};
-static constexpr uint8_t COLOR_INPUT_BORDER[4] = {80, 80, 80, 255};
-static constexpr uint8_t COLOR_INPUT_ACTIVE[4] = {100, 150, 255, 255};
-static constexpr uint8_t COLOR_TEXT[4] = {220, 220, 220, 255};
-static constexpr uint8_t COLOR_PLACEHOLDER[4] = {100, 100, 100, 150};
-static constexpr uint8_t COLOR_SELECTION[4] = {50, 100, 200, 128};
 
 InputField::InputField(TTF_Font* font)
     : m_font(font) {
@@ -341,29 +292,18 @@ bool InputField::handleEvent(const SDL_Event& event) {
 void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
     if (!renderer) return;
 
-    // 背景
-    fillRoundRect(renderer, m_rect, 7,
-                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
-
-    // 边框
-    SDL_FRect borderRect = m_rect;
+    // 1px 边框（聚焦时高亮色）+ 内底
+    const uint8_t* border = m_active ? UiStyle::kAccentColor : UiStyle::kDialogBorder;
+    UiDraw::fillRoundRect(renderer, m_rect, 6.0f, border[0], border[1], border[2], border[3]);
     SDL_FRect innerRect = {
         m_rect.x + 1.0f,
         m_rect.y + 1.0f,
         std::max(0.0f, m_rect.w - 2.0f),
         std::max(0.0f, m_rect.h - 2.0f)
     };
-    if (m_active) {
-        fillRoundRect(renderer, borderRect, 7,
-                      COLOR_INPUT_ACTIVE[0], COLOR_INPUT_ACTIVE[1],
-                      COLOR_INPUT_ACTIVE[2], COLOR_INPUT_ACTIVE[3]);
-    } else {
-        fillRoundRect(renderer, borderRect, 7,
-                      COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
-                      COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
-    }
-    fillRoundRect(renderer, innerRect, 6,
-                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
+    UiDraw::fillRoundRect(renderer, innerRect, 5.0f,
+                          UiStyle::kInputBg[0], UiStyle::kInputBg[1],
+                          UiStyle::kInputBg[2], UiStyle::kInputBg[3]);
 
     std::string display = getDisplayValue();
     std::string visibleText = display.empty() && !m_active ? m_placeholder : display;
@@ -390,7 +330,8 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
         int selX = textX + getTextWidth(beforeSel);
         int selW = getTextWidth(selected);
 
-        SDL_SetRenderDrawColor(renderer, COLOR_SELECTION[0], COLOR_SELECTION[1], COLOR_SELECTION[2], COLOR_SELECTION[3]);
+        SDL_SetRenderDrawColor(renderer, UiStyle::kSelectionColor[0], UiStyle::kSelectionColor[1],
+                               UiStyle::kSelectionColor[2], UiStyle::kSelectionColor[3]);
         SDL_FRect selRect = {static_cast<float>(selX), static_cast<float>(textY),
                             static_cast<float>(selW), static_cast<float>(getFontHeight())};
         SDL_RenderFillRect(renderer, &selRect);
@@ -398,9 +339,12 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
 
     // 文本或占位符
     if (!display.empty()) {
-        drawText(renderer, display, textX, textY, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 255);
+        drawText(renderer, display, textX, textY,
+                 UiStyle::kValueColor[0], UiStyle::kValueColor[1], UiStyle::kValueColor[2], 255);
     } else if (!m_active && !m_placeholder.empty()) {
-        drawText(renderer, m_placeholder, textX, textY, COLOR_PLACEHOLDER[0], COLOR_PLACEHOLDER[1], COLOR_PLACEHOLDER[2], COLOR_PLACEHOLDER[3]);
+        drawText(renderer, m_placeholder, textX, textY,
+                 UiStyle::kPlaceholderColor[0], UiStyle::kPlaceholderColor[1],
+                 UiStyle::kPlaceholderColor[2], UiStyle::kPlaceholderColor[3]);
     }
 
     // 光标
@@ -415,7 +359,8 @@ void InputField::render(SDL_Renderer* renderer, float mouseX, float mouseY) {
             int cursorX = textX + getTextWidth(beforeCursor);
             int cursorY = textY + 2;
             int cursorH = getFontHeight() - 4;
-            SDL_SetRenderDrawColor(renderer, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], COLOR_TEXT[3]);
+            SDL_SetRenderDrawColor(renderer, UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                                   UiStyle::kValueColor[2], UiStyle::kValueColor[3]);
             SDL_FRect cursorRect = {static_cast<float>(cursorX), static_cast<float>(cursorY),
                                    2.0f, static_cast<float>(cursorH)};
             SDL_RenderFillRect(renderer, &cursorRect);

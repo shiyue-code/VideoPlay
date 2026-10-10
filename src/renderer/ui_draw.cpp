@@ -1,6 +1,10 @@
 #include "renderer/ui_draw.h"
 
+#include "renderer/ui_style.h"
+#include "renderer/textutils.h"
+
 #include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include <algorithm>
 #include <cmath>
@@ -76,6 +80,56 @@ void fillRoundRect(SDL_Renderer* renderer, int x, int y, int w, int h, int radiu
 
     SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()),
                        indices.data(), static_cast<int>(indices.size()));
+}
+
+void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
+                   uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    fillRoundRect(renderer, static_cast<int>(rect.x), static_cast<int>(rect.y),
+                  static_cast<int>(rect.w), static_cast<int>(rect.h),
+                  static_cast<int>(radius), r, g, b, a);
+}
+
+void drawCloseButton(SDL_Renderer* renderer, int x, int y, int size,
+                     bool hovered, bool pressed, int radius, int inset,
+                     int hoverAlpha, uint8_t lineShade, uint8_t lineAlpha) {
+    if (pressed) {
+        fillRoundRect(renderer, x, y, size, size, radius,
+                      UiStyle::kClosePressedBg[0], UiStyle::kClosePressedBg[1],
+                      UiStyle::kClosePressedBg[2], UiStyle::kClosePressedBg[3]);
+    } else if (hovered) {
+        fillRoundRect(renderer, x, y, size, size, radius,
+                      UiStyle::kCloseHoverBg[0], UiStyle::kCloseHoverBg[1],
+                      UiStyle::kCloseHoverBg[2], static_cast<uint8_t>(hoverAlpha));
+    }
+    SDL_SetRenderDrawColor(renderer, lineShade, lineShade, lineShade,
+                           hovered ? 255 : lineAlpha);
+    SDL_RenderLine(renderer,
+                   static_cast<float>(x + inset), static_cast<float>(y + inset),
+                   static_cast<float>(x + size - inset), static_cast<float>(y + size - inset));
+    SDL_RenderLine(renderer,
+                   static_cast<float>(x + size - inset), static_cast<float>(y + inset),
+                   static_cast<float>(x + inset), static_cast<float>(y + size - inset));
+}
+
+void drawButton(SDL_Renderer* renderer, TTF_Font* font, const SDL_FRect& rect,
+                const std::string& text, bool hovered, bool pressed, bool primary) {
+    const uint8_t* bg;
+    if (primary) {
+        bg = pressed ? UiStyle::kBtnPrimaryPressed
+                     : (hovered ? UiStyle::kBtnPrimaryHover : UiStyle::kBtnPrimaryBg);
+    } else {
+        bg = pressed ? UiStyle::kBtnSecondaryPressed
+                     : (hovered ? UiStyle::kBtnSecondaryHover : UiStyle::kBtnSecondaryBg);
+    }
+    fillRoundRect(renderer, rect, static_cast<float>(UiStyle::kButtonRadius),
+                  bg[0], bg[1], bg[2], bg[3]);
+
+    int textW = TextRender::textWidth(font, text);
+    int textH = TextRender::fontHeight(font);
+    TextRender::drawText(renderer, font, text,
+                         static_cast<int>(rect.x) + (static_cast<int>(rect.w) - textW) / 2,
+                         static_cast<int>(rect.y) + (static_cast<int>(rect.h) - textH) / 2,
+                         255, 255, 255);
 }
 
 } // namespace VideoPlay::UiDraw

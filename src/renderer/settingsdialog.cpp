@@ -1,5 +1,6 @@
 #include "renderer/settingsdialog.h"
 
+#include "renderer/ui_draw.h"
 #include "utils/string_utils.h"
 
 #include <algorithm>
@@ -41,60 +42,16 @@ bool containsOption(const std::vector<std::string>& options, const std::string& 
     return std::find(options.begin(), options.end(), option) != options.end();
 }
 
-void fillRoundRect(SDL_Renderer* renderer, const SDL_FRect& rect, float radius,
-                   uint8_t r, uint8_t g, uint8_t b, uint8_t a)
-{
-    if (!renderer) return;
-
-    const int x = static_cast<int>(rect.x);
-    const int y = static_cast<int>(rect.y);
-    const int w = static_cast<int>(rect.w);
-    const int h = static_cast<int>(rect.h);
-    const int rr = std::max(0, std::min(static_cast<int>(radius), std::min(w, h) / 2));
-
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
-    SDL_FRect center = {static_cast<float>(x + rr), static_cast<float>(y),
-                        static_cast<float>(w - 2 * rr), static_cast<float>(h)};
-    SDL_RenderFillRect(renderer, &center);
-    SDL_FRect middle = {static_cast<float>(x), static_cast<float>(y + rr),
-                        static_cast<float>(w), static_cast<float>(h - 2 * rr)};
-    SDL_RenderFillRect(renderer, &middle);
-
-    auto drawCornerPixel = [&](int px, int py, float coverage) {
-        if (coverage <= 0.0f) return;
-        uint8_t alpha = static_cast<uint8_t>(std::clamp(coverage, 0.0f, 1.0f) * a);
-        SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
-        SDL_RenderPoint(renderer, static_cast<float>(px), static_cast<float>(py));
-    };
-
-    for (int dy = 0; dy < rr; ++dy) {
-        for (int dx = 0; dx < rr; ++dx) {
-            float cx = static_cast<float>(rr - dx) - 0.5f;
-            float cy = static_cast<float>(rr - dy) - 0.5f;
-            float distance = std::sqrt(cx * cx + cy * cy);
-            float coverage = static_cast<float>(rr) + 0.5f - distance;
-
-            drawCornerPixel(x + dx, y + dy, coverage);
-            drawCornerPixel(x + w - 1 - dx, y + dy, coverage);
-            drawCornerPixel(x + dx, y + h - 1 - dy, coverage);
-            drawCornerPixel(x + w - 1 - dx, y + h - 1 - dy, coverage);
-        }
-    }
-}
 }
 
-static constexpr uint8_t COLOR_LABEL[4] = {180, 180, 180, 255};
-static constexpr uint8_t COLOR_INPUT_BG[4] = {50, 50, 50, 255};
-static constexpr uint8_t COLOR_INPUT_BORDER[4] = {80, 80, 80, 255};
-static constexpr uint8_t COLOR_BUTTON_PRIMARY[4] = {50, 120, 200, 255};
-static constexpr uint8_t COLOR_BUTTON_PRIMARY_HOVER[4] = {70, 140, 220, 255};
-static constexpr uint8_t COLOR_BUTTON_TEXT[4] = {255, 255, 255, 255};
-static constexpr uint8_t COLOR_DROPDOWN_HOVER[4] = {65, 75, 90, 255};
-
-SettingsDialog::SettingsDialog(SDL_Window* parentWindow, TTF_Font* font)
-    : ModalDialog(parentWindow, font) {
+SettingsDialog::SettingsDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont)
+    : ModalDialog(parentWindow, font, titleFont) {
     m_windowWidth = 500;
-    m_windowHeight = 420;
+    // 标题区 + 表单 5 行(行距 INPUT_HEIGHT+PADDING) + 提示行 + 间距 + 按钮区(高32，下边距20)
+    m_windowHeight = titleHeight() + PADDING +
+                     5 * INPUT_HEIGHT + 4 * PADDING +
+                     4 + getFontHeight() + PADDING +
+                     UiStyle::kButtonHeight + (UiStyle::kPanelPadding - 4);
 }
 
 void SettingsDialog::show(const AISettings& currentSettings, SaveCallback onSave) {
@@ -283,20 +240,19 @@ bool SettingsDialog::handleDropdownClick(int mx, int my) {
 }
 
 void SettingsDialog::calculateLayout() {
-    int y = kTitleHeight + PADDING;
+    int y = titleHeight() + PADDING;
+    float fieldW = static_cast<float>(m_windowWidth - PADDING * 2 - 120);
 
-    m_providerDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
-                              static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
+    m_providerDropdownRect = {PADDING + 120.0f, static_cast<float>(y), fieldW, INPUT_HEIGHT};
     y += INPUT_HEIGHT + PADDING;
 
-    m_baseUrlInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                            static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT});
+    m_baseUrlInput->setRect({PADDING + 120.0f, static_cast<float>(y), fieldW, INPUT_HEIGHT});
     y += INPUT_HEIGHT + PADDING;
 
-    int toggleWidth = 54;
+    int toggleWidth = UiStyle::kButtonMinWidth;
     int toggleGap = 8;
     m_apiKeyInput->setRect({PADDING + 120.0f, static_cast<float>(y),
-                           static_cast<float>(m_windowWidth - PADDING * 2 - 120 - toggleWidth - toggleGap), INPUT_HEIGHT});
+                           fieldW - toggleWidth - toggleGap, INPUT_HEIGHT});
     m_apiKeyToggleRect = {
         static_cast<float>(m_windowWidth - PADDING - toggleWidth),
         static_cast<float>(y),
@@ -305,50 +261,52 @@ void SettingsDialog::calculateLayout() {
     };
     y += INPUT_HEIGHT + PADDING;
 
-    m_modelDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
-                           static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
+    m_modelDropdownRect = {PADDING + 120.0f, static_cast<float>(y), fieldW, INPUT_HEIGHT};
     y += INPUT_HEIGHT + PADDING;
 
-    m_detailDropdownRect = {PADDING + 120.0f, static_cast<float>(y),
-                            static_cast<float>(m_windowWidth - PADDING * 2 - 120), INPUT_HEIGHT};
+    m_detailDropdownRect = {PADDING + 120.0f, static_cast<float>(y), fieldW, INPUT_HEIGHT};
 
-    int btnWidth = 80;
-    int btnHeight = 30;
-    int btnY = m_windowHeight - btnHeight - PADDING;
-    m_saveBtnRect = {static_cast<float>(m_windowWidth - btnWidth * 2 - PADDING * 2),
-                     static_cast<float>(btnY), static_cast<float>(btnWidth), static_cast<float>(btnHeight)};
-    m_cancelBtnRect = {static_cast<float>(m_windowWidth - btnWidth - PADDING),
-                       static_cast<float>(btnY), static_cast<float>(btnWidth), static_cast<float>(btnHeight)};
+    // 按钮区：右下角，右边距 padding，下边距 padding-4，间距 10，左取消右保存
+    int btnW = UiStyle::kButtonMinWidth;
+    int btnY = m_windowHeight - UiStyle::kButtonHeight - (UiStyle::kPanelPadding - 4);
+    m_saveBtnRect = {static_cast<float>(m_windowWidth - UiStyle::kPanelPadding - btnW),
+                     static_cast<float>(btnY), static_cast<float>(btnW),
+                     static_cast<float>(UiStyle::kButtonHeight)};
+    m_cancelBtnRect = {m_saveBtnRect.x - 10.0f - btnW, m_saveBtnRect.y,
+                       static_cast<float>(btnW), static_cast<float>(UiStyle::kButtonHeight)};
 }
 
 void SettingsDialog::renderContent() {
     float mx, my;
     SDL_GetMouseState(&mx, &my);
+    const uint8_t* label = UiStyle::kLabelColor;
 
-    int formY = kTitleHeight + PADDING;
-    drawText("服务商:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    int formY = titleHeight() + PADDING;
+    drawText("服务商:", PADDING, formY + 8, label[0], label[1], label[2], 255);
     formY += INPUT_HEIGHT + PADDING;
 
-    drawText("API 地址:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    drawText("API 地址:", PADDING, formY + 8, label[0], label[1], label[2], 255);
     m_baseUrlInput->render(m_renderer, mx, my);
     formY += INPUT_HEIGHT + PADDING;
 
-    drawText("API Key:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    drawText("API Key:", PADDING, formY + 8, label[0], label[1], label[2], 255);
     m_apiKeyInput->render(m_renderer, mx, my);
-    drawButton(m_apiKeyVisible ? "隐藏" : "显示", m_apiKeyToggleRect, isPointInRect(mx, my, m_apiKeyToggleRect));
+    UiDraw::drawButton(m_renderer, m_font, m_apiKeyToggleRect,
+                       m_apiKeyVisible ? "隐藏" : "显示",
+                       isPointInRect(mx, my, m_apiKeyToggleRect), false, false);
     formY += INPUT_HEIGHT + PADDING;
 
-    drawText("模型:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    drawText("模型:", PADDING, formY + 8, label[0], label[1], label[2], 255);
     formY += INPUT_HEIGHT + PADDING;
-    drawText("分析详细度:", PADDING, formY + 8, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 255);
+    drawText("分析详细度:", PADDING, formY + 8, label[0], label[1], label[2], 255);
 
     drawText("切换服务商会保留各自的地址、Key 和模型", PADDING + 120,
-             formY + INPUT_HEIGHT + 4, COLOR_LABEL[0], COLOR_LABEL[1], COLOR_LABEL[2], 150);
+             formY + INPUT_HEIGHT + 4, label[0], label[1], label[2], 150);
 
-    bool saveHovered = isPointInRect(mx, my, m_saveBtnRect);
-    bool cancelHovered = isPointInRect(mx, my, m_cancelBtnRect);
-    drawButton("保存", m_saveBtnRect, saveHovered);
-    drawButton("取消", m_cancelBtnRect, cancelHovered);
+    UiDraw::drawButton(m_renderer, m_font, m_cancelBtnRect, "取消",
+                       isPointInRect(mx, my, m_cancelBtnRect), false, false);
+    UiDraw::drawButton(m_renderer, m_font, m_saveBtnRect, "保存",
+                       isPointInRect(mx, my, m_saveBtnRect), false, true);
 
     updateModelOptions();
     drawDropdown(m_providerDropdownRect, m_settings.provider, m_providerDropdownOpen, mx, my);
@@ -463,23 +421,24 @@ void SettingsDialog::drawDropdown(const SDL_FRect& rect,
                                   bool open,
                                   float mouseX,
                                   float mouseY) {
-    fillRoundRect(m_renderer, rect, 7,
-                  COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
-                  COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
+    // 1px 边框（展开时高亮色）+ 内底
+    const uint8_t* border = open ? UiStyle::kAccentColor : UiStyle::kDialogBorder;
+    UiDraw::fillRoundRect(m_renderer, rect, 6.0f, border[0], border[1], border[2], border[3]);
     SDL_FRect innerRect = {rect.x + 1.0f, rect.y + 1.0f,
                            std::max(0.0f, rect.w - 2.0f),
                            std::max(0.0f, rect.h - 2.0f)};
-    fillRoundRect(m_renderer, innerRect, 6,
-                  COLOR_INPUT_BG[0], COLOR_INPUT_BG[1], COLOR_INPUT_BG[2], COLOR_INPUT_BG[3]);
+    UiDraw::fillRoundRect(m_renderer, innerRect, 5.0f,
+                          UiStyle::kInputBg[0], UiStyle::kInputBg[1],
+                          UiStyle::kInputBg[2], UiStyle::kInputBg[3]);
 
     int textY = static_cast<int>(rect.y) + (static_cast<int>(rect.h) - getFontHeight()) / 2;
     drawText(value, static_cast<int>(rect.x) + 8, textY,
-             COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
+             UiStyle::kValueColor[0], UiStyle::kValueColor[1], UiStyle::kValueColor[2], 255);
 
     int arrowX = static_cast<int>(rect.x + rect.w - 20.0f);
     int arrowY = static_cast<int>(rect.y + rect.h / 2.0f) - 2;
-    SDL_SetRenderDrawColor(m_renderer, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1],
-                           COLOR_BUTTON_TEXT[2], COLOR_BUTTON_TEXT[3]);
+    SDL_SetRenderDrawColor(m_renderer, UiStyle::kLabelColor[0], UiStyle::kLabelColor[1],
+                           UiStyle::kLabelColor[2], UiStyle::kLabelColor[3]);
     if (open) {
         // 展开时箭头朝上
         SDL_RenderLine(m_renderer, arrowX, arrowY + 5, arrowX + 5, arrowY);
@@ -514,35 +473,18 @@ void SettingsDialog::drawDropdownOptions(const SDL_FRect& rect,
     for (size_t i = 0; i < options.size(); ++i) {
         SDL_FRect optionRect = dropdownOptionRect(rect, i, options.size());
         bool hovered = isPointInRect(mouseX, mouseY, optionRect);
-        const uint8_t* bg = hovered ? COLOR_DROPDOWN_HOVER : COLOR_INPUT_BG;
-        fillRoundRect(m_renderer, optionRect, 5, bg[0], bg[1], bg[2], bg[3]);
+        const uint8_t* bg = hovered ? UiStyle::kDropdownHover : UiStyle::kInputBg;
+        UiDraw::fillRoundRect(m_renderer, optionRect, 5.0f, bg[0], bg[1], bg[2], bg[3]);
 
-        SDL_SetRenderDrawColor(m_renderer, COLOR_INPUT_BORDER[0], COLOR_INPUT_BORDER[1],
-                               COLOR_INPUT_BORDER[2], COLOR_INPUT_BORDER[3]);
+        SDL_SetRenderDrawColor(m_renderer, UiStyle::kDialogBorder[0], UiStyle::kDialogBorder[1],
+                               UiStyle::kDialogBorder[2], UiStyle::kDialogBorder[3]);
         SDL_RenderRect(m_renderer, &optionRect);
 
         int optionTextY = static_cast<int>(optionRect.y) +
                           (static_cast<int>(optionRect.h) - getFontHeight()) / 2;
         drawText(options[i], static_cast<int>(optionRect.x) + 8, optionTextY,
-                 COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
+                 UiStyle::kValueColor[0], UiStyle::kValueColor[1], UiStyle::kValueColor[2], 255);
     }
-}
-
-void SettingsDialog::drawButton(const std::string& text, const SDL_FRect& rect, bool isHovered) {
-    if (isHovered) {
-        fillRoundRect(m_renderer, rect, 7,
-                      COLOR_BUTTON_PRIMARY_HOVER[0], COLOR_BUTTON_PRIMARY_HOVER[1],
-                      COLOR_BUTTON_PRIMARY_HOVER[2], COLOR_BUTTON_PRIMARY_HOVER[3]);
-    } else {
-        fillRoundRect(m_renderer, rect, 7,
-                      COLOR_BUTTON_PRIMARY[0], COLOR_BUTTON_PRIMARY[1],
-                      COLOR_BUTTON_PRIMARY[2], COLOR_BUTTON_PRIMARY[3]);
-    }
-
-    int textWidth = getTextWidth(text);
-    int textX = static_cast<int>(rect.x) + (static_cast<int>(rect.w) - textWidth) / 2;
-    int textY = static_cast<int>(rect.y) + (static_cast<int>(rect.h) - getFontHeight()) / 2;
-    drawText(text, textX, textY, COLOR_BUTTON_TEXT[0], COLOR_BUTTON_TEXT[1], COLOR_BUTTON_TEXT[2], 255);
 }
 
 } // namespace VideoPlay

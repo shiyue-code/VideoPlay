@@ -438,6 +438,8 @@ public:
     // 获取窗口和字体对象
     SDL_Window* getWindow() const { return m_window; }
     TTF_Font* getFont() const { return m_font; }
+    // 18px 标题字体（对话框标题与信息面板一致）
+    TTF_Font* getTitleFont() const { return m_fontLarge ? m_fontLarge : m_font; }
 
     // 显示消息框
     void showMessageBox(const std::string& title, const std::string& message,

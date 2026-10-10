@@ -1,5 +1,6 @@
 #include "renderer/modaldialog.h"
 
+#include "renderer/ui_draw.h"
 #include "utils/logger.h"
 
 #include <string>
@@ -24,8 +25,13 @@ Logger& logger() {
 }
 }
 
-ModalDialog::ModalDialog(SDL_Window* parentWindow, TTF_Font* font)
-    : m_parentWindow(parentWindow), m_font(font) {
+ModalDialog::ModalDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont)
+    : m_parentWindow(parentWindow), m_font(font),
+      m_titleFont(titleFont ? titleFont : font) {
+}
+
+int ModalDialog::titleHeight() const {
+    return UiStyle::kPanelPadding + TextRender::fontHeight(m_titleFont) + 14;
 }
 
 ModalDialog::~ModalDialog() {
@@ -111,7 +117,7 @@ void ModalDialog::runModal() {
                             int my = static_cast<int>(event.button.y);
                             if (hitCloseButton(mx, my)) {
                                 m_running = false;
-                            } else if (my < kTitleHeight) {
+                            } else if (my < titleHeight()) {
                                 // 标题栏拖动
 #ifdef _WIN32
                                 SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
@@ -184,52 +190,44 @@ void ModalDialog::renderContent() {
 }
 
 void ModalDialog::renderChrome() {
-    // 主背景
+    // 主背景（不透明面板底色）+ 整窗 1px 边框
     SDL_FRect bgRect = {0, 0, static_cast<float>(m_windowWidth),
                         static_cast<float>(m_windowHeight)};
-    SDL_SetRenderDrawColor(m_renderer, kColorBg[0], kColorBg[1], kColorBg[2], kColorBg[3]);
+    SDL_SetRenderDrawColor(m_renderer, UiStyle::kDialogBg[0], UiStyle::kDialogBg[1],
+                           UiStyle::kDialogBg[2], UiStyle::kDialogBg[3]);
     SDL_RenderFillRect(m_renderer, &bgRect);
+    SDL_SetRenderDrawColor(m_renderer, UiStyle::kDialogBorder[0], UiStyle::kDialogBorder[1],
+                           UiStyle::kDialogBorder[2], UiStyle::kDialogBorder[3]);
+    SDL_RenderRect(m_renderer, &bgRect);
 
-    // 标题栏
-    SDL_FRect titleBar = {0, 0, static_cast<float>(m_windowWidth),
-                          static_cast<float>(kTitleHeight)};
-    SDL_SetRenderDrawColor(m_renderer, kColorTitleBg[0], kColorTitleBg[1],
-                           kColorTitleBg[2], kColorTitleBg[3]);
-    SDL_RenderFillRect(m_renderer, &titleBar);
+    // 标题：18px 白字，与信息面板相同的布局（x/顶部对齐到内边距）
+    TextRender::drawText(m_renderer, m_titleFont, m_title,
+                         UiStyle::kPanelPadding, UiStyle::kPanelPadding, 255, 255, 255);
 
-    int titleTextY = (kTitleHeight - getFontHeight()) / 2;
-    drawText(m_title, 15, titleTextY,
-             kColorTitleText[0], kColorTitleText[1], kColorTitleText[2], 255);
-
-    // 关闭按钮
-    constexpr int closeIconSize = 10;
-    int closeX = m_windowWidth - kCloseWidth;
-
+    // 关闭按钮：与信息面板一致（28px，距右边 16px，与标题垂直居中）
     float mx, my;
     SDL_GetMouseState(&mx, &my);
-    if (hitCloseButton(static_cast<int>(mx), static_cast<int>(my))) {
-        SDL_SetRenderDrawColor(m_renderer, kColorCloseHover[0], kColorCloseHover[1],
-                               kColorCloseHover[2], kColorCloseHover[3]);
-        SDL_FRect closeBtn = {static_cast<float>(closeX), 0,
-                              static_cast<float>(kCloseWidth), static_cast<float>(kTitleHeight)};
-        SDL_RenderFillRect(m_renderer, &closeBtn);
-    }
-
-    SDL_SetRenderDrawColor(m_renderer, kColorButtonText[0], kColorButtonText[1],
-                           kColorButtonText[2], kColorButtonText[3]);
-    int iconX = closeX + (kCloseWidth - closeIconSize) / 2;
-    int iconY = (kTitleHeight - closeIconSize) / 2;
-    SDL_RenderLine(m_renderer, iconX, iconY, iconX + closeIconSize, iconY + closeIconSize);
-    SDL_RenderLine(m_renderer, iconX + closeIconSize, iconY, iconX, iconY + closeIconSize);
+    int closeX = m_windowWidth - 16 - UiStyle::kCloseSize;
+    int closeY = UiStyle::kPanelPadding +
+                 (TextRender::fontHeight(m_titleFont) - UiStyle::kCloseSize) / 2;
+    bool hovered = hitCloseButton(static_cast<int>(mx), static_cast<int>(my));
+    UiDraw::drawCloseButton(m_renderer, closeX, closeY, UiStyle::kCloseSize,
+                            hovered, false,
+                            UiStyle::kCloseRadius, UiStyle::kCloseInset,
+                            UiStyle::kCloseHoverAlpha,
+                            UiStyle::kCloseLineShade, UiStyle::kCloseLineAlpha);
 }
 
 bool ModalDialog::hitCloseButton(int mx, int my) const {
-    int closeX = m_windowWidth - kCloseWidth;
-    return mx >= closeX && mx <= closeX + kCloseWidth && my >= 0 && my <= kTitleHeight;
+    int closeX = m_windowWidth - 16 - UiStyle::kCloseSize;
+    int closeY = UiStyle::kPanelPadding +
+                 (TextRender::fontHeight(m_titleFont) - UiStyle::kCloseSize) / 2;
+    return mx >= closeX && mx <= closeX + UiStyle::kCloseSize &&
+           my >= closeY && my <= closeY + UiStyle::kCloseSize;
 }
 
 bool ModalDialog::hitTitleBar(int mx, int my) const {
-    return mx >= 0 && mx <= m_windowWidth && my >= 0 && my < kTitleHeight;
+    return mx >= 0 && mx <= m_windowWidth && my >= 0 && my < titleHeight();
 }
 
 bool ModalDialog::isPointInRect(float x, float y, const SDL_FRect& rect) const {

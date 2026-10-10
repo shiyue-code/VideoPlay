@@ -16,7 +16,8 @@ void DialogManager::showInputDialog(const std::string& title, const std::string&
                                     std::function<void(const std::string&)> callback) {
     if (!m_inputDialog) {
         m_inputDialog = std::make_unique<InputDialog>(m_sdlRenderer->getWindow(),
-                                                      m_sdlRenderer->getFont());
+                                                      m_sdlRenderer->getFont(),
+                                                      m_sdlRenderer->getTitleFont());
     }
     m_inputDialog->show(title, placeholder, "", std::move(callback));
 }

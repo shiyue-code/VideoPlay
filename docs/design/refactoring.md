@@ -10,6 +10,8 @@
 
 第三轮已完成（2026-10-10）：`decodeLoop` 拆分为私有方法 `waitForDecodeSlot` / `handleReadFailure` / `decodeVideoPacket` / `decodeAudioPacket` / `decodeSubtitlePacket` / `receiveVideoFrames` / `receiveAudioFrames`；新增可独立单测的纯逻辑模块 `AudioClock`（`core/audioclock.*`）、`settings_maintenance`（`core/settings_maintenance.*`）、`frame_image`（`utils/frame_image.*`）。下表为剩余项。
 
+第四轮已完成（2026-10-11）：信息面板样式常量收敛到 `UiStyle`（`renderer/ui_style.h`）、通用绘制原语收敛到 `UiDraw`（`renderer/ui_draw.*`：`fillRoundRect` / `drawCloseButton` / `drawButton`）；`settingsdialog.cpp` 与 `inputfield.cpp` 的 static `fillRoundRect` 副本已删除；`CustomMessageBox` 独立窗口已删除，消息型弹窗全部改为窗口内信息面板（`showInfoPanel`/`showMessageBox`，支持正文折行、滚动、可点时间戳与消息队列）；`ModalDialog`/`InputDialog`/`SettingsDialog`/`InputField` 已按同一套 UiStyle 视觉重绘。
+
 ## 原则
 
 - 一次只做一项，提交信息 `refactor: ...`，不夹带行为修改
@@ -63,9 +65,9 @@
 
 JSON 读写单体。可按「播放列表 / 窗口 / AI / 键位」分域拆函数，但都在一个文件内且格式稳定，收益一般。
 
-### 8. `fillRoundRect` 两处实现
+### ~~8. `fillRoundRect` 两处实现~~ ✅
 
-`settingsdialog.cpp`（文件内 static）与 `sdlrenderer_draw.cpp` 各有一份圆角矩形绘制。对话框在独立窗口跑，不能直接调渲染层方法；可并入 `ui_utils.h` 做 free function。
+已统一：`UiDraw::fillRoundRect`（`renderer/ui_draw.*`）为唯一实现，`SDLRenderer::fillRoundRect` 委托之，`settingsdialog.cpp`/`inputfield.cpp` 的 static 副本已删除。
 
 ### 9. 日志格式化重复
 

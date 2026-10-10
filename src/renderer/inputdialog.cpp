@@ -1,6 +1,7 @@
 #include "renderer/inputdialog.h"
 
 #include "renderer/inputfield.h"
+#include "renderer/ui_draw.h"
 #include "utils/logger.h"
 
 #include <utility>
@@ -9,14 +10,13 @@
 namespace VideoPlay {
 
 static constexpr int INPUT_HEIGHT = 34;
-static constexpr int BUTTON_WIDTH = 80;
-static constexpr int BUTTON_HEIGHT = 30;
-static constexpr int MARGIN = 20;
 
-InputDialog::InputDialog(SDL_Window* parentWindow, TTF_Font* font)
-    : ModalDialog(parentWindow, font) {
+InputDialog::InputDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont)
+    : ModalDialog(parentWindow, font, titleFont) {
     m_windowWidth = 520;
-    m_windowHeight = 150;
+    // 标题区 + 34px 输入框 + 底部按钮区（下边距 padding-4）
+    m_windowHeight = titleHeight() + 4 + INPUT_HEIGHT + 16 +
+                     UiStyle::kButtonHeight + UiStyle::kPanelPadding - 4;
 }
 
 void InputDialog::show(const std::string& title, const std::string& placeholder,
@@ -28,9 +28,9 @@ void InputDialog::show(const std::string& title, const std::string& placeholder,
     m_input = std::make_unique<InputField>(m_font);
     m_input->setPlaceholder(placeholder);
     m_input->setValue(initialValue);
-    m_input->setRect({static_cast<float>(MARGIN),
-                      static_cast<float>(kTitleHeight + MARGIN),
-                      static_cast<float>(m_windowWidth - MARGIN * 2),
+    m_input->setRect({static_cast<float>(UiStyle::kPanelPadding),
+                      static_cast<float>(titleHeight() + 4),
+                      static_cast<float>(m_windowWidth - UiStyle::kPanelPadding * 2),
                       static_cast<float>(INPUT_HEIGHT)});
     m_input->setActive(true);
 
@@ -65,16 +65,17 @@ bool InputDialog::onEvent(const SDL_Event& event) {
                 int mx = static_cast<int>(event.button.x);
                 int my = static_cast<int>(event.button.y);
 
-                // 确定 / 取消按钮
-                int btnY = m_windowHeight - BUTTON_HEIGHT - 15;
-                int okX = m_windowWidth / 2 - BUTTON_WIDTH - 10;
-                int cancelX = m_windowWidth / 2 + 10;
-                if (my >= btnY && my <= btnY + BUTTON_HEIGHT) {
-                    if (mx >= okX && mx <= okX + BUTTON_WIDTH) {
+                // 取消 / 确定按钮（右下角，右到左排布）
+                int btnW = UiStyle::kButtonMinWidth;
+                int btnY = m_windowHeight - UiStyle::kButtonHeight - (UiStyle::kPanelPadding - 4);
+                int okX = m_windowWidth - UiStyle::kPanelPadding - btnW;
+                int cancelX = okX - 10 - btnW;
+                if (my >= btnY && my <= btnY + UiStyle::kButtonHeight) {
+                    if (mx >= okX && mx <= okX + btnW) {
                         finish(!m_input || !m_input->getValue().empty());
                         return true;
                     }
-                    if (mx >= cancelX && mx <= cancelX + BUTTON_WIDTH) {
+                    if (mx >= cancelX && mx <= cancelX + btnW) {
                         finish(false);
                         return true;
                     }
@@ -102,26 +103,19 @@ void InputDialog::renderContent() {
         m_input->render(m_renderer, mx, my);
     }
 
-    // 确定 / 取消按钮
-    int btnY = m_windowHeight - BUTTON_HEIGHT - 15;
-    int okX = m_windowWidth / 2 - BUTTON_WIDTH - 10;
-    int cancelX = m_windowWidth / 2 + 10;
+    // 取消 / 确定按钮（右下角，右到左排布：确定最右）
+    int btnW = UiStyle::kButtonMinWidth;
+    int btnY = m_windowHeight - UiStyle::kButtonHeight - (UiStyle::kPanelPadding - 4);
+    SDL_FRect okRect = {static_cast<float>(m_windowWidth - UiStyle::kPanelPadding - btnW),
+                        static_cast<float>(btnY), static_cast<float>(btnW),
+                        static_cast<float>(UiStyle::kButtonHeight)};
+    SDL_FRect cancelRect = {okRect.x - 10.0f - btnW, okRect.y,
+                            static_cast<float>(btnW), static_cast<float>(UiStyle::kButtonHeight)};
 
-    auto drawButton = [&](int x, const std::string& text) {
-        bool hovered = (mx >= x && mx <= x + BUTTON_WIDTH &&
-                        my >= btnY && my <= btnY + BUTTON_HEIGHT);
-        const uint8_t* c = hovered ? kColorButtonHover : kColorButtonBg;
-        SDL_SetRenderDrawColor(m_renderer, c[0], c[1], c[2], c[3]);
-        SDL_FRect rect = {static_cast<float>(x), static_cast<float>(btnY),
-                          static_cast<float>(BUTTON_WIDTH), static_cast<float>(BUTTON_HEIGHT)};
-        SDL_RenderFillRect(m_renderer, &rect);
-        int textW = getTextWidth(text);
-        drawText(text, x + (BUTTON_WIDTH - textW) / 2,
-                 btnY + (BUTTON_HEIGHT - getFontHeight()) / 2,
-                 kColorButtonText[0], kColorButtonText[1], kColorButtonText[2], 255);
-    };
-    drawButton(okX, "确定");
-    drawButton(cancelX, "取消");
+    UiDraw::drawButton(m_renderer, m_font, cancelRect, "取消",
+                       isPointInRect(mx, my, cancelRect), false, false);
+    UiDraw::drawButton(m_renderer, m_font, okRect, "确定",
+                       isPointInRect(mx, my, okRect), false, true);
 }
 
 } // namespace VideoPlay

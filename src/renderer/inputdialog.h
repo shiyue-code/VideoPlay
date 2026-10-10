@@ -17,7 +17,7 @@ class InputField;
 // 确定/回车返回输入文本，取消/Esc 返回空串（通过回调区分）。
 class InputDialog : public ModalDialog {
 public:
-    InputDialog(SDL_Window* parentWindow, TTF_Font* font);
+    InputDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont);
     ~InputDialog() override = default;
 
     // 阻塞显示对话框；确定时以输入文本调用 callback，取消时调用 callback("")

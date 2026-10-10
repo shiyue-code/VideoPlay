@@ -2,6 +2,7 @@
 #define MODALDIALOG_H
 
 #include "renderer/textutils.h"
+#include "renderer/ui_style.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -12,30 +13,23 @@
 
 namespace VideoPlay {
 
-// 无边框模态对话框基类。
+// 无边框模态对话框基类。视觉与窗口内信息面板一致（UiStyle）：
+// 不透明深色底 + 1px 边框 + 顶部 18px 标题 + 右上角 ×。
 // 基类承担：窗口/渲染器创建与销毁、父窗口居中、Win11 圆角、
-// 标题栏拖动（Win32 走 HTCAPTION）、关闭按钮、Esc/QUIT 退出、
+// 标题区拖动（Win32 走 HTCAPTION）、关闭按钮、Esc/QUIT 退出、
 // 文本绘制与测量助手。子类实现 onEvent / renderContent。
 class ModalDialog {
 public:
-    ModalDialog(SDL_Window* parentWindow, TTF_Font* font);
+    // titleFont 为空时退回正文 font（18px 标题字体由调用方传入）
+    ModalDialog(SDL_Window* parentWindow, TTF_Font* font, TTF_Font* titleFont = nullptr);
     virtual ~ModalDialog();
 
     ModalDialog(const ModalDialog&) = delete;
     ModalDialog& operator=(const ModalDialog&) = delete;
 
 protected:
-    static constexpr int kTitleHeight = 32;
-    static constexpr int kCloseWidth = 46;
-
-    // 通用配色（三个对话框原本各自重复定义同一套）
-    static constexpr uint8_t kColorBg[4] = {30, 30, 30, 240};
-    static constexpr uint8_t kColorTitleBg[4] = {40, 40, 40, 255};
-    static constexpr uint8_t kColorTitleText[4] = {255, 255, 255, 255};
-    static constexpr uint8_t kColorButtonBg[4] = {60, 60, 60, 255};
-    static constexpr uint8_t kColorButtonHover[4] = {80, 80, 80, 255};
-    static constexpr uint8_t kColorButtonText[4] = {255, 255, 255, 255};
-    static constexpr uint8_t kColorCloseHover[4] = {232, 17, 35, 255};
+    // 标题区高度（内边距 + 标题字高 + 14），子类内容以此为顶部偏移
+    int titleHeight() const;
 
     // 子类先设置 m_windowWidth/m_windowHeight，再调 openWindow 创建窗口。
     // enableTextInput 为 true 时在循环期间启用 SDL 文本输入（IME/编辑事件）。
@@ -72,6 +66,7 @@ protected:
     SDL_Window* m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
     TTF_Font* m_font;
+    TTF_Font* m_titleFont;
 
     std::string m_title;
     bool m_running = false;

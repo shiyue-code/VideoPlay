@@ -768,7 +768,8 @@ void VideoPlayerApp::showAISettings() {
         };
     }
 
-    SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont());
+    SettingsDialog dialog(m_renderer->getWindow(), m_renderer->getFont(),
+                          m_renderer->getTitleFont());
     dialog.show(settings, [this](const AISettings& newSettings) {
         AIConfig config = Settings::instance().aiConfig();
         config.provider = toLower(trim(newSettings.provider));
