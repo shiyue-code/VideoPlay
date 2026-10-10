@@ -631,7 +631,14 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
     }
-    
+
+    // 音频媒体时间跟踪复位：目标之前的整帧音频被丢弃
+    m_audioNextPtsMs = -1.0;
+    m_audioInputExpectedMs = -1.0;
+    m_audioTrimBeforeMs = positionMs;
+    // 视频同样裁剪掉 seek 目标之前的帧
+    m_videoTrimBeforeMs = positionMs;
+
     m_position = positionMs;
     m_audioBaseMs = positionMs;
     // 回退时钟重新从 seek 点起算（无音轨文件）
@@ -790,6 +797,7 @@ void FFmpegPlayer::decodeLoop() {
 
         // Pacing: don't decode too far ahead of playback time
         if (!waitForDecodeSlot()) break;
+        if (m_seekRequested.load()) continue;   // seek 优先，交给循环顶部处理
 
         pktCount++;
 
@@ -799,6 +807,17 @@ void FFmpegPlayer::decodeLoop() {
 
         if (ret < 0) {
             av_packet_unref(packet);
+            if (ret == AVERROR_EOF) {
+                // 排空解码器与播放队列，再进入 Stopped；
+                // 排空期间有 seek 请求则交回主循环正常处理 seek 并继续读包
+                drainEndOfStream(vframe, aframe);
+                if (m_abortRequest.load()) {
+                    break;
+                }
+                if (m_seekRequested.load()) {
+                    continue;
+                }
+            }
             if (handleReadFailure(ret, consecutiveReadErrors)) break;
             continue;
         }
@@ -813,8 +832,10 @@ void FFmpegPlayer::decodeLoop() {
             decodeVideoPacket(packet, vframe, dtRead);
         }
         else if (m_audioCtx.stream && packet->stream_index == m_audioCtx.stream->index && m_audioCtx.codecContext) {
-            // 音频背压丢包：保持原有 continue 语义（跳过 pausedBurst 递减与 PERF 段）
-            if (m_audioPlayer && m_audioPlayer->queuedMs() > kMaxAudioQueueMs) {
+            // 暂停态补解码期间音频不会消耗，满了只能丢包，否则补解码卡死；
+            // 正常播放时由 waitForDecodeSlot 阻塞式背压，不丢包
+            if (pausedBurstPackets > 0 && m_audioPlayer &&
+                m_audioPlayer->queuedMs() > kMaxAudioQueueMs) {
                 av_packet_unref(packet);
                 continue;
             }
@@ -850,11 +871,83 @@ void FFmpegPlayer::decodeLoop() {
 }
 
 bool FFmpegPlayer::waitForDecodeSlot() {
-    std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
-    m_decodeCondition.wait(vqLock, [this] {
-        return m_abortRequest.load() || m_videoFrameQueue.size() < kMaxVideoQueueSize;
-    });
-    return !m_abortRequest.load();
+    // 视频队列有空位且音频队列不超上限才可继续解码；
+    // 音频没有通知机制，5ms 轮询等待并响应 abort/seek。
+    // 音频设备暂停时不等音频（暂停态补解码由丢包防溢出）。
+    for (;;) {
+        if (m_abortRequest.load()) return false;
+        if (m_seekRequested.load()) return true;
+        bool videoHasSpace;
+        {
+            std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
+            videoHasSpace = m_videoFrameQueue.size() < kMaxVideoQueueSize;
+        }
+        bool audioOk = !m_audioPlayer || m_audioPlayer->isPaused() ||
+                       m_audioPlayer->queuedMs() <= kMaxAudioQueueMs;
+        if (videoHasSpace && audioOk) return true;
+        std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
+        m_decodeCondition.wait_for(vqLock, std::chrono::milliseconds(5), [this] {
+            return m_abortRequest.load() || m_seekRequested.load() ||
+                   m_videoFrameQueue.size() < kMaxVideoQueueSize;
+        });
+    }
+}
+
+// EOF 时排空解码器与播放队列：先送 NULL 收完剩余帧（B 帧尾帧），
+// 再等视频队列与音频缓冲播完，最后才允许进入 Stopped
+void FFmpegPlayer::drainEndOfStream(AVFrame* vframe, AVFrame* aframe) {
+    if (m_videoCtx.codecContext) {
+        avcodec_send_packet(m_videoCtx.codecContext, nullptr);
+        while (avcodec_receive_frame(m_videoCtx.codecContext, vframe) >= 0) {
+            // pushVideoFrame 满了会丢队首，推入前先等空位
+            {
+                std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
+                m_decodeCondition.wait_for(vqLock, std::chrono::milliseconds(5), [this] {
+                    return m_abortRequest.load() || m_seekRequested.load() ||
+                           m_videoFrameQueue.size() < kMaxVideoQueueSize;
+                });
+            }
+            if (m_abortRequest.load() || m_seekRequested.load()) {
+                av_frame_unref(vframe);
+                return;
+            }
+            handleDecodedVideoFrame(vframe, 0.0);
+            av_frame_unref(vframe);
+        }
+    }
+    if (m_audioCtx.codecContext) {
+        avcodec_send_packet(m_audioCtx.codecContext, nullptr);
+        while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
+            handleDecodedAudioFrame(aframe, 0.0);
+            av_frame_unref(aframe);
+        }
+    }
+
+    // 等队列播完：暂停态继续等；有 seek 请求则交回主循环处理
+    int64_t lastAudioQueuedMs = -1;
+    int audioStallMs = 0;
+    while (!m_abortRequest && !m_seekRequested) {
+        size_t videoQueued;
+        {
+            std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
+            videoQueued = m_videoFrameQueue.size();
+        }
+        int64_t audioQueuedMs = m_audioPlayer ? m_audioPlayer->queuedMs() : 0;
+        bool audioDone = !m_audioPlayer || !m_audioPlayer->isPlaying() || audioQueuedMs <= 0;
+        if (videoQueued == 0 && audioDone) break;
+        // 安全阀：播放态音频队列连续 2 秒不下降就放弃等待
+        if (m_state == PlaybackState::Playing && m_audioPlayer &&
+            m_audioPlayer->isPlaying()) {
+            if (lastAudioQueuedMs >= 0 && audioQueuedMs < lastAudioQueuedMs) {
+                audioStallMs = 0;
+            } else {
+                audioStallMs += 10;
+                if (audioStallMs >= 2000) break;
+            }
+            lastAudioQueuedMs = audioQueuedMs;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 // 读包失败/EOF/网络重连处理；返回 true 表示需要退出解码循环
@@ -886,28 +979,52 @@ bool FFmpegPlayer::handleReadFailure(int ret, int& consecutiveReadErrors) {
     return false;
 }
 
+// 流时间戳（pts/dts）转媒体毫秒，基准为容器 start_time，与 seek 基准一致
+int64_t FFmpegPlayer::streamPtsToMs(const AVStream* stream, int64_t pts) const {
+    if (!stream || pts == AV_NOPTS_VALUE) {
+        return 0;
+    }
+    int64_t startTime = 0;
+    if (m_formatContext && m_formatContext->start_time != AV_NOPTS_VALUE) {
+        startTime = av_rescale_q(m_formatContext->start_time,
+                                 {1, AV_TIME_BASE}, stream->time_base);
+    }
+    return av_rescale_q(pts - startTime, stream->time_base, {1, 1000});
+}
+
+void FFmpegPlayer::handleDecodedVideoFrame(AVFrame* frame, double dtRead) {
+    // seek 裁剪：seek 落点前的关键帧会被解出，目标之前的帧不入队，
+    // 否则消费者会先显示一大段早于 seek 位置的画面
+    int64_t rawPts = frame->pts;
+    if (rawPts == AV_NOPTS_VALUE) rawPts = frame->best_effort_timestamp;
+    const int64_t rawPtsMs = streamPtsToMs(m_videoCtx.stream, rawPts);
+    if (m_videoTrimBeforeMs >= 0) {
+        if (rawPts != AV_NOPTS_VALUE && rawPtsMs < m_videoTrimBeforeMs) {
+            return;
+        }
+        m_videoTrimBeforeMs = -1;
+    }
+
+    auto t1 = HRClock::now();
+    VideoFrame videoFrame = convertVideoFrame(frame);
+    double dtConv = elapsedMs(t1);
+    if (!videoFrame.data.empty()) {
+        videoFrame.pts = rawPtsMs;
+        auto t2 = HRClock::now();
+        pushVideoFrame(std::move(videoFrame));
+        m_vframeCount++;
+        double dtPush = elapsedMs(t2);
+        if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
+            logger().debug("[PERF] video read=" + std::to_string(dtRead) +
+                "ms convert=" + std::to_string(dtConv) +
+                "ms push=" + std::to_string(dtPush) + "ms");
+        }
+    }
+}
+
 void FFmpegPlayer::receiveVideoFrames(AVFrame* frame, double dtRead) {
     while (avcodec_receive_frame(m_videoCtx.codecContext, frame) >= 0) {
-        auto t1 = HRClock::now();
-        VideoFrame videoFrame = convertVideoFrame(frame);
-        double dtConv = elapsedMs(t1);
-        if (!videoFrame.data.empty()) {
-            int64_t pts = frame->pts;
-            if (pts == AV_NOPTS_VALUE) pts = frame->best_effort_timestamp;
-            if (pts != AV_NOPTS_VALUE) {
-                int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
-                videoFrame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
-            }
-            auto t2 = HRClock::now();
-            pushVideoFrame(std::move(videoFrame));
-            m_vframeCount++;
-            double dtPush = elapsedMs(t2);
-            if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                logger().debug("[PERF] video read=" + std::to_string(dtRead) +
-                    "ms convert=" + std::to_string(dtConv) +
-                    "ms push=" + std::to_string(dtPush) + "ms");
-            }
-        }
+        handleDecodedVideoFrame(frame, dtRead);
         av_frame_unref(frame);
     }
 }
@@ -925,22 +1042,64 @@ void FFmpegPlayer::decodeVideoPacket(AVPacket* packet, AVFrame* frame, double dt
     }
 }
 
-void FFmpegPlayer::receiveAudioFrames(AVFrame* frame, double dtRead) {
-    while (avcodec_receive_frame(m_audioCtx.codecContext, frame) >= 0) {
-        auto t3 = HRClock::now();
-        auto audioData = processAudioFrame(frame);
-        double dtResample = elapsedMs(t3);
-        if (!audioData.empty() && m_audioPlayer) {
-            auto t4 = HRClock::now();
-            m_audioPlayer->enqueue(audioData);
-            m_aframeCount++;
-            double dtEnqueue = elapsedMs(t4);
-            if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
-                    "ms resample=" + std::to_string(dtResample) +
-                    "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
+void FFmpegPlayer::handleDecodedAudioFrame(AVFrame* frame, double dtRead) {
+    // 媒体时间跟踪：seek 后整帧早于目标的丢弃；时间戳不连续时重新对齐
+    int64_t rawPts = frame->best_effort_timestamp != AV_NOPTS_VALUE ?
+        frame->best_effort_timestamp : frame->pts;
+    const bool hasPts = rawPts != AV_NOPTS_VALUE;
+    double framePtsMs = hasPts ?
+        static_cast<double>(streamPtsToMs(m_audioCtx.stream, rawPts)) :
+        static_cast<double>(m_audioBaseMs.load());
+    double durMs = frame->sample_rate > 0 ?
+        frame->nb_samples * 1000.0 / frame->sample_rate : 0.0;
+    if (m_audioTrimBeforeMs >= 0) {
+        if (framePtsMs + durMs <= m_audioTrimBeforeMs) {
+            return;   // 整帧都在 seek 目标之前
+        }
+        m_audioTrimBeforeMs = -1;
+    }
+    if (m_audioNextPtsMs < 0) {
+        m_audioNextPtsMs = framePtsMs;
+    } else if (m_audioInputExpectedMs >= 0 &&
+               std::abs(framePtsMs - m_audioInputExpectedMs) > 1000.0) {
+        // 断流/时间戳跳变：重新对齐媒体时间
+        m_audioNextPtsMs = framePtsMs;
+    }
+    m_audioInputExpectedMs = framePtsMs + durMs;
+
+    auto t3 = HRClock::now();
+    auto audioData = processAudioFrame(frame);
+    double dtResample = elapsedMs(t3);
+    if (!audioData.empty() && m_audioPlayer) {
+        // 取产出这段数据的滤镜图实际生效的 atempo（无图为 1.0）
+        double tempo = 1.0;
+        {
+            std::lock_guard<std::mutex> filterLock(m_audioFilterMutex);
+            if (m_audioFilterGraph) {
+                tempo = m_audioFilterTempo;
             }
         }
+        int channels = m_audioCtx.format.channels > 0 ? m_audioCtx.format.channels : 1;
+        int64_t outFrames = static_cast<int64_t>(audioData.size()) / channels;
+        int dstRate = m_audioCtx.format.sampleRate > 0 ? m_audioCtx.format.sampleRate : 48000;
+        double msPerFrame = tempo * 1000.0 / dstRate;
+        auto t4 = HRClock::now();
+        m_audioPlayer->enqueue(audioData.data(), audioData.size(),
+                               m_audioNextPtsMs, msPerFrame);
+        m_audioNextPtsMs += static_cast<double>(outFrames) * msPerFrame;
+        m_aframeCount++;
+        double dtEnqueue = elapsedMs(t4);
+        if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
+            logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                "ms resample=" + std::to_string(dtResample) +
+                "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
+        }
+    }
+}
+
+void FFmpegPlayer::receiveAudioFrames(AVFrame* frame, double dtRead) {
+    while (avcodec_receive_frame(m_audioCtx.codecContext, frame) >= 0) {
+        handleDecodedAudioFrame(frame, dtRead);
         av_frame_unref(frame);
     }
 }
@@ -963,8 +1122,7 @@ void FFmpegPlayer::decodeSubtitlePacket(AVPacket* packet) {
     int gotSub = 0;
     if (avcodec_decode_subtitle2(m_subtitleCtx.codecContext, &sub, &gotSub, packet) >= 0 && gotSub) {
         int64_t pktPts = packet->pts != AV_NOPTS_VALUE ? packet->pts : (packet->dts != AV_NOPTS_VALUE ? packet->dts : 0);
-        int64_t ptsMs = av_rescale_q(pktPts - m_subtitleCtx.startTime,
-                                     m_subtitleCtx.stream->time_base, {1, 1000});
+        int64_t ptsMs = streamPtsToMs(m_subtitleCtx.stream, pktPts);
         // 文本字幕的显示区间：优先取解码器给出的 end_display_time，
         // 其次用包 duration，都没有才退到 5 秒兜底
         int64_t startMs = ptsMs + sub.start_display_time;
@@ -1310,7 +1468,12 @@ int64_t FFmpegPlayer::audioPositionMs() const {
     // 音频同步偏移（Shift+G/H）：加到显示位置上，等效于音频相对视频偏移
     const int64_t syncOffset = m_audioSyncOffsetMs.load();
     if (m_audioPlayer) {
-        return m_audioBaseMs.load() + m_audioPlayer->playedMs() + syncOffset;
+        // 媒体时钟按已入队采样推算；时钟为空（如刚 seek）时用 seek 基准
+        double pos = m_audioPlayer->mediaPositionMs();
+        if (pos < 0) {
+            pos = static_cast<double>(m_audioBaseMs.load());
+        }
+        return static_cast<int64_t>(pos) + syncOffset;
     }
     // 无音轨文件：挂钟回退，保证进度条与视频帧正常前进
     int64_t base = m_audioBaseMs.load();
@@ -1346,9 +1509,7 @@ void FFmpegPlayer::stopFallbackClock() {
 void FFmpegPlayer::setPlaybackSpeed(double speed) {
     speed = std::clamp(speed, 0.25, 4.0);
     m_playbackSpeed = speed;
-    if (m_audioPlayer) {
-        m_audioPlayer->setPlaybackSpeed(speed);
-    }
+    // 倍速经 atempo 滤镜实现：滤镜描述串变化后由解码线程自动重建滤镜图
     if (m_speedCallback) {
         m_speedCallback(speed);
     }
@@ -1405,8 +1566,13 @@ void FFmpegPlayer::setAudioOutputDevice(SDL_AudioDeviceID deviceId) {
     const bool wasPaused = m_audioPlayer->isPaused();
     const int volume = m_audioPlayer->volume();
     const bool muted = m_audioPlayer->isMuted();
-    const double speed = m_audioPlayer->playbackSpeed();
     const AudioFormat format = m_audioCtx.format;
+
+    // 重建 stream 会丢队列与媒体时钟，记录当前位置做基准，避免时钟跳回旧 seek 点
+    const double pos = m_audioPlayer->mediaPositionMs();
+    if (pos >= 0) {
+        m_audioBaseMs = static_cast<int64_t>(pos);
+    }
 
     if (!m_audioPlayer->initialize(format, m_audioOutputDeviceId)) {
         logger().error("Failed to switch audio output device");
@@ -1414,7 +1580,6 @@ void FFmpegPlayer::setAudioOutputDevice(SDL_AudioDeviceID deviceId) {
     }
     m_audioPlayer->setVolume(volume);
     m_audioPlayer->setMuted(muted);
-    m_audioPlayer->setPlaybackSpeed(speed);
     if (wasPlaying) {
         m_audioPlayer->play();
     } else if (wasPaused) {

@@ -158,11 +158,16 @@ private:
     // decodeLoop 拆分出的子步骤（均只在解码线程调用）
     bool waitForDecodeSlot();
     bool handleReadFailure(int ret, int& consecutiveReadErrors);
+    void drainEndOfStream(AVFrame* vframe, AVFrame* aframe);
     void decodeVideoPacket(AVPacket* packet, AVFrame* frame, double dtRead);
     void decodeAudioPacket(AVPacket* packet, AVFrame* frame, double dtRead);
     void decodeSubtitlePacket(AVPacket* packet);
     void receiveVideoFrames(AVFrame* frame, double dtRead);
     void receiveAudioFrames(AVFrame* frame, double dtRead);
+    void handleDecodedVideoFrame(AVFrame* frame, double dtRead);
+    void handleDecodedAudioFrame(AVFrame* frame, double dtRead);
+    // 流时间戳转媒体毫秒：以容器 start_time 为基准（NOPTS 或空流返回 0）
+    int64_t streamPtsToMs(const AVStream* stream, int64_t pts) const;
     bool initializeVideoContext();
     bool initializeAudioContext();
     VideoFrame convertVideoFrame(AVFrame* frame);
@@ -199,6 +204,7 @@ private:
     int m_audioFilterChannels = 0;
     AVSampleFormat m_audioFilterSampleFormat = AV_SAMPLE_FMT_NONE;
     std::string m_audioFilterDescription;
+    double m_audioFilterTempo = 1.0;   // 当前滤镜图实际生效的 atempo（m_audioFilterMutex 保护）
     mutable std::mutex m_audioFilterMutex;
 
     // 视频基础参数滤镜 (eq / hue)
@@ -261,6 +267,12 @@ private:
     // decodeLoop 的 PERF 帧计数（仅解码线程读写）
     int m_vframeCount = 0;
     int m_aframeCount = 0;
+
+    // 音频媒体时间跟踪（仅解码线程访问；seek/stop/切轨时由持有方置位）
+    double m_audioNextPtsMs = -1.0;        // 下一段入队数据的起始媒体时间
+    double m_audioInputExpectedMs = -1.0;  // 解码时间戳连续性检测
+    int64_t m_audioTrimBeforeMs = -1;      // seek 后丢弃整帧都早于此时间的音频帧
+    int64_t m_videoTrimBeforeMs = -1;      // seek 后丢弃 pts 早于此时间的视频帧
 
     // Video frame queue with PTS ordering
     std::deque<VideoFrame> m_videoFrameQueue;

@@ -13,6 +13,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "core/audioclock.h"
+
 namespace VideoPlay {
 
 struct AudioFormat {
@@ -47,24 +49,22 @@ public:
     int volume() const;
     void setMuted(bool muted);
     bool isMuted() const;
-    void setPlaybackSpeed(double speed);
-    double playbackSpeed() const;
 
-    void enqueue(const std::vector<float>& audioData);
-    void enqueue(const float* data, size_t sampleCount);
+    // startMs：这段数据首帧对应的媒体时间（毫秒）
+    // msPerFrame：每个输出帧对应的媒体时长（已含倍速）
+    void enqueue(const float* data, size_t sampleCount, double startMs, double msPerFrame);
 
     bool isPlaying() const;
     bool isPaused() const;
     size_t queueSize() const;
-    int64_t playedMs() const;
+    // 当前播放到的媒体时间；时钟为空（尚未入队数据）时返回 -1
+    double mediaPositionMs() const;
     int64_t queuedMs() const;
 
     using DataCallback = std::function<void(float* output, size_t frameCount)>;
     void setDataCallback(DataCallback callback);
 
 private:
-    using Clock = std::chrono::high_resolution_clock;
-
     mutable std::mutex m_mutex;
 
     SDL_AudioStream* m_stream = nullptr;
@@ -76,18 +76,15 @@ private:
     std::atomic<bool> m_paused{false};
     std::atomic<int> m_volume{100};
     std::atomic<bool> m_muted{false};
-    std::atomic<double> m_playbackSpeed{1.0};
 
     AudioFormat m_format;
     DataCallback m_dataCallback;
+    AudioClock m_clock;
 
     // Apply volume/mute to SDL stream gain
     void applyStreamGain();
-
-    // Timing state for playedMs()
-    double m_basePlayedMs = 0.0;
-    Clock::time_point m_timerStart;
-    bool m_timerRunning = false;
+    // 调用方需持有 m_mutex；返回设备尚未取走的帧数
+    int64_t queuedFramesLocked() const;
 };
 
 } // namespace VideoPlay

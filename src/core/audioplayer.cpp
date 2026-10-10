@@ -79,8 +79,7 @@ bool AudioPlayer::initialize(const AudioFormat& format, SDL_AudioDeviceID device
 
     m_deviceId = SDL_GetAudioStreamDevice(m_stream);
     m_initialized = true;
-    m_basePlayedMs = 0.0;
-    m_timerRunning = false;
+    m_clock.reset();
 
     applyStreamGain();
 
@@ -103,6 +102,7 @@ void AudioPlayer::shutdown() {
             m_deviceId = 0;
         }
         m_initialized = false;
+        m_clock.reset();
         logger().info("Audio stream shutdown");
     }
 }
@@ -118,8 +118,6 @@ void AudioPlayer::play() {
         if (streamResumed || deviceResumed) {
             m_playing = true;
             m_paused = false;
-            m_timerStart = Clock::now();
-            m_timerRunning = true;
             bool streamPaused = SDL_AudioStreamDevicePaused(m_stream);
             logger().debug("Audio playback started, streamPaused=" +
                            std::string(streamPaused ? "true" : "false"));
@@ -130,8 +128,6 @@ void AudioPlayer::play() {
         if (SDL_ResumeAudioStreamDevice(m_stream) ||
             (m_deviceId != 0 && SDL_ResumeAudioDevice(m_deviceId))) {
             m_paused = false;
-            m_timerStart = Clock::now();
-            m_timerRunning = true;
             logger().debug("Audio playback resumed");
         }
     }
@@ -147,11 +143,6 @@ void AudioPlayer::pause() {
             SDL_PauseAudioDevice(m_deviceId);
         }
         m_paused = true;
-        if (m_timerRunning) {
-            auto physicalElapsed = std::chrono::duration<double, std::milli>(Clock::now() - m_timerStart).count();
-            m_basePlayedMs += physicalElapsed * m_playbackSpeed.load();
-            m_timerRunning = false;
-        }
         logger().debug("Audio playback paused");
     }
 }
@@ -170,8 +161,7 @@ void AudioPlayer::stop() {
         m_paused = false;
         logger().debug("Audio playback stopped");
     }
-    m_basePlayedMs = 0.0;
-    m_timerRunning = false;
+    m_clock.reset();
 }
 
 void AudioPlayer::reset() {
@@ -179,10 +169,7 @@ void AudioPlayer::reset() {
     if (m_stream) {
         SDL_ClearAudioStream(m_stream);
     }
-    m_basePlayedMs = 0.0;
-    if (m_timerRunning) {
-        m_timerStart = Clock::now();
-    }
+    m_clock.reset();
 }
 
 void AudioPlayer::setVolume(int volume) {
@@ -212,34 +199,7 @@ void AudioPlayer::applyStreamGain() {
     SDL_SetAudioStreamGain(m_stream, gain);
 }
 
-void AudioPlayer::setPlaybackSpeed(double speed) {
-    double newSpeed = std::clamp(speed, 0.25, 4.0);
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_timerRunning) {
-        auto physicalElapsed = std::chrono::duration<double, std::milli>(Clock::now() - m_timerStart).count();
-        m_basePlayedMs += physicalElapsed * m_playbackSpeed.load();
-        m_timerStart = Clock::now();
-    }
-    m_playbackSpeed = newSpeed;
-}
-
-double AudioPlayer::playbackSpeed() const {
-    return m_playbackSpeed.load();
-}
-
-void AudioPlayer::enqueue(const std::vector<float>& audioData) {
-    if (audioData.empty()) return;
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_stream) { return; }
-
-    // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
-    if (!SDL_PutAudioStreamData(m_stream, audioData.data(), static_cast<int>(audioData.size() * sizeof(float)))) {
-        logger().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
-    }
-}
-
-void AudioPlayer::enqueue(const float* data, size_t sampleCount) {
+void AudioPlayer::enqueue(const float* data, size_t sampleCount, double startMs, double msPerFrame) {
     if (!data || sampleCount == 0) return;
 
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -248,7 +208,11 @@ void AudioPlayer::enqueue(const float* data, size_t sampleCount) {
     // Volume is handled by SDL_SetAudioStreamGain, no need to copy/scale here
     if (!SDL_PutAudioStreamData(m_stream, data, static_cast<int>(sampleCount * sizeof(float)))) {
         logger().error("SDL_PutAudioStreamData failed: " + std::string(SDL_GetError()));
+        return;
     }
+    int channels = m_format.channels > 0 ? m_format.channels : 1;
+    m_clock.push(static_cast<int64_t>(sampleCount) / channels, startMs, msPerFrame);
+    m_clock.prune(queuedFramesLocked());
 }
 
 bool AudioPlayer::isPlaying() const {
@@ -259,37 +223,30 @@ bool AudioPlayer::isPaused() const {
     return m_paused.load();
 }
 
-size_t AudioPlayer::queueSize() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
+int64_t AudioPlayer::queuedFramesLocked() const {
     if (!m_stream) return 0;
     int queuedBytes = SDL_GetAudioStreamQueued(m_stream);
     if (queuedBytes <= 0) return 0;
-    int samples = queuedBytes / static_cast<int>(sizeof(float));
     int channels = m_format.channels > 0 ? m_format.channels : 1;
-    return static_cast<size_t>(samples / channels);
+    return queuedBytes / static_cast<int>(sizeof(float) * channels);
+}
+
+size_t AudioPlayer::queueSize() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return static_cast<size_t>(queuedFramesLocked());
 }
 
 int64_t AudioPlayer::queuedMs() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_stream) return 0;
-    int queuedBytes = SDL_GetAudioStreamQueued(m_stream);
-    if (queuedBytes <= 0) return 0;
-    int totalFloats = queuedBytes / static_cast<int>(sizeof(float));
-    int channels = m_format.channels > 0 ? m_format.channels : 1;
+    int64_t frames = queuedFramesLocked();
     int sampleRate = m_format.sampleRate > 0 ? m_format.sampleRate : 48000;
-    int frames = totalFloats / channels;
     if (frames <= 0 || sampleRate <= 0) return 0;
-    return static_cast<int64_t>(frames * 1000LL / sampleRate);
+    return frames * 1000LL / sampleRate;
 }
 
-int64_t AudioPlayer::playedMs() const {
+double AudioPlayer::mediaPositionMs() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    double result = m_basePlayedMs;
-    if (m_timerRunning) {
-        auto physicalElapsed = std::chrono::duration<double, std::milli>(Clock::now() - m_timerStart).count();
-        result += physicalElapsed * m_playbackSpeed.load();
-    }
-    return static_cast<int64_t>(result);
+    return m_clock.positionMs(queuedFramesLocked());
 }
 
 void AudioPlayer::setDataCallback(DataCallback callback) {

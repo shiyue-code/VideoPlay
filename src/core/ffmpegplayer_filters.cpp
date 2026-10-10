@@ -2,39 +2,52 @@
 #include "core/ffmpegplayer_internal.h"
 
 #include <algorithm>
+#include <locale>
 #include <sstream>
 
 namespace VideoPlay {
 
 std::string FFmpegPlayer::buildAudioFilterDescription() const {
-    if (!m_audioFilterConfig.enabled) {
-        return {};
-    }
-
     std::vector<std::string> filters;
-    if (std::abs(m_audioFilterConfig.preampDb) > 0.01) {
-        std::ostringstream oss;
-        oss << "volume=" << m_audioFilterConfig.preampDb << "dB";
-        filters.push_back(oss.str());
+    if (m_audioFilterConfig.enabled) {
+        if (std::abs(m_audioFilterConfig.preampDb) > 0.01) {
+            std::ostringstream oss;
+            oss << "volume=" << m_audioFilterConfig.preampDb << "dB";
+            filters.push_back(oss.str());
+        }
+
+        for (const auto& band : m_audioFilterConfig.eqBands) {
+            if (band.frequency <= 0.0 || band.width <= 0.0 ||
+                std::abs(band.gainDb) <= 0.01) {
+                continue;
+            }
+            std::ostringstream oss;
+            oss << "equalizer=f=" << band.frequency
+                << ":width_type=o:width=" << band.width
+                << ":g=" << band.gainDb;
+            filters.push_back(oss.str());
+        }
+
+        if (m_audioFilterConfig.dynamicNormalizerEnabled) {
+            filters.push_back("dynaudnorm=f=150:g=8");
+        }
+        if (m_audioFilterConfig.limiterEnabled) {
+            filters.push_back("alimiter=limit=0.95");
+        }
     }
 
-    for (const auto& band : m_audioFilterConfig.eqBands) {
-        if (band.frequency <= 0.0 || band.width <= 0.0 ||
-            std::abs(band.gainDb) <= 0.01) {
-            continue;
+    // 倍速经 atempo 实现（保持音高），与用户滤镜无关，追加在链尾。
+    // atempo 单级下限 0.5，更慢的速度拆成多级。
+    double tempo = m_playbackSpeed.load();
+    if (std::abs(tempo - 1.0) > 0.001) {
+        while (tempo < 0.5) {
+            filters.push_back("atempo=0.5");
+            tempo /= 0.5;
         }
         std::ostringstream oss;
-        oss << "equalizer=f=" << band.frequency
-            << ":width_type=o:width=" << band.width
-            << ":g=" << band.gainDb;
+        oss.imbue(std::locale::classic());
+        oss << "atempo=" << tempo;
         filters.push_back(oss.str());
-    }
-
-    if (m_audioFilterConfig.dynamicNormalizerEnabled) {
-        filters.push_back("dynaudnorm=f=150:g=8");
-    }
-    if (m_audioFilterConfig.limiterEnabled) {
-        filters.push_back("alimiter=limit=0.95");
     }
 
     if (filters.empty()) {
@@ -61,15 +74,21 @@ void FFmpegPlayer::cleanupAudioFilterGraph() {
     m_audioFilterChannels = 0;
     m_audioFilterSampleFormat = AV_SAMPLE_FMT_NONE;
     m_audioFilterDescription.clear();
+    m_audioFilterTempo = 1.0;
 }
 
 bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
-    if (!frame || !m_audioFilterConfig.enabled || m_audioFilterRuntimeDisabled) {
+    // 用户滤镜未启用且速度为 1 时才不需要滤镜图
+    const bool needTempo = std::abs(m_playbackSpeed.load() - 1.0) > 0.001;
+    if (!frame || (!m_audioFilterConfig.enabled && !needTempo) ||
+        m_audioFilterRuntimeDisabled) {
+        cleanupAudioFilterGraph();
         return false;
     }
 
     std::string description = buildAudioFilterDescription();
     if (description.empty()) {
+        cleanupAudioFilterGraph();
         return false;
     }
 
@@ -110,11 +129,11 @@ bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
         return false;
     }
 
-    AVFilterContext* src = nullptr;
-    AVFilterContext* sink = nullptr;
-    int ret = avfilter_graph_create_filter(&src, bufferSrc, "in", nullptr, nullptr, graph);
-    if (ret < 0) {
-        logger().warning("Failed to create audio filter source");
+    // FFmpeg 8 起 avfilter_graph_create_filter 会立刻初始化滤镜，
+    // abuffer 必须先 alloc、设好参数再 init
+    AVFilterContext* src = avfilter_graph_alloc_filter(graph, bufferSrc, "in");
+    if (!src) {
+        logger().warning("Failed to allocate audio filter source");
         avfilter_graph_free(&graph);
         m_audioFilterRuntimeDisabled = true;
         return false;
@@ -138,7 +157,7 @@ bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
         av_channel_layout_default(&params->ch_layout, channels);
     }
 
-    ret = av_buffersrc_parameters_set(src, params);
+    int ret = av_buffersrc_parameters_set(src, params);
     av_channel_layout_uninit(&params->ch_layout);
     av_free(params);
     if (ret < 0) {
@@ -148,9 +167,24 @@ bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
         return false;
     }
 
-    ret = avfilter_graph_create_filter(&sink, bufferSink, "out", nullptr, nullptr, graph);
+    ret = avfilter_init_dict(src, nullptr);
     if (ret < 0) {
-        logger().warning("Failed to create audio filter sink");
+        logger().warning("Failed to init audio filter source");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+
+    AVFilterContext* sink = avfilter_graph_alloc_filter(graph, bufferSink, "out");
+    if (!sink) {
+        logger().warning("Failed to allocate audio filter sink");
+        avfilter_graph_free(&graph);
+        m_audioFilterRuntimeDisabled = true;
+        return false;
+    }
+    ret = avfilter_init_dict(sink, nullptr);
+    if (ret < 0) {
+        logger().warning("Failed to init audio filter sink");
         avfilter_graph_free(&graph);
         m_audioFilterRuntimeDisabled = true;
         return false;
@@ -201,6 +235,7 @@ bool FFmpegPlayer::ensureAudioFilterGraph(AVFrame* frame) {
     m_audioFilterChannels = channels;
     m_audioFilterSampleFormat = sampleFormat;
     m_audioFilterDescription = description;
+    m_audioFilterTempo = m_playbackSpeed.load();
     logger().info("Audio filter graph enabled: " + description);
     return true;
 }

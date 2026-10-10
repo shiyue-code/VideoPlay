@@ -218,11 +218,14 @@ bool FFmpegPlayer::setAudioTrack(int trackIndex) {
     }
     m_currentAudioTrack = trackIndex;
 
-    // 重置音频播放器
+    // 重置音频播放器与媒体时间跟踪（随后 seek 会重新置位）
     if (m_audioPlayer) {
         m_audioPlayer->stop();
         m_audioPlayer->reset();
     }
+    m_audioNextPtsMs = -1.0;
+    m_audioInputExpectedMs = -1.0;
+    m_audioTrimBeforeMs = -1;
 
     // seek 回原位置以重新填充缓冲
     if (wasPlaying) {
