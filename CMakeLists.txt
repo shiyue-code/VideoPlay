@@ -133,6 +133,7 @@ set(SOURCES
     src/core/audioclock.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
+    src/core/settings_maintenance.cpp
     src/core/episodedetector.cpp
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
@@ -173,6 +174,7 @@ set(HEADERS
     src/core/audioclock.h
     src/core/audioplayer.h
     src/core/settings.h
+    src/core/settings_maintenance.h
     src/core/common.h
     src/core/episodedetector.h
     src/subtitles/subtitleparser.h

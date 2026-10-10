@@ -1,4 +1,5 @@
 #include "core/settings.h"
+#include "core/settings_maintenance.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
 #include <algorithm>
@@ -130,8 +131,8 @@ void Settings::ensureDirectoryExists() const {
 }
 
 void Settings::load() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    
+    std::unique_lock<std::mutex> lock(m_mutex);
+
     if (!std::filesystem::exists(m_configPath)) {
         // 使用默认配置
         m_config = {
@@ -192,7 +193,14 @@ void Settings::load() {
             file >> m_config;
         }
     } catch (const std::exception& e) {
-        logger().error("Failed to load settings: " + std::string(e.what()));
+        // 备份损坏的配置文件后回退到默认配置
+        std::error_code ec;
+        std::filesystem::copy_file(m_configPath, m_configPath + ".broken",
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) {
+            logger().warning("Failed to back up broken settings file: " + ec.message());
+        }
+        logger().warning("Failed to load settings: " + std::string(e.what()));
         // 使用默认配置
         m_config = nlohmann::json::object();
     }
@@ -225,18 +233,69 @@ void Settings::load() {
     if (!m_config["playback"].contains("hardwareDecodingEnabled")) {
         m_config["playback"]["hardwareDecodingEnabled"] = true;
     }
+
+    // 清理键为本地文件路径但文件已不存在的条目（URL/UNC 路径保留，避免阻塞）
+    // 所在目录不存在（移动硬盘未接入等）时视为存在，避免误删
+    const auto fileExists = [](const std::string& path) {
+        std::error_code ec;
+        const auto p = std::filesystem::u8path(path);
+        return std::filesystem::exists(p, ec) || !std::filesystem::exists(p.parent_path(), ec);
+    };
+    size_t removed = 0;
+    if (m_config.contains("positions")) {
+        removed += pruneMissingFileEntries(m_config["positions"], fileExists);
+    }
+    if (m_config.contains("bookmarks")) {
+        removed += pruneMissingFileEntries(m_config["bookmarks"], fileExists);
+    }
+    if (m_config.contains("seriesProgress") && m_config["seriesProgress"].is_object()) {
+        for (auto& item : m_config["seriesProgress"].items()) {
+            auto& series = item.value();
+            if (series.is_object() && series.contains("episodePositions")) {
+                removed += pruneMissingFileEntries(series["episodePositions"], fileExists);
+            }
+        }
+    }
+    lock.unlock();
+
+    if (removed > 0) {
+        logger().info("Pruned " + std::to_string(removed) +
+                      " missing file entries from settings");
+        save();
+    }
 }
 
 void Settings::save() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
+    // 先写临时文件，成功后原子替换，避免写一半留下损坏的配置
+    const std::string tmpPath = m_configPath + ".tmp";
     try {
-        std::ofstream file(m_configPath);
-        if (file.is_open()) {
-            file << m_config.dump(4);
+        bool written = false;
+        {
+            std::ofstream file(tmpPath, std::ios::trunc);
+            if (file.is_open()) {
+                file << m_config.dump(4);
+                file.flush();
+                written = file.good();
+            }
+        }
+        if (!written) {
+            logger().error("Failed to write settings file: " + tmpPath);
+            std::error_code ec;
+            std::filesystem::remove(tmpPath, ec);
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::rename(tmpPath, m_configPath, ec);
+        if (ec) {
+            logger().error("Failed to replace settings file: " + ec.message());
+            std::filesystem::remove(tmpPath, ec);
         }
     } catch (const std::exception& e) {
         logger().error("Failed to save settings: " + std::string(e.what()));
+        std::error_code ec;
+        std::filesystem::remove(tmpPath, ec);
     }
 }
 
