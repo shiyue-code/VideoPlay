@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -214,7 +215,9 @@ void VideoPlayerApp::takeScreenshot() {
 
     if (saveFramePng(shot, savePath)) {
         logger().info("Screenshot saved: " + savePath);
-        m_renderer->showMessageBox("截图已保存", "截图已保存到:\n" + savePath, false);
+        // 轻提示走 OSD；日志仍记录完整路径
+        std::string filename = std::filesystem::path(savePath).filename().u8string();
+        m_renderer->showOSD(OSDType::Info, "截图已保存：" + filename);
     } else {
         logger().error("Failed to save screenshot");
         m_renderer->showMessageBox("截图失败", "无法保存截图", true);

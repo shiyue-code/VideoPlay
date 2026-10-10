@@ -4,7 +4,6 @@
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "renderer/windowframe.h"
-#include "renderer/custommessagebox.h"
 
 #include <SDL3/SDL.h>
 #ifdef HAS_SDL_TTF
@@ -494,10 +493,16 @@ void SDLRenderer::openFileDialog(std::function<void(const std::string&)> callbac
     m_dialogManager->openFileDialog(std::move(callback), filters);
 }
 
+// 消息型弹窗统一走窗口内信息面板（模态，不再弹独立窗口）
 void SDLRenderer::showMessageBox(const std::string& title, const std::string& message,
                                  bool isError,
                                  std::function<void(int64_t timestampMs)> timestampCallback) {
-    m_dialogManager->showMessageBox(title, message, isError, std::move(timestampCallback));
+    InfoPanelContent content;
+    content.title = title;
+    content.body = message;
+    content.isError = isError;
+    content.timestampCallback = std::move(timestampCallback);
+    showInfoPanel(std::move(content));
 }
 
 void SDLRenderer::showInputDialog(const std::string& title, const std::string& placeholder,
@@ -784,21 +789,42 @@ void SDLRenderer::addChatMessage(bool isUser, const std::string& text) {
 }
 
 void SDLRenderer::toggleMediaInfoPanel() {
+    // 消息面板显示期间 Tab 不切换
+    if (m_infoPanel == InfoPanelKind::Custom) {
+        return;
+    }
     if (m_infoPanel == InfoPanelKind::MediaInfo) {
         m_infoPanel = InfoPanelKind::None;
         showOSD("关闭媒体信息");
     } else {
         m_infoPanel = InfoPanelKind::MediaInfo;
+        m_infoPanelScroll = 0;
         showOSD("媒体信息");
     }
 }
 
-void SDLRenderer::showAboutPanel(InfoPanelContent content) {
-    m_aboutContent = std::move(content);
-    m_infoPanel = InfoPanelKind::About;
+void SDLRenderer::showInfoPanel(InfoPanelContent content) {
+    // Custom 面板显示期间新消息排队，关闭后依次显示
+    if (m_infoPanel == InfoPanelKind::Custom) {
+        if (m_infoPanelQueue.size() >= 8) {
+            m_infoPanelQueue.pop_front();
+            logger().warning("信息面板队列已满，丢弃最早的一条消息");
+        }
+        m_infoPanelQueue.push_back(std::move(content));
+        return;
+    }
+    m_customContent = std::move(content);
+    m_infoPanel = InfoPanelKind::Custom;
+    m_infoPanelScroll = 0;
 }
 
 void SDLRenderer::closeInfoPanel() {
+    if (m_infoPanel == InfoPanelKind::Custom && !m_infoPanelQueue.empty()) {
+        m_customContent = std::move(m_infoPanelQueue.front());
+        m_infoPanelQueue.pop_front();
+        m_infoPanelScroll = 0;
+        return;
+    }
     m_infoPanel = InfoPanelKind::None;
 }
 

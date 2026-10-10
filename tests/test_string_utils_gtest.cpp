@@ -43,3 +43,50 @@ TEST(StringUtils, ParseHexColorRejectsInvalid)
     EXPECT_FALSE(parseHexColor("#12 456", r, g, b));   // 含空格
     EXPECT_FALSE(parseHexColor("0xFF8040", r, g, b));  // 0x 前缀不支持
 }
+
+TEST(StringUtils, SplitTimestampTokensPlainText)
+{
+    auto tokens = splitTimestampTokens("没有标记的一行");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].text, "没有标记的一行");
+    EXPECT_FALSE(tokens[0].isTimestamp);
+}
+
+TEST(StringUtils, SplitTimestampTokensSingle)
+{
+    auto tokens = splitTimestampTokens("[01:23] 介绍开始");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_TRUE(tokens[0].isTimestamp);
+    EXPECT_EQ(tokens[0].text, "[01:23]");
+    EXPECT_EQ(tokens[0].ms, 83000);
+    EXPECT_EQ(tokens[1].text, " 介绍开始");
+    EXPECT_FALSE(tokens[1].isTimestamp);
+}
+
+TEST(StringUtils, SplitTimestampTokensMultiple)
+{
+    auto tokens = splitTimestampTokens("[00:05] 开场，中间 [1:02:03] 又一段");
+    ASSERT_EQ(tokens.size(), 4u);
+    EXPECT_TRUE(tokens[0].isTimestamp);
+    EXPECT_EQ(tokens[0].ms, 5000);
+    EXPECT_EQ(tokens[1].text, " 开场，中间 ");
+    EXPECT_TRUE(tokens[2].isTimestamp);
+    EXPECT_EQ(tokens[2].ms, 3723000);
+    EXPECT_EQ(tokens[3].text, " 又一段");
+}
+
+TEST(StringUtils, SplitTimestampTokensNonTimestampStaysPlain)
+{
+    auto tokens = splitTimestampTokens("[abc] 普通文本");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].text, "[abc] 普通文本");
+    EXPECT_FALSE(tokens[0].isTimestamp);
+}
+
+TEST(StringUtils, SplitTimestampTokensUnclosedBracket)
+{
+    auto tokens = splitTimestampTokens("前面 [12:34");
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].text, "前面 [12:34");
+    EXPECT_FALSE(tokens[0].isTimestamp);
+}

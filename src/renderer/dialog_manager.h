@@ -1,6 +1,5 @@
 #pragma once
 
-#include "renderer/custommessagebox.h"
 #include "renderer/inputdialog.h"
 
 #include <cstdint>
@@ -19,9 +18,6 @@ public:
     explicit DialogManager(SDLRenderer* renderer);
     ~DialogManager();
 
-    void showMessageBox(const std::string& title, const std::string& message,
-                        bool isError = false,
-                        std::function<void(int64_t timestampMs)> timestampCallback = nullptr);
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
     void openSubtitleDialog(std::function<void(const std::string&)> callback);
     void openFolderDialog(std::function<void(const std::string&)> callback);
@@ -32,7 +28,6 @@ public:
 private:
     SDLRenderer* m_sdlRenderer = nullptr;
 
-    std::unique_ptr<CustomMessageBox> m_messageBox;
     std::unique_ptr<InputDialog> m_inputDialog;
     std::mutex m_dialogMutex;
     std::string m_pendingDialogResult;

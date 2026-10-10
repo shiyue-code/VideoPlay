@@ -147,7 +147,6 @@ set(SOURCES
     src/renderer/ui_draw.cpp
     src/renderer/dialog_manager.cpp
     src/renderer/windowframe.cpp
-    src/renderer/custommessagebox.cpp
     src/renderer/inputfield.cpp
     src/renderer/inputdialog.cpp
     src/renderer/modaldialog.cpp
@@ -193,7 +192,6 @@ set(HEADERS
     src/renderer/ui_draw.h
     src/renderer/dialog_manager.h
     src/renderer/windowframe.h
-    src/renderer/custommessagebox.h
     src/renderer/inputfield.h
     src/renderer/inputdialog.h
     src/renderer/modaldialog.h

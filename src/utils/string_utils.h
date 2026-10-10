@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace VideoPlay {
 
@@ -79,6 +80,54 @@ inline bool parseBracketTimestampMs(const std::string& text, int64_t& timestampM
         return true;
     }
     return false;
+}
+
+// 一行文本拆分出的片段：普通文本或 "[mm:ss]" 时间戳
+struct TimestampToken {
+    std::string text;
+    bool isTimestamp = false;
+    int64_t ms = 0;
+    int width = 0;  // 渲染侧填充的像素宽度（折行时测得）
+};
+
+// 把一行文本拆成普通片段与 [mm:ss]/[hh:mm:ss] 时间戳片段；
+// 解析失败的 "[...]" 与未闭合的 "[" 都保留为普通文本
+inline std::vector<TimestampToken> splitTimestampTokens(const std::string& line) {
+    std::vector<TimestampToken> tokens;
+    std::string pending;
+    auto flushPending = [&]() {
+        if (!pending.empty()) {
+            tokens.push_back({std::move(pending), false, 0});
+            pending.clear();
+        }
+    };
+
+    size_t pos = 0;
+    while (pos < line.size()) {
+        size_t start = line.find('[', pos);
+        if (start == std::string::npos) {
+            pending += line.substr(pos);
+            break;
+        }
+        pending += line.substr(pos, start - pos);
+        size_t end = line.find(']', start + 1);
+        if (end == std::string::npos) {
+            pending += line.substr(start);
+            break;
+        }
+        int64_t ms = 0;
+        if (parseBracketTimestampMs(line.substr(start, end - start + 1), ms)) {
+            flushPending();
+            tokens.push_back({line.substr(start, end - start + 1), true, ms});
+            pos = end + 1;
+        } else {
+            // "[" 当作普通字符，继续找下一个可能的 "["
+            pending += line[start];
+            pos = start + 1;
+        }
+    }
+    flushPending();
+    return tokens;
 }
 
 // 解析 "mm:ss" / "hh:mm:ss"（容忍首尾非数字字符与 '*' 标记）

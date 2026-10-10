@@ -7,11 +7,13 @@
 #include "renderer/menu_manager.h"
 #include "renderer/ui_manager.h"
 #include "renderer/dialog_manager.h"
+#include "utils/string_utils.h"
 
 #include <string>
 #include <functional>
 #include <memory>
 #include <vector>
+#include <deque>
 #include <mutex>
 #include <map>
 #include <unordered_map>
@@ -275,7 +277,8 @@ enum class ControlType {
     VideoPanelSaturationBar,
     VideoPanelReset,
     VideoPanelHdrToggle,
-    InfoPanelClose
+    InfoPanelClose,
+    InfoPanelLink
 };
 
 // 无边框窗口 resize 模式
@@ -297,17 +300,25 @@ struct ChatMessage {
     std::string text;
 };
 
-// 信息面板种类：媒体信息与「关于」共用同一渲染，互斥显示
+// 信息面板种类：媒体信息与自定义消息面板共用同一渲染，互斥显示
 enum class InfoPanelKind {
     None,
     MediaInfo,
-    About
+    Custom
 };
 
-// 信息面板内容：标题 + 标签/值行（标签为空表示上一行的续行）
+// 信息面板内容：
+// - rows 模式：标签/值行；标签为空表示上一行的续行；
+//   标签非空而值为空表示小节标题（13px 白字，占整行宽）
+// - rows 为空时显示 body 正文：'\n' 分行、空行作段落间距、按面板宽度折行
 struct InfoPanelContent {
     std::string title;
     std::vector<std::pair<std::string, std::string>> rows;
+    std::string body;
+    bool isError = false;  // 标题左侧画红点
+    // body 中的 [mm:ss] / [hh:mm:ss] 高亮可点击，回调参数为毫秒；
+    // 点击后先回调再关闭面板
+    std::function<void(int64_t timestampMs)> timestampCallback;
 };
 
 class SDLRenderer {
@@ -388,7 +399,8 @@ public:
     void toggleSearchPanel();
     void addChatMessage(bool isUser, const std::string& text);
     void toggleMediaInfoPanel();
-    void showAboutPanel(InfoPanelContent content);
+    // 仅主线程调用（直接读写渲染状态，无锁）
+    void showInfoPanel(InfoPanelContent content);
     void closeInfoPanel();
     void setMediaInfo(const MediaInfo& info);
     void showOSD(const std::string& text);
@@ -521,9 +533,11 @@ private:
     void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
     void renderTooltip();
     void renderOSD();
-    void renderInfoPanel(const std::string& title,
-                         const std::vector<std::pair<std::string, std::string>>& rows);
+    void renderInfoPanel(const InfoPanelContent& content);
     std::vector<std::pair<std::string, std::string>> buildMediaInfoRows() const;
+    // body 折行缓存：按 UTF-8 字符折行，[mm:ss] 时间戳整体不拆
+    std::vector<std::vector<TimestampToken>> wrapInfoPanelBody(const std::string& body,
+                                                               int maxWidth, int fontSize);
     // 面板右上角「×」按钮：悬停/按下半透明底色 + 交叉线，热区注册进 m_controlRects
     void drawPanelCloseButton(int x, int y, int size, ControlType type, bool hovered,
                               int radius, int inset, int hoverAlpha,
@@ -630,7 +644,17 @@ private:
     bool m_showEpisodePanel = false;
     bool m_showSearchPanel = false;
     InfoPanelKind m_infoPanel = InfoPanelKind::None;
-    InfoPanelContent m_aboutContent;
+    InfoPanelContent m_customContent;
+    // Custom 面板显示期间新到的消息排队，关闭当前后依次显示（上限 8，丢弃最旧）
+    std::deque<InfoPanelContent> m_infoPanelQueue;
+    int m_infoPanelScroll = 0;
+    int m_infoPanelScrollMax = 0;
+    // 当前面板正文中可点击时间戳（InfoPanelLink 的 value 为下标）
+    std::vector<int64_t> m_infoPanelLinks;
+    // body 折行缓存：内容或宽度变化时重算（getTextWidth 无缓存，不能每帧折行）
+    std::vector<std::vector<TimestampToken>> m_infoPanelBodyLines;
+    std::string m_infoPanelWrapBody;
+    int m_infoPanelWrapWidth = -1;
     int m_playlistScrollOffset = 0;
     bool m_playlistDragging = false;
     int m_playlistDragFrom = -1;

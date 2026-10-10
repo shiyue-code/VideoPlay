@@ -1,6 +1,7 @@
 #include "renderer/sdlrenderer.h"
 #include "renderer/sdlrenderer_internal.h"
 #include "renderer/ui_style.h"
+#include "renderer/textutils.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
 #include <SDL3/SDL.h>
@@ -188,9 +189,12 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
     renderAIAnalysisOverlay();
 
     if (m_infoPanel == InfoPanelKind::MediaInfo) {
-        renderInfoPanel("媒体信息", buildMediaInfoRows());
-    } else if (m_infoPanel == InfoPanelKind::About) {
-        renderInfoPanel(m_aboutContent.title, m_aboutContent.rows);
+        InfoPanelContent mediaInfo;
+        mediaInfo.title = "媒体信息";
+        mediaInfo.rows = buildMediaInfoRows();
+        renderInfoPanel(mediaInfo);
+    } else if (m_infoPanel == InfoPanelKind::Custom) {
+        renderInfoPanel(m_customContent);
     }
 
     if (m_showVideoControlPanel) {
@@ -1054,23 +1058,121 @@ std::vector<std::pair<std::string, std::string>> SDLRenderer::buildMediaInfoRows
     return rows;
 }
 
-void SDLRenderer::renderInfoPanel(const std::string& title,
-                                  const std::vector<std::pair<std::string, std::string>>& rows) {
+// body 折行：'\n' 为逻辑行边界（空行保留作段落间距），再按像素宽度逐字符折行；
+// [mm:ss] / [hh:mm:ss] 时间戳片段作为整体不拆。token 的 width 在此测好，渲染不再测
+std::vector<std::vector<TimestampToken>> SDLRenderer::wrapInfoPanelBody(
+        const std::string& body, int maxWidth, int fontSize) {
+    std::vector<std::vector<TimestampToken>> lines;
+    std::vector<TimestampToken> cur;
+    int curW = 0;
+    auto pushLine = [&]() {
+        lines.push_back(std::move(cur));
+        cur.clear();
+        curW = 0;
+    };
+    auto pushToken = [&](TimestampToken tok) {
+        if (tok.isTimestamp) {
+            tok.width = getTextWidth(tok.text, fontSize);
+            if (curW + tok.width > maxWidth && !cur.empty()) {
+                pushLine();
+            }
+            curW += tok.width;
+            cur.push_back(std::move(tok));
+            return;
+        }
+        // 普通文本按 UTF-8 字符逐个塞入
+        std::string buf;
+        int bufW = 0;
+        for (size_t i = 0; i < tok.text.size();) {
+            size_t len = TextRender::utf8CharLength(tok.text, i);
+            std::string ch = tok.text.substr(i, len);
+            i += len;
+            int chW = getTextWidth(ch, fontSize);
+            if (curW + bufW + chW > maxWidth && (!cur.empty() || !buf.empty())) {
+                if (!buf.empty()) {
+                    cur.push_back({buf, false, 0, bufW});
+                    buf.clear();
+                }
+                pushLine();
+                bufW = 0;
+            }
+            buf += ch;
+            bufW += chW;
+        }
+        if (!buf.empty()) {
+            cur.push_back({buf, false, 0, bufW});
+            curW += bufW;
+        }
+    };
+
+    size_t start = 0;
+    while (start <= body.size()) {
+        size_t nl = body.find('\n', start);
+        std::string logical = (nl == std::string::npos)
+                                  ? body.substr(start)
+                                  : body.substr(start, nl - start);
+        start = (nl == std::string::npos) ? body.size() + 1 : nl + 1;
+        for (auto& tok : splitTimestampTokens(logical)) {
+            pushToken(std::move(tok));
+        }
+        pushLine();
+    }
+    return lines;
+}
+
+void SDLRenderer::renderInfoPanel(const InfoPanelContent& content) {
     fillRect(0, 0, m_windowWidth, m_windowHeight, 0, 0, 0, 95);
 
     int panelW = std::min(560, std::max(320, m_windowWidth - 80));
     int panelX = (m_windowWidth - panelW) / 2;
     int panelY = std::max(m_menuBarHeight + 30, (m_windowHeight - 360) / 2);
-    int radius = UiStyle::kPanelRadius;
-
+    const int radius = UiStyle::kPanelRadius;
+    const int padding = UiStyle::kPanelPadding;
     const int titleFont = UiStyle::kTitleFontSize;
     const int rowFont = UiStyle::kRowFontSize;
-    const int padding = UiStyle::kPanelPadding;
     const int rowH = UiStyle::kRowHeight;
-    int panelH = padding * 2 + getFontHeight(titleFont) + 14 +
-                 static_cast<int>(rows.size()) * rowH;
-    if (panelY + panelH > m_windowHeight - 24) {
-        panelY = std::max(m_menuBarHeight + 12, m_windowHeight - panelH - 24);
+    const int titleH = getFontHeight(titleFont);
+    const int contentTopOff = padding + titleH + 14;  // 面板顶部到内容区的偏移
+    const int bodyLineH = getFontHeight(rowFont) + 6;
+
+    m_infoPanelLinks.clear();
+
+    const bool rowMode = !content.rows.empty();
+    const int contentW = panelW - padding * 2;
+
+    // 内容高度与标签列宽（小节标题不占标签列）
+    int labelW = 78;
+    int contentH = 0;
+    if (rowMode) {
+        int maxLabelW = 0;
+        bool first = true;
+        for (const auto& row : content.rows) {
+            bool isHeader = !row.first.empty() && row.second.empty();
+            if (!isHeader && !row.first.empty()) {
+                maxLabelW = std::max(maxLabelW, getTextWidth(row.first, rowFont));
+            }
+            if (isHeader && !first) {
+                contentH += 10;
+            }
+            first = false;
+            contentH += rowH;
+        }
+        labelW = std::clamp(maxLabelW + 18, 78, panelW * 45 / 100);
+    } else {
+        if (m_infoPanelWrapWidth != contentW || m_infoPanelWrapBody != content.body) {
+            m_infoPanelBodyLines = wrapInfoPanelBody(content.body, contentW, rowFont);
+            m_infoPanelWrapBody = content.body;
+            m_infoPanelWrapWidth = contentW;
+        }
+        contentH = static_cast<int>(m_infoPanelBodyLines.size()) * bodyLineH;
+    }
+
+    // 内容超出可视高度（窗口高 - 菜单栏 - 上下边距）时截高并让内容区滚动
+    const int bottomMargin = 24;
+    int maxPanelH = m_windowHeight - m_menuBarHeight - 30 - bottomMargin;
+    int panelH = std::min(padding + contentTopOff + contentH, std::max(maxPanelH, 120));
+    if (panelY + panelH > m_windowHeight - bottomMargin) {
+        panelY = std::max(m_menuBarHeight + 12, m_windowHeight - panelH - bottomMargin);
     }
 
     fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius,
@@ -1085,43 +1187,110 @@ void SDLRenderer::renderInfoPanel(const std::string& title,
 
     m_infoPanelRect = {panelX, panelY, panelW, panelH, ControlType::None, 0};
 
-    drawText(title, panelX + padding, panelY + padding,
+    // 标题：错误面板左侧加红点
+    int titleX = panelX + padding;
+    if (content.isError) {
+        fillCircle(titleX + 4, panelY + padding + titleH / 2, 4, 230, 70, 70, 255);
+        titleX += 18;
+    }
+    drawText(content.title, titleX, panelY + padding,
              UiStyle::kTitleColor[0], UiStyle::kTitleColor[1],
              UiStyle::kTitleColor[2], titleFont);
 
     // 右上角关闭按钮，与标题垂直居中对齐
     int closeSize = UiStyle::kCloseSize;
     int closeX = panelX + panelW - closeSize - 16;
-    int closeY = panelY + padding + (getFontHeight(titleFont) - closeSize) / 2;
+    int closeY = panelY + padding + (titleH - closeSize) / 2;
     drawPanelCloseButton(closeX, closeY, closeSize, ControlType::InfoPanelClose,
                          m_hoveredControl == ControlType::InfoPanelClose,
                          UiStyle::kCloseRadius, UiStyle::kCloseInset,
                          UiStyle::kCloseHoverAlpha, UiStyle::kCloseLineShade,
                          UiStyle::kCloseLineAlpha);
 
-    int y = panelY + padding + getFontHeight(titleFont) + 14;
-    int labelW = 78;
-    int valueX = panelX + padding + labelW + 18;
-    int valueMaxW = panelW - padding * 2 - labelW - 18;
-    for (const auto& row : rows) {
-        drawText(row.first, panelX + padding, y,
-                 UiStyle::kLabelColor[0], UiStyle::kLabelColor[1],
-                 UiStyle::kLabelColor[2], rowFont);
+    // 内容区：标题与 × 不滚动，行/正文随滚动偏移裁剪
+    const int contentY = panelY + contentTopOff;
+    const int viewportH = panelY + panelH - padding - contentY;
+    m_infoPanelScrollMax = std::max(0, contentH - viewportH);
+    m_infoPanelScroll = std::clamp(m_infoPanelScroll, 0, m_infoPanelScrollMax);
 
-        std::string value = row.second;
-        int valueW = getTextWidth(value, rowFont);
-        if (valueW > valueMaxW) {
-            const std::string ellipsis = "...";
-            while (!value.empty() &&
-                   getTextWidth(value + ellipsis, rowFont) > valueMaxW) {
-                value.pop_back();
+    SDL_Rect clipRect = {panelX, contentY, panelW, viewportH};
+    SDL_SetRenderClipRect(m_renderer, &clipRect);
+
+    int y = contentY - m_infoPanelScroll;
+    if (rowMode) {
+        int valueX = panelX + padding + labelW + 18;
+        int valueMaxW = panelW - padding * 2 - labelW - 18;
+        bool first = true;
+        for (const auto& row : content.rows) {
+            bool isHeader = !row.first.empty() && row.second.empty();
+            if (isHeader) {
+                if (!first) {
+                    y += 10;
+                }
+                drawText(row.first, panelX + padding, y, 255, 255, 255, 13);
+            } else {
+                drawText(row.first, panelX + padding, y,
+                         UiStyle::kLabelColor[0], UiStyle::kLabelColor[1],
+                         UiStyle::kLabelColor[2], rowFont);
+
+                std::string value = row.second;
+                int valueW = getTextWidth(value, rowFont);
+                if (valueW > valueMaxW) {
+                    const std::string ellipsis = "...";
+                    while (!value.empty() &&
+                           getTextWidth(value + ellipsis, rowFont) > valueMaxW) {
+                        value.pop_back();
+                    }
+                    value += ellipsis;
+                }
+                drawText(value, valueX, y,
+                         UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                         UiStyle::kValueColor[2], rowFont);
             }
-            value += ellipsis;
+            first = false;
+            y += rowH;
         }
-        drawText(value, valueX, y,
-                 UiStyle::kValueColor[0], UiStyle::kValueColor[1],
-                 UiStyle::kValueColor[2], rowFont);
-        y += rowH;
+    } else {
+        for (const auto& line : m_infoPanelBodyLines) {
+            int x = panelX + padding;
+            for (const auto& tok : line) {
+                bool isLink = tok.isTimestamp && content.timestampCallback != nullptr;
+                if (isLink) {
+                    int linkIdx = static_cast<int>(m_infoPanelLinks.size());
+                    m_infoPanelLinks.push_back(tok.ms);
+                    drawText(tok.text, x, y, 0, 170, 255, rowFont);
+                    // 命中区域只在可视范围内注册（裁剪到可视边界，防止点到遮住的半行）
+                    if (y + bodyLineH > contentY && y < contentY + viewportH) {
+                        int ry = std::max(y, contentY);
+                        int rh = std::min(y + bodyLineH, contentY + viewportH) - ry;
+                        m_controlRects.push_back(
+                            {x, ry, tok.width, rh, ControlType::InfoPanelLink, linkIdx});
+                    }
+                    if (m_hoveredControl == ControlType::InfoPanelLink &&
+                        m_hoveredControlValue == linkIdx) {
+                        fillRect(x, y + bodyLineH - 4, tok.width, 1, 0, 170, 255, 255);
+                    }
+                } else {
+                    drawText(tok.text, x, y,
+                             UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                             UiStyle::kValueColor[2], rowFont);
+                }
+                x += tok.width;
+            }
+            y += bodyLineH;
+        }
+    }
+
+    SDL_SetRenderClipRect(m_renderer, nullptr);
+
+    // 右侧细滚动条（可滚动时显示）
+    if (m_infoPanelScrollMax > 0) {
+        int trackX = panelX + panelW - 12;
+        fillRoundRect(trackX, contentY, 4, viewportH, 2, 255, 255, 255, 30);
+        int thumbH = std::max(20, viewportH * viewportH / std::max(1, contentH));
+        int thumbY = contentY +
+                     (viewportH - thumbH) * m_infoPanelScroll / m_infoPanelScrollMax;
+        fillRoundRect(trackX, thumbY, 4, thumbH, 2, 255, 255, 255, 90);
     }
 }
 

@@ -485,55 +485,75 @@ void VideoPlayerApp::loadSubtitleFile(const std::string& path) {
 }
 
 void VideoPlayerApp::showHelp() {
-    const char* helpText = 
-        "快捷键列表：\n\n"
-        "空格          - 播放/暂停\n"
-        "S             - 停止\n"
-        "← / →         - 后退/前进 5秒\n"
-        "Shift+← / Shift+→ - 后退/前进 30秒\n"
-        "↑ / ↓         - 音量增加/减少\n"
-        "M             - 静音切换\n"
-        ".             - 切换播放速度\n"
-        "F             - 全屏切换\n"
-        "N             - 下一个（优先下一集）\n"
-        "P             - 上一个（优先上一集）\n"
-        "Ctrl+Shift+Right - 下一集\n"
-        "Ctrl+Shift+Left  - 上一集\n"
-        "L             - 循环模式切换\n"
-        "A             - 画面比例切换\n"
-        "T             - 窗口置顶\n"
-        "G / H         - 字幕提前/延后 0.5秒\n"
-        "Shift+G / Shift+H - 音频提前/延后 0.5秒\n"
-        "[             - AB循环: 设置A点\n"
-        "]             - AB循环: 设置B点\n"
-        "\\             - AB循环: 清除\n"
-        "Ctrl+B        - 添加书签\n"
-        "Shift+B       - 清除书签\n"
-        "播放菜单      - 切换音频滤镜预设\n"
-        "播放菜单      - 切换硬件解码\n"
-        "C / F6        - 画面调节面板\n"
-        "Ctrl+↑ / Ctrl+↓ - 亮度 +/- 5%\n"
-        "Ctrl+Shift+↑ / Ctrl+Shift+↓ - 对比度 +/- 10%\n"
-        "Ctrl+0        - 重置画面参数\n"
-        "Tab           - 媒体信息\n"
-        "F12           - 截图\n"
-        "Ctrl+E        - 切换选集面板\n"
-        "Ctrl+L        - 切换播放列表\n"
-        "Ctrl+F        - 搜索内容\n"
-        "Ctrl+O        - 打开文件\n"
-        "Ctrl+U        - 打开 URL\n"
-        "Delete        - 删除选中的播放列表项\n"
-        "F1            - 显示帮助\n"
-        "Esc           - 退出全屏/关闭菜单\n\n"
-        "鼠标操作：\n"
-        "左键点击控制栏按钮\n"
-        "拖动进度条跳转\n"
-        "滚轮调节音量\n"
-        "拖放文件到窗口播放";
-    
-    if (m_renderer) {
-        m_renderer->showMessageBox("帮助", helpText, false);
-    }
+    if (!m_renderer) return;
+
+    // 行模式：{标签, 说明}；标签非空且值为空的行是小节标题
+    InfoPanelContent content;
+    content.title = "帮助";
+    auto section = [&content](const char* name) {
+        content.rows.push_back({name, ""});
+    };
+    auto row = [&content](const char* key, const char* desc) {
+        content.rows.push_back({key, desc});
+    };
+
+    section("播放控制");
+    row("空格", "播放/暂停");
+    row("S", "停止");
+    row("← / →", "后退/前进 5秒");
+    row("Shift+← / Shift+→", "后退/前进 30秒");
+    row(".", "切换播放速度");
+    row("F", "全屏切换");
+    row("N", "下一个（优先下一集）");
+    row("P", "上一个（优先上一集）");
+    row("L", "循环模式切换");
+    row("[", "AB循环: 设置A点");
+    row("]", "AB循环: 设置B点");
+    row("\\", "AB循环: 清除");
+    row("Ctrl+B", "添加书签");
+    row("Shift+B", "清除书签");
+
+    section("音量与音频");
+    row("↑ / ↓", "音量增加/减少");
+    row("M", "静音切换");
+    row("Shift+G / Shift+H", "音频提前/延后 0.5秒");
+    row("播放菜单", "切换音频滤镜预设");
+
+    section("画面");
+    row("A", "画面比例切换");
+    row("播放菜单", "切换硬件解码");
+    row("C / F6", "画面调节面板");
+    row("Ctrl+↑ / Ctrl+↓", "亮度 +/- 5%");
+    row("Ctrl+Shift+↑ / Ctrl+Shift+↓", "对比度 +/- 10%");
+    row("Ctrl+0", "重置画面参数");
+
+    section("字幕");
+    row("G / H", "字幕提前/延后 0.5秒");
+
+    section("列表与剧集");
+    row("Ctrl+Shift+Right", "下一集");
+    row("Ctrl+Shift+Left", "上一集");
+    row("Ctrl+E", "切换选集面板");
+    row("Ctrl+L", "切换播放列表");
+    row("Delete", "删除选中的播放列表项");
+
+    section("其它");
+    row("T", "窗口置顶");
+    row("Tab", "媒体信息");
+    row("F12", "截图");
+    row("Ctrl+F", "搜索内容");
+    row("Ctrl+O", "打开文件");
+    row("Ctrl+U", "打开 URL");
+    row("F1", "显示帮助");
+    row("Esc", "退出全屏/关闭菜单");
+
+    section("鼠标操作");
+    row("左键", "点击控制栏按钮");
+    row("拖动", "进度条跳转");
+    row("滚轮", "调节音量");
+    row("拖放", "拖放文件到窗口播放");
+
+    m_renderer->showInfoPanel(std::move(content));
 }
 
 void VideoPlayerApp::showAbout() {
@@ -560,13 +580,13 @@ void VideoPlayerApp::showAbout() {
     content.rows.push_back({"", "AI 视频摘要、章节划分与内容搜索"});
     content.rows.push_back({"许可证", "GPLv3"});
 
-    m_renderer->showAboutPanel(std::move(content));
+    m_renderer->showInfoPanel(std::move(content));
 }
 
 void VideoPlayerApp::startAIAnalysis() {
     if (m_currentFile.empty()) {
         if (m_renderer) {
-            m_renderer->showMessageBox("AI 分析", "请先打开一个视频文件", false);
+            m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
         }
         return;
     }
@@ -649,7 +669,7 @@ void VideoPlayerApp::startAIAnalysis() {
 void VideoPlayerApp::showAISummary() {
     if (m_currentFile.empty()) {
         if (m_renderer) {
-            m_renderer->showMessageBox("AI 摘要", "请先打开一个视频文件", false);
+            m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
         }
         return;
     }
@@ -665,14 +685,14 @@ void VideoPlayerApp::showAISummary() {
 
     if (!m_aiResult.valid) {
         if (m_renderer) {
-            m_renderer->showMessageBox("AI 摘要", 
-                "当前视频尚未进行 AI 分析\n\n"
-                "请先执行 \"AI 分析当前视频\"", false);
+            m_renderer->showOSD(OSDType::Info,
+                "当前视频尚未进行 AI 分析，请先执行「AI 分析当前视频」");
         }
         return;
     }
 
-    std::string summaryText = "AI 摘要\n\n" + m_aiResult.summary + "\n\n自动生成的章节：\n";
+    // 面板标题已是「AI 摘要」，正文不再重复标题行
+    std::string summaryText = m_aiResult.summary + "\n\n自动生成的章节：\n";
     for (const auto& chapter : m_aiResult.chapters) {
         summaryText += "[" + formatTime(chapter.startTime) + "] " + chapter.title + "\n";
     }
@@ -693,7 +713,7 @@ void VideoPlayerApp::showAISummary() {
 void VideoPlayerApp::showSearchPanel() {
     if (m_currentFile.empty()) {
         if (m_renderer) {
-            m_renderer->showMessageBox("搜索", "请先打开一个视频文件", false);
+            m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
         }
         return;
     }
@@ -708,7 +728,7 @@ void VideoPlayerApp::showSearchPanel() {
 void VideoPlayerApp::clearAICache() {
     if (m_currentFile.empty()) {
         if (m_renderer) {
-            m_renderer->showMessageBox("清除缓存", "请先打开一个视频文件", false);
+            m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
         }
         return;
     }
@@ -720,7 +740,7 @@ void VideoPlayerApp::clearAICache() {
     }
 
     if (m_renderer) {
-        m_renderer->showMessageBox("清除缓存", "AI 缓存已清除", false);
+        m_renderer->showOSD(OSDType::Info, "AI 缓存已清除");
     }
     logger().info("[AI] Cache cleared for: " + m_currentFile);
 }

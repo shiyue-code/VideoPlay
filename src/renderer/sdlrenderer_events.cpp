@@ -264,6 +264,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         m_menuManager->closeAllMenus();
                         m_menuManager->hideContextMenu();
                         break;
+                    case SDLK_RETURN:
+                    case SDLK_KP_ENTER:
+                        if (m_infoPanel == InfoPanelKind::Custom) {
+                            closeInfoPanel();
+                        }
+                        break;
                     case SDLK_TAB:
                         toggleMediaInfoPanel();
                         break;
@@ -440,6 +446,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                 adjustBrightness(event.wheel.y > 0.0f ? 0.05f : -0.05f);
                 break;
             }
+            // 信息面板模态期间滚轮滚动面板内容，不变音量
+            if (m_infoPanel != InfoPanelKind::None) {
+                m_infoPanelScroll -= static_cast<int>(event.wheel.y * 40.0f);
+                m_infoPanelScroll = std::clamp(m_infoPanelScroll, 0, m_infoPanelScrollMax);
+                break;
+            }
             int mx = static_cast<int>(event.wheel.mouse_x);
             int my = static_cast<int>(event.wheel.mouse_y);
             bool overPlaylist = m_showPlaylistPanel && mx >= m_windowWidth - 284 && mx <= m_windowWidth - 24
@@ -470,14 +482,16 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     ControlType lastHovered = m_hoveredControl;
     m_hoveredControl = getControlAt(x, y, &m_hoveredControlValue);
 
-    // 信息面板模态：打开期间遮罩下方控件不可悬停，只保留关闭按钮
+    // 信息面板模态：打开期间遮罩下方控件不可悬停，只保留关闭按钮与正文时间戳链接
     if (m_infoPanel != InfoPanelKind::None) {
         m_hoveredControl = ControlType::None;
         for (const auto& rect : m_controlRects) {
-            if (rect.type == ControlType::InfoPanelClose &&
+            if ((rect.type == ControlType::InfoPanelClose ||
+                 rect.type == ControlType::InfoPanelLink) &&
                 x >= rect.x && x <= rect.x + rect.w &&
                 y >= rect.y && y <= rect.y + rect.h) {
-                m_hoveredControl = ControlType::InfoPanelClose;
+                m_hoveredControl = rect.type;
+                m_hoveredControlValue = rect.value;
                 break;
             }
         }
@@ -846,21 +860,31 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         return;
     }
 
-    // 信息面板模态：× 或面板外点击关闭面板；面板内点击只吞掉事件，
-    // 不透传给遮罩下的控制栏/进度条（m_pressedControl 置空避免松开时误触发）
+    // 信息面板模态：× 关闭；正文时间戳链接先回调再关闭；面板内点击只吞掉事件；
+    // 面板外点击关闭，不透传给遮罩下的控制栏/进度条（m_pressedControl 置空避免松开时误触发）
     if (m_infoPanel != InfoPanelKind::None) {
-        bool onClose = false;
         for (const auto& rect : m_controlRects) {
-            if (rect.type == ControlType::InfoPanelClose &&
-                x >= rect.x && x <= rect.x + rect.w &&
-                y >= rect.y && y <= rect.y + rect.h) {
-                onClose = true;
-                break;
+            if ((rect.type != ControlType::InfoPanelClose &&
+                 rect.type != ControlType::InfoPanelLink) ||
+                x < rect.x || x > rect.x + rect.w ||
+                y < rect.y || y > rect.y + rect.h) {
+                continue;
             }
+            if (rect.type == ControlType::InfoPanelClose) {
+                closeInfoPanel();
+            } else if (rect.value >= 0 && rect.value < static_cast<int>(m_infoPanelLinks.size()) &&
+                       m_infoPanel == InfoPanelKind::Custom &&
+                       m_customContent.timestampCallback) {
+                auto callback = m_customContent.timestampCallback;
+                callback(m_infoPanelLinks[rect.value]);
+                closeInfoPanel();
+            }
+            m_pressedControl = ControlType::None;
+            return;
         }
         bool inPanel = x >= m_infoPanelRect.x && x <= m_infoPanelRect.x + m_infoPanelRect.w &&
                        y >= m_infoPanelRect.y && y <= m_infoPanelRect.y + m_infoPanelRect.h;
-        if (onClose || !inPanel) {
+        if (!inPanel) {
             closeInfoPanel();
         }
         m_pressedControl = ControlType::None;

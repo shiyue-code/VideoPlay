@@ -10,18 +10,7 @@ namespace VideoPlay {
 DialogManager::DialogManager(SDLRenderer* renderer) : m_sdlRenderer(renderer) {
 }
 
-DialogManager::~DialogManager() {
-    m_messageBox.reset();
-}
-
-void DialogManager::showMessageBox(const std::string& title, const std::string& message,
-                                   bool isError,
-                                   std::function<void(int64_t timestampMs)> timestampCallback) {
-    if (!m_messageBox) {
-        m_messageBox = std::make_unique<CustomMessageBox>(m_sdlRenderer->getWindow(), m_sdlRenderer->getFont());
-    }
-    m_messageBox->show(title, message, isError, std::move(timestampCallback));
-}
+DialogManager::~DialogManager() = default;
 
 void DialogManager::showInputDialog(const std::string& title, const std::string& placeholder,
                                     std::function<void(const std::string&)> callback) {
