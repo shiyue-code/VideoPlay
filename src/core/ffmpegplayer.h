@@ -155,6 +155,14 @@ private:
     void initialize();
     void cleanup();
     void decodeLoop();
+    // decodeLoop 拆分出的子步骤（均只在解码线程调用）
+    bool waitForDecodeSlot();
+    bool handleReadFailure(int ret, int& consecutiveReadErrors);
+    void decodeVideoPacket(AVPacket* packet, AVFrame* frame, double dtRead);
+    void decodeAudioPacket(AVPacket* packet, AVFrame* frame, double dtRead);
+    void decodeSubtitlePacket(AVPacket* packet);
+    void receiveVideoFrames(AVFrame* frame, double dtRead);
+    void receiveAudioFrames(AVFrame* frame, double dtRead);
     bool initializeVideoContext();
     bool initializeAudioContext();
     VideoFrame convertVideoFrame(AVFrame* frame);
@@ -249,6 +257,10 @@ private:
     std::chrono::steady_clock::time_point m_preloadStartTime;
     
     std::atomic<int64_t> m_audioSyncOffsetMs{0};  // 音频同步偏移：正值=音频延后
+
+    // decodeLoop 的 PERF 帧计数（仅解码线程读写）
+    int m_vframeCount = 0;
+    int m_aframeCount = 0;
 
     // Video frame queue with PTS ordering
     std::deque<VideoFrame> m_videoFrameQueue;

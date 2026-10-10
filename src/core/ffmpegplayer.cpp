@@ -736,8 +736,8 @@ void FFmpegPlayer::decodeLoop() {
 
     auto reportStart = HRClock::now();
     int pktCount = 0;
-    int vframeCount = 0;
-    int aframeCount = 0;
+    m_vframeCount = 0;
+    m_aframeCount = 0;
     int consecutiveReadErrors = 0;
     // 暂停态下允许补解码的包数：seek 后让新位置的帧入队，随后回到暂停等待
     int pausedBurstPackets = 0;
@@ -789,13 +789,7 @@ void FFmpegPlayer::decodeLoop() {
         lock.unlock();
 
         // Pacing: don't decode too far ahead of playback time
-        {
-            std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
-            m_decodeCondition.wait(vqLock, [this] {
-                return m_abortRequest.load() || m_videoFrameQueue.size() < kMaxVideoQueueSize;
-            });
-            if (m_abortRequest.load()) break;
-        }
+        if (!waitForDecodeSlot()) break;
 
         pktCount++;
 
@@ -805,30 +799,7 @@ void FFmpegPlayer::decodeLoop() {
 
         if (ret < 0) {
             av_packet_unref(packet);
-            if (ret == AVERROR_EOF) {
-                std::lock_guard<std::mutex> l(m_mutex);
-                m_state = PlaybackState::Stopped;
-                if (m_stateCallback) {
-                    m_stateCallback(PlaybackState::Stopped);
-                }
-                if (m_audioPlayer) {
-                    m_audioPlayer->stop();
-                    m_audioPlayer->reset();
-                }
-                if (m_sourceType == SourceType::NetworkStream) {
-                    setNetworkState(NetworkState::Idle);
-                }
-                break;
-            }
-            if (m_sourceType == SourceType::NetworkStream) {
-                consecutiveReadErrors++;
-                if (consecutiveReadErrors == 1) {
-                    setNetworkState(NetworkState::Reconnecting);
-                } else if (consecutiveReadErrors > 200) {
-                    setNetworkState(NetworkState::Failed);
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
+            if (handleReadFailure(ret, consecutiveReadErrors)) break;
             continue;
         }
         if (m_sourceType == SourceType::NetworkStream) {
@@ -839,172 +810,18 @@ void FFmpegPlayer::decodeLoop() {
         }
 
         if (m_videoCtx.stream && packet->stream_index == m_videoCtx.stream->index && m_videoCtx.codecContext) {
-            // Decode all available video frames from this packet
-            ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
-            // Process any frames already buffered (EAGAIN case)
-            if (ret == AVERROR(EAGAIN)) {
-                while (avcodec_receive_frame(m_videoCtx.codecContext, vframe) >= 0) {
-                    auto t1 = HRClock::now();
-                    VideoFrame frame = convertVideoFrame(vframe);
-                    double dtConv = elapsedMs(t1);
-                    if (!frame.data.empty()) {
-                        int64_t pts = vframe->pts;
-                        if (pts == AV_NOPTS_VALUE) pts = vframe->best_effort_timestamp;
-                        if (pts != AV_NOPTS_VALUE) {
-                            int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
-                            frame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
-                        }
-                        auto t2 = HRClock::now();
-                        pushVideoFrame(std::move(frame));
-                        vframeCount++;
-                        double dtPush = elapsedMs(t2);
-                        if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            logger().debug("[PERF] video read=" + std::to_string(dtRead) +
-                                "ms convert=" + std::to_string(dtConv) +
-                                "ms push=" + std::to_string(dtPush) + "ms");
-                        }
-                    }
-                    av_frame_unref(vframe);
-                }
-                ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
-            }
-            if (ret >= 0) {
-                while (avcodec_receive_frame(m_videoCtx.codecContext, vframe) >= 0) {
-                    auto t1 = HRClock::now();
-                    VideoFrame frame = convertVideoFrame(vframe);
-                    double dtConv = elapsedMs(t1);
-                    if (!frame.data.empty()) {
-                        int64_t pts = vframe->pts;
-                        if (pts == AV_NOPTS_VALUE) pts = vframe->best_effort_timestamp;
-                        if (pts != AV_NOPTS_VALUE) {
-                            int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
-                            frame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
-                        }
-                        auto t2 = HRClock::now();
-                        pushVideoFrame(std::move(frame));
-                        vframeCount++;
-                        double dtPush = elapsedMs(t2);
-                        if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
-                            logger().debug("[PERF] video read=" + std::to_string(dtRead) +
-                                "ms convert=" + std::to_string(dtConv) +
-                                "ms push=" + std::to_string(dtPush) + "ms");
-                        }
-                    }
-                    av_frame_unref(vframe);
-                }
-            }
+            decodeVideoPacket(packet, vframe, dtRead);
         }
         else if (m_audioCtx.stream && packet->stream_index == m_audioCtx.stream->index && m_audioCtx.codecContext) {
-            // Audio backpressure: skip decoding if audio buffer is already full enough.
-            // This prevents unbounded audio buffer growth without blocking video decoding.
+            // 音频背压丢包：保持原有 continue 语义（跳过 pausedBurst 递减与 PERF 段）
             if (m_audioPlayer && m_audioPlayer->queuedMs() > kMaxAudioQueueMs) {
                 av_packet_unref(packet);
                 continue;
             }
-            // Decode all available audio frames from this packet
-            ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
-            if (ret == AVERROR(EAGAIN)) {
-                while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
-                    auto t3 = HRClock::now();
-                    auto audioData = processAudioFrame(aframe);
-                    double dtResample = elapsedMs(t3);
-                    if (!audioData.empty() && m_audioPlayer) {
-                        auto t4 = HRClock::now();
-                        m_audioPlayer->enqueue(audioData);
-                        aframeCount++;
-                        double dtEnqueue = elapsedMs(t4);
-                        if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
-                                "ms resample=" + std::to_string(dtResample) +
-                                "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
-                        }
-                    }
-                    av_frame_unref(aframe);
-                }
-                ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
-            }
-            if (ret >= 0) {
-                while (avcodec_receive_frame(m_audioCtx.codecContext, aframe) >= 0) {
-                    auto t3 = HRClock::now();
-                    auto audioData = processAudioFrame(aframe);
-                    double dtResample = elapsedMs(t3);
-                    if (!audioData.empty() && m_audioPlayer) {
-                        auto t4 = HRClock::now();
-                        m_audioPlayer->enqueue(audioData);
-                        aframeCount++;
-                        double dtEnqueue = elapsedMs(t4);
-                        if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
-                            logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
-                                "ms resample=" + std::to_string(dtResample) +
-                                "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
-                        }
-                    }
-                    av_frame_unref(aframe);
-                }
-            }
+            decodeAudioPacket(packet, aframe, dtRead);
         }
         else if (m_subtitleCtx.stream && packet->stream_index == m_subtitleCtx.stream->index && m_subtitleCtx.codecContext) {
-            // 解码内封字幕包（文本/ASS/PGS 等统一用 avcodec_decode_subtitle2）
-            AVSubtitle sub{};
-            int gotSub = 0;
-            if (avcodec_decode_subtitle2(m_subtitleCtx.codecContext, &sub, &gotSub, packet) >= 0 && gotSub) {
-                int64_t pktPts = packet->pts != AV_NOPTS_VALUE ? packet->pts : (packet->dts != AV_NOPTS_VALUE ? packet->dts : 0);
-                int64_t ptsMs = av_rescale_q(pktPts - m_subtitleCtx.startTime,
-                                             m_subtitleCtx.stream->time_base, {1, 1000});
-                // 文本字幕的显示区间：优先取解码器给出的 end_display_time，
-                // 其次用包 duration，都没有才退到 5 秒兜底
-                int64_t startMs = ptsMs + sub.start_display_time;
-                int64_t endMs;
-                if (sub.end_display_time > 0) {
-                    endMs = startMs + sub.end_display_time;
-                } else if (packet->duration > 0) {
-                    endMs = startMs + av_rescale_q(packet->duration,
-                                                   m_subtitleCtx.stream->time_base, {1, 1000});
-                } else {
-                    endMs = startMs + 5000;
-                }
-                for (unsigned i = 0; i < sub.num_rects; i++) {
-                    AVSubtitleRect* rect = sub.rects[i];
-                    if (!rect) continue;
-
-                    if (rect->type == SUBTITLE_BITMAP) {
-                        SubtitleBitmap bm;
-                        bm.x = rect->x;
-                        bm.y = rect->y;
-                        bm.width = rect->w;
-                        bm.height = rect->h;
-                        bm.startMs = ptsMs + sub.start_display_time;
-                        bm.endMs = bm.startMs + (sub.end_display_time > 0 ? sub.end_display_time : 5000);
-
-                        const uint8_t* src = rect->data[0];
-                        const int linesize = rect->linesize[0];
-                        const uint32_t* palette = reinterpret_cast<const uint32_t*>(rect->data[1]);
-
-                        if (src && bm.width > 0 && bm.height > 0) {
-                            bm.pixels.resize(static_cast<size_t>(bm.width) * bm.height);
-                            for (int y = 0; y < bm.height; y++) {
-                                for (int x = 0; x < bm.width; x++) {
-                                    uint8_t idx = src[y * linesize + x];
-                                    bm.pixels[y * bm.width + x] = palette ? palette[idx] : 0xFF000000;
-                                }
-                            }
-                            std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
-                            m_subtitleBitmapQueue.push_back(std::move(bm));
-                            if (m_subtitleBitmapQueue.size() > 10) {
-                                m_subtitleBitmapQueue.pop_front();
-                            }
-                        }
-                    } else if (rect->ass && m_subtitleTextCallback) {
-                        // ASS/SSA：rect->ass 是整行 Dialogue，需要提取 Text 并剥标签
-                        m_subtitleTextCallback(startMs, endMs,
-                            SubtitleParser::embeddedTextToPlain(rect->ass));
-                    } else if (rect->text && m_subtitleTextCallback) {
-                        m_subtitleTextCallback(startMs, endMs,
-                            SubtitleParser::removeFormatting(rect->text));
-                    }
-                }
-                avsubtitle_free(&sub);
-            }
+            decodeSubtitlePacket(packet);
         }
 
         av_packet_unref(packet);
@@ -1015,11 +832,11 @@ void FFmpegPlayer::decodeLoop() {
 
         if (elapsedMs(reportStart) >= 1000.0) {
             logger().debug("[PERF] decodeLoop pkt/s=" + std::to_string(pktCount) +
-                " vframe/s=" + std::to_string(vframeCount) +
-                " aframe/s=" + std::to_string(aframeCount));
+                " vframe/s=" + std::to_string(m_vframeCount) +
+                " aframe/s=" + std::to_string(m_aframeCount));
             pktCount = 0;
-            vframeCount = 0;
-            aframeCount = 0;
+            m_vframeCount = 0;
+            m_aframeCount = 0;
             reportStart = HRClock::now();
         }
     }
@@ -1030,6 +847,178 @@ void FFmpegPlayer::decodeLoop() {
     av_frame_free(&aframe);
 
     logger().debug("Decode thread stopped");
+}
+
+bool FFmpegPlayer::waitForDecodeSlot() {
+    std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
+    m_decodeCondition.wait(vqLock, [this] {
+        return m_abortRequest.load() || m_videoFrameQueue.size() < kMaxVideoQueueSize;
+    });
+    return !m_abortRequest.load();
+}
+
+// 读包失败/EOF/网络重连处理；返回 true 表示需要退出解码循环
+bool FFmpegPlayer::handleReadFailure(int ret, int& consecutiveReadErrors) {
+    if (ret == AVERROR_EOF) {
+        std::lock_guard<std::mutex> l(m_mutex);
+        m_state = PlaybackState::Stopped;
+        if (m_stateCallback) {
+            m_stateCallback(PlaybackState::Stopped);
+        }
+        if (m_audioPlayer) {
+            m_audioPlayer->stop();
+            m_audioPlayer->reset();
+        }
+        if (m_sourceType == SourceType::NetworkStream) {
+            setNetworkState(NetworkState::Idle);
+        }
+        return true;
+    }
+    if (m_sourceType == SourceType::NetworkStream) {
+        consecutiveReadErrors++;
+        if (consecutiveReadErrors == 1) {
+            setNetworkState(NetworkState::Reconnecting);
+        } else if (consecutiveReadErrors > 200) {
+            setNetworkState(NetworkState::Failed);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
+void FFmpegPlayer::receiveVideoFrames(AVFrame* frame, double dtRead) {
+    while (avcodec_receive_frame(m_videoCtx.codecContext, frame) >= 0) {
+        auto t1 = HRClock::now();
+        VideoFrame videoFrame = convertVideoFrame(frame);
+        double dtConv = elapsedMs(t1);
+        if (!videoFrame.data.empty()) {
+            int64_t pts = frame->pts;
+            if (pts == AV_NOPTS_VALUE) pts = frame->best_effort_timestamp;
+            if (pts != AV_NOPTS_VALUE) {
+                int64_t startTime = m_videoCtx.stream->start_time != AV_NOPTS_VALUE ? m_videoCtx.stream->start_time : 0;
+                videoFrame.pts = av_rescale_q(pts - startTime, m_videoCtx.stream->time_base, {1, 1000});
+            }
+            auto t2 = HRClock::now();
+            pushVideoFrame(std::move(videoFrame));
+            m_vframeCount++;
+            double dtPush = elapsedMs(t2);
+            if (dtConv > 5.0 || dtRead > 5.0 || dtPush > 1.0) {
+                logger().debug("[PERF] video read=" + std::to_string(dtRead) +
+                    "ms convert=" + std::to_string(dtConv) +
+                    "ms push=" + std::to_string(dtPush) + "ms");
+            }
+        }
+        av_frame_unref(frame);
+    }
+}
+
+void FFmpegPlayer::decodeVideoPacket(AVPacket* packet, AVFrame* frame, double dtRead) {
+    // Decode all available video frames from this packet
+    int ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
+    // Process any frames already buffered (EAGAIN case)
+    if (ret == AVERROR(EAGAIN)) {
+        receiveVideoFrames(frame, dtRead);
+        ret = avcodec_send_packet(m_videoCtx.codecContext, packet);
+    }
+    if (ret >= 0) {
+        receiveVideoFrames(frame, dtRead);
+    }
+}
+
+void FFmpegPlayer::receiveAudioFrames(AVFrame* frame, double dtRead) {
+    while (avcodec_receive_frame(m_audioCtx.codecContext, frame) >= 0) {
+        auto t3 = HRClock::now();
+        auto audioData = processAudioFrame(frame);
+        double dtResample = elapsedMs(t3);
+        if (!audioData.empty() && m_audioPlayer) {
+            auto t4 = HRClock::now();
+            m_audioPlayer->enqueue(audioData);
+            m_aframeCount++;
+            double dtEnqueue = elapsedMs(t4);
+            if (dtRead > 5.0 || dtResample > 5.0 || dtEnqueue > 1.0) {
+                logger().debug("[PERF] audio read=" + std::to_string(dtRead) +
+                    "ms resample=" + std::to_string(dtResample) +
+                    "ms enqueue=" + std::to_string(dtEnqueue) + "ms");
+            }
+        }
+        av_frame_unref(frame);
+    }
+}
+
+void FFmpegPlayer::decodeAudioPacket(AVPacket* packet, AVFrame* frame, double dtRead) {
+    // Decode all available audio frames from this packet
+    int ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
+    if (ret == AVERROR(EAGAIN)) {
+        receiveAudioFrames(frame, dtRead);
+        ret = avcodec_send_packet(m_audioCtx.codecContext, packet);
+    }
+    if (ret >= 0) {
+        receiveAudioFrames(frame, dtRead);
+    }
+}
+
+void FFmpegPlayer::decodeSubtitlePacket(AVPacket* packet) {
+    // 解码内封字幕包（文本/ASS/PGS 等统一用 avcodec_decode_subtitle2）
+    AVSubtitle sub{};
+    int gotSub = 0;
+    if (avcodec_decode_subtitle2(m_subtitleCtx.codecContext, &sub, &gotSub, packet) >= 0 && gotSub) {
+        int64_t pktPts = packet->pts != AV_NOPTS_VALUE ? packet->pts : (packet->dts != AV_NOPTS_VALUE ? packet->dts : 0);
+        int64_t ptsMs = av_rescale_q(pktPts - m_subtitleCtx.startTime,
+                                     m_subtitleCtx.stream->time_base, {1, 1000});
+        // 文本字幕的显示区间：优先取解码器给出的 end_display_time，
+        // 其次用包 duration，都没有才退到 5 秒兜底
+        int64_t startMs = ptsMs + sub.start_display_time;
+        int64_t endMs;
+        if (sub.end_display_time > 0) {
+            endMs = startMs + sub.end_display_time;
+        } else if (packet->duration > 0) {
+            endMs = startMs + av_rescale_q(packet->duration,
+                                           m_subtitleCtx.stream->time_base, {1, 1000});
+        } else {
+            endMs = startMs + 5000;
+        }
+        for (unsigned i = 0; i < sub.num_rects; i++) {
+            AVSubtitleRect* rect = sub.rects[i];
+            if (!rect) continue;
+
+            if (rect->type == SUBTITLE_BITMAP) {
+                SubtitleBitmap bm;
+                bm.x = rect->x;
+                bm.y = rect->y;
+                bm.width = rect->w;
+                bm.height = rect->h;
+                bm.startMs = ptsMs + sub.start_display_time;
+                bm.endMs = bm.startMs + (sub.end_display_time > 0 ? sub.end_display_time : 5000);
+
+                const uint8_t* src = rect->data[0];
+                const int linesize = rect->linesize[0];
+                const uint32_t* palette = reinterpret_cast<const uint32_t*>(rect->data[1]);
+
+                if (src && bm.width > 0 && bm.height > 0) {
+                    bm.pixels.resize(static_cast<size_t>(bm.width) * bm.height);
+                    for (int y = 0; y < bm.height; y++) {
+                        for (int x = 0; x < bm.width; x++) {
+                            uint8_t idx = src[y * linesize + x];
+                            bm.pixels[y * bm.width + x] = palette ? palette[idx] : 0xFF000000;
+                        }
+                    }
+                    std::lock_guard<std::mutex> lock(m_subtitleBitmapMutex);
+                    m_subtitleBitmapQueue.push_back(std::move(bm));
+                    if (m_subtitleBitmapQueue.size() > 10) {
+                        m_subtitleBitmapQueue.pop_front();
+                    }
+                }
+            } else if (rect->ass && m_subtitleTextCallback) {
+                // ASS/SSA：rect->ass 是整行 Dialogue，需要提取 Text 并剥标签
+                m_subtitleTextCallback(startMs, endMs,
+                    SubtitleParser::embeddedTextToPlain(rect->ass));
+            } else if (rect->text && m_subtitleTextCallback) {
+                m_subtitleTextCallback(startMs, endMs,
+                    SubtitleParser::removeFormatting(rect->text));
+            }
+        }
+        avsubtitle_free(&sub);
+    }
 }
 
 VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
