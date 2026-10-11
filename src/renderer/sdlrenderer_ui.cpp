@@ -172,11 +172,11 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
         closeAllMenus(false);
     }
 
-    // 侧边面板独立生命周期，不受控制栏自动隐藏影响
-    if (m_showPlaylistPanel && !playlist.empty()) {
+    // 侧边面板随控制栏一起显隐：用户打开列表且控制栏显示时才渲染
+    if (m_showControls && m_showPlaylistPanel && !playlist.empty()) {
         renderPlaylistPanel(playlist, currentPlaylistIndex);
     }
-    if (m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
+    if (m_showControls && m_showEpisodePanel && m_episodeData && !m_episodeData->empty()) {
         renderEpisodePanel();
     }
 
@@ -2058,143 +2058,140 @@ void SDLRenderer::renderSearchPanel() {
 
 void SDLRenderer::renderVideoControlPanel() {
     int panelW = 340;
-    int panelH = 240;
+    int panelH = 224;
     int panelX = m_windowWidth - 24 - panelW;
     int panelY = m_windowHeight - m_controlHeight - 24 - 12 - panelH;
     if (panelY < m_menuBarHeight + 10) {
         panelY = m_menuBarHeight + 10;
     }
-    int radius = 16;
+    int radius = UiStyle::kPanelRadius;
 
-    // 阴影
-    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius, 0, 0, 0, 90);
-    // 高光边框
-    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1, 255, 255, 255, 50);
-    // 半透明深色背景
+    // 阴影 / 1px 边框 / 背景，与信息面板同一套 UiStyle
+    fillRoundRect(panelX + 2, panelY + 4, panelW, panelH, radius,
+                  UiStyle::kPanelShadow[0], UiStyle::kPanelShadow[1],
+                  UiStyle::kPanelShadow[2], UiStyle::kPanelShadow[3]);
+    fillRoundRect(panelX - 1, panelY - 1, panelW + 2, panelH + 2, radius + 1,
+                  UiStyle::kPanelBorder[0], UiStyle::kPanelBorder[1],
+                  UiStyle::kPanelBorder[2], UiStyle::kPanelBorder[3]);
     fillRoundRect(panelX, panelY, panelW, panelH, radius,
-                  COLOR_CONTROL_BG[0], COLOR_CONTROL_BG[1], COLOR_CONTROL_BG[2], COLOR_CONTROL_BG[3]);
+                  UiStyle::kPanelBg[0], UiStyle::kPanelBg[1],
+                  UiStyle::kPanelBg[2], UiStyle::kPanelBg[3]);
 
-    // 标题
-    drawText("画面调节", panelX + 18, panelY + 16, 255, 255, 255, 13);
-
-    // 关闭按钮 '×'
-    int closeSize = 22;
-    int closeX = panelX + panelW - closeSize - 14;
+    // 右上角关闭按钮，与信息面板同款
+    int closeSize = UiStyle::kCloseSize;
+    int closeX = panelX + panelW - 42;
     int closeY = panelY + 14;
     drawPanelCloseButton(closeX, closeY, closeSize, ControlType::VideoPanelClose,
-                         m_hoveredControl == ControlType::VideoPanelClose, 4, 6, 180, 220, 180);
+                         m_hoveredControl == ControlType::VideoPanelClose,
+                         UiStyle::kCloseRadius, UiStyle::kCloseInset,
+                         UiStyle::kCloseHoverAlpha, UiStyle::kCloseLineShade,
+                         UiStyle::kCloseLineAlpha);
+
+    // 标题与关闭按钮垂直居中对齐
+    int titleY = closeY + (closeSize - getFontHeight(14)) / 2;
+    drawText("画面调节", panelX + 18, titleY,
+             UiStyle::kTitleColor[0], UiStyle::kTitleColor[1],
+             UiStyle::kTitleColor[2], 14);
 
     // 滑块参数
-    int startY = panelY + 48;
-    int rowSpacing = 38;
-    int barW = 180;
+    int startY = panelY + 56;
+    int rowSpacing = 40;
+    int barW = 190;
     int barH = 6;
     int barX = panelX + 76;
+    int valueRight = panelX + panelW - 18;
+
+    // 单行滑块：标签 + 轨道 + 滑钮 + 右对齐数值
+    auto drawSliderRow = [&](const char* label, float ratio, const std::string& valueText,
+                             int rowY, ControlType barType, bool dragging) {
+        drawText(label, panelX + 18, rowY,
+                 UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                 UiStyle::kValueColor[2], 12);
+        int barY = rowY + 6;
+        fillRoundRect(barX, barY, barW, barH, 3,
+                      UiStyle::kInputBg[0], UiStyle::kInputBg[1],
+                      UiStyle::kInputBg[2], UiStyle::kInputBg[3]);
+        int fillW = static_cast<int>(barW * std::clamp(ratio, 0.0f, 1.0f));
+        if (fillW > 0) {
+            fillRoundRect(barX, barY, fillW, barH, 3,
+                          COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
+        }
+        int thumbX = barX + fillW;
+        bool hovered = (m_hoveredControl == barType) || dragging;
+        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
+        if (hovered) {
+            fillCircle(thumbX, barY + 3, 3,
+                       COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
+        }
+        int valueW = getTextWidth(valueText, 12);
+        drawText(valueText, valueRight - valueW, rowY,
+                 UiStyle::kValueColor[0], UiStyle::kValueColor[1],
+                 UiStyle::kValueColor[2], 12);
+        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, barType, 0});
+    };
 
     // 1. 亮度滑块 (-1.0 ~ 1.0, 默认 0.0)
     {
-        int rowY = startY;
-        drawText("亮度", panelX + 18, rowY, 210, 210, 215, 12);
-        int barY = rowY + 5;
-        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
-        float bRatio = std::clamp((m_videoFilterConfig.brightness + 1.0f) / 2.0f, 0.0f, 1.0f);
-        int fillW = static_cast<int>(barW * bRatio);
-        if (fillW > 0) {
-            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
-        }
-        int thumbX = barX + fillW;
-        bool hovered = (m_hoveredControl == ControlType::VideoPanelBrightnessBar) || m_draggingBrightness;
-        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
-        if (hovered) {
-            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
-        }
         int bPct = static_cast<int>(std::round(m_videoFilterConfig.brightness * 100.0f));
         std::string bStr = (bPct > 0 ? "+" : "") + std::to_string(bPct) + "%";
-        drawText(bStr, panelX + 268, rowY, 200, 200, 210, 12);
-
-        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelBrightnessBar, 0});
+        drawSliderRow("亮度", (m_videoFilterConfig.brightness + 1.0f) / 2.0f, bStr,
+                      startY, ControlType::VideoPanelBrightnessBar, m_draggingBrightness);
     }
 
     // 2. 对比度滑块 (0.0 ~ 2.0, 默认 1.0)
     {
-        int rowY = startY + rowSpacing;
-        drawText("对比度", panelX + 18, rowY, 210, 210, 215, 12);
-        int barY = rowY + 5;
-        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
-        float cRatio = std::clamp(m_videoFilterConfig.contrast / 2.0f, 0.0f, 1.0f);
-        int fillW = static_cast<int>(barW * cRatio);
-        if (fillW > 0) {
-            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
-        }
-        int thumbX = barX + fillW;
-        bool hovered = (m_hoveredControl == ControlType::VideoPanelContrastBar) || m_draggingContrast;
-        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
-        if (hovered) {
-            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
-        }
         int cPct = static_cast<int>(std::round(m_videoFilterConfig.contrast * 100.0f));
         std::string cStr = std::to_string(cPct) + "%";
-        drawText(cStr, panelX + 268, rowY, 200, 200, 210, 12);
-
-        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelContrastBar, 0});
+        drawSliderRow("对比度", m_videoFilterConfig.contrast / 2.0f, cStr,
+                      startY + rowSpacing, ControlType::VideoPanelContrastBar, m_draggingContrast);
     }
 
     // 3. 饱和度滑块 (0.0 ~ 3.0, 默认 1.0)
     {
-        int rowY = startY + rowSpacing * 2;
-        drawText("饱和度", panelX + 18, rowY, 210, 210, 215, 12);
-        int barY = rowY + 5;
-        fillRoundRect(barX, barY, barW, barH, 3, 50, 52, 60, 220);
-        float sRatio = std::clamp(m_videoFilterConfig.saturation / 3.0f, 0.0f, 1.0f);
-        int fillW = static_cast<int>(barW * sRatio);
-        if (fillW > 0) {
-            fillRoundRect(barX, barY, fillW, barH, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 240);
-        }
-        int thumbX = barX + fillW;
-        bool hovered = (m_hoveredControl == ControlType::VideoPanelSaturationBar) || m_draggingSaturation;
-        fillCircle(thumbX, barY + 3, hovered ? 7 : 5, 255, 255, 255, 255);
-        if (hovered) {
-            fillCircle(thumbX, barY + 3, 3, COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2], 255);
-        }
         int sPct = static_cast<int>(std::round(m_videoFilterConfig.saturation * 100.0f));
         std::string sStr = std::to_string(sPct) + "%";
-        drawText(sStr, panelX + 268, rowY, 200, 200, 210, 12);
-
-        m_controlRects.push_back({barX - 4, barY - 6, barW + 8, barH + 12, ControlType::VideoPanelSaturationBar, 0});
+        drawSliderRow("饱和度", m_videoFilterConfig.saturation / 3.0f, sStr,
+                      startY + rowSpacing * 2, ControlType::VideoPanelSaturationBar, m_draggingSaturation);
     }
 
-    // 底部操作栏
-    int btnY = panelY + panelH - 42;
-    int btnH = 26;
+    // 底部操作栏：左侧重置图标按钮，右侧 HDR 切换（UiStyle 次要按钮）
+    int btnY = panelY + panelH - 16 - 32;
 
-    // 重置按钮
+    // 重置按钮：走播放键同款圆形 hover 图标按钮，与 32 高按钮行垂直居中
     {
-        int btnW = 86;
-        int btnX = panelX + 18;
+        int resetSize = m_buttonSize;
+        int resetX = panelX + 18;
+        int resetY = btnY + (32 - resetSize) / 2;
         bool hovered = (m_hoveredControl == ControlType::VideoPanelReset);
         bool pressed = (m_pressedControl == ControlType::VideoPanelReset);
-        uint8_t bgAlpha = pressed ? 220 : (hovered ? 180 : 120);
-        fillRoundRect(btnX, btnY, btnW, btnH, 4, 60, 64, 75, bgAlpha);
-        drawText("重置默认", btnX + 16, btnY + 5, 220, 220, 220, 11);
-        m_controlRects.push_back({btnX, btnY, btnW, btnH, ControlType::VideoPanelReset, 0});
+        drawButton(resetX, resetY, resetSize, resetSize, "reset", hovered, pressed);
+        m_controlRects.push_back({resetX, resetY, resetSize, resetSize,
+                                  ControlType::VideoPanelReset, 0});
     }
 
-    // HDR 映射切换按钮
+    // HDR 映射切换按钮（次要按钮样式，文字居中）
     {
-        int btnW = 120;
-        int btnX = panelX + 114;
+        int btnW = 130;
+        int btnH = 32;
+        int btnX = panelX + panelW - 18 - btnW;
         bool hovered = (m_hoveredControl == ControlType::VideoPanelHdrToggle);
         bool pressed = (m_pressedControl == ControlType::VideoPanelHdrToggle);
-        uint8_t bgAlpha = pressed ? 220 : (hovered ? 180 : 120);
-        fillRoundRect(btnX, btnY, btnW, btnH, 4, 60, 64, 75, bgAlpha);
+        const uint8_t* bg = pressed ? UiStyle::kBtnSecondaryPressed
+            : (hovered ? UiStyle::kBtnSecondaryHover : UiStyle::kBtnSecondaryBg);
+        fillRoundRect(btnX, btnY, btnW, btnH, UiStyle::kButtonRadius,
+                      bg[0], bg[1], bg[2], bg[3]);
         std::string hdrText = "HDR: ";
         switch (m_videoFilterConfig.hdrToneMap) {
             case HdrToneMapMode::Off: hdrText += "关闭"; break;
             case HdrToneMapMode::Auto: hdrText += "自动"; break;
             case HdrToneMapMode::On: hdrText += "强制开启"; break;
         }
-        drawText(hdrText, btnX + 12, btnY + 5, 220, 220, 220, 11);
-        m_controlRects.push_back({btnX, btnY, btnW, btnH, ControlType::VideoPanelHdrToggle, 0});
+        int textW = getTextWidth(hdrText, 12);
+        int textH = getFontHeight(12);
+        drawText(hdrText, btnX + (btnW - textW) / 2, btnY + (btnH - textH) / 2,
+                 255, 255, 255, 12);
+        m_controlRects.push_back({btnX, btnY, btnW, btnH,
+                                  ControlType::VideoPanelHdrToggle, 0});
     }
 
     // 面板背景命中检测（防止穿透）

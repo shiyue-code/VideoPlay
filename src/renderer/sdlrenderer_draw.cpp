@@ -486,6 +486,49 @@ SDL_Texture* SDLRenderer::createIconTexture(const std::string& type) {
         fillCircle(cx - 24, barY1, 18, 255, 255, 255, 255);
         fillCircle(cx + 24, barY2, 24, 255, 255, 255, 100);
         fillCircle(cx + 24, barY2, 18, 255, 255, 255, 255);
+    } else if (type == "reset") {
+        // 重置：环形箭头（270° 圆弧环带 + 端点切向箭头），↺ 恢复默认语义
+        const float PI = 3.14159265f;
+        const float startDeg = 50.0f;
+        const float endDeg = 320.0f;
+        const float outerR = 78.0f;
+        const float innerR = 58.0f;
+        const int arcSegs = 24;
+
+        // 圆弧环带：innerR ~ outerR 之间，用四边形分段拼接
+        auto drawArcRing = [&](float inR, float outR, float alpha) {
+            for (int i = 0; i < arcSegs; ++i) {
+                float a0 = (startDeg + (endDeg - startDeg) * i / arcSegs) * PI / 180.0f;
+                float a1 = (startDeg + (endDeg - startDeg) * (i + 1) / arcSegs) * PI / 180.0f;
+                auto mv = [&](float r, float a) {
+                    SDL_Vertex v = mkVert(cx + r * std::cos(a), cy + r * std::sin(a));
+                    v.color.a = alpha;
+                    return v;
+                };
+                drawQuad({ mv(inR, a0), mv(outR, a0), mv(outR, a1), mv(inR, a1) });
+            }
+        };
+        // 软边过渡层：内外各扩 3px（共 ~6px）、alpha 50%，再叠实心主体
+        drawArcRing(innerR - 3.0f, outerR + 3.0f, 0.5f);
+        drawArcRing(innerR, outerR, 1.0f);
+
+        // 箭头：位于 50° 端点，沿切线指向弧外缺口
+        float headA = startDeg * PI / 180.0f;
+        float midR = (innerR + outerR) / 2.0f;
+        float baseX = cx + midR * std::cos(headA);
+        float baseY = cy + midR * std::sin(headA);
+        // 切向（角度减小方向，即指向缺口一侧）
+        float tx = std::sin(headA);
+        float ty = -std::cos(headA);
+        // 法向（径向），用于展开箭头底边
+        float nx = std::cos(headA);
+        float ny = std::sin(headA);
+        float tipX = baseX + tx * 36.0f;
+        float tipY = baseY + ty * 36.0f;
+        float halfW = 30.0f;
+        drawSoftTri({ mkVert(tipX, tipY),
+                      mkVert(baseX + nx * halfW, baseY + ny * halfW),
+                      mkVert(baseX - nx * halfW, baseY - ny * halfW) }, 6);
     } else {
         fillCircle(cx, cy, 72, 255, 255, 255, 100);
         fillCircle(cx, cy, 64, 255, 255, 255, 255);
@@ -516,7 +559,8 @@ SDL_Texture* SDLRenderer::getIconTexture(const std::string& type) {
 
 void SDLRenderer::loadIconTextures() {
     const std::vector<std::string> iconNames = {
-        "play", "pause", "stop", "prev", "next", "volume", "mute", "playlist", "video_control"
+        "play", "pause", "stop", "prev", "next", "volume", "mute", "playlist", "video_control",
+        "reset"
     };
     for (const auto& name : iconNames) {
         getIconTexture(name);
@@ -626,6 +670,29 @@ void SDLRenderer::drawIcon(int cx, int cy, const std::string& type, bool hovered
         int sy2 = cy + mouthH / 2 + 2;
         SDL_RenderLine(m_renderer, static_cast<float>(sx), static_cast<float>(sy1), static_cast<float>(sx + r / 2), static_cast<float>(sy2));
         SDL_RenderLine(m_renderer, static_cast<float>(sx + 1), static_cast<float>(sy1), static_cast<float>(sx + 1 + r / 2), static_cast<float>(sy2));
+    } else if (type == "reset") {
+        // 简化圆弧箭头：8 段折线弧（50°~320°）+ 端点切向箭头
+        const float PI = 3.14159265f;
+        float a0 = 50.0f * PI / 180.0f;
+        float a1 = 320.0f * PI / 180.0f;
+        float rr = static_cast<float>(r);
+        const int segN = 8;
+        for (int i = 0; i < segN; ++i) {
+            float t0 = a0 + (a1 - a0) * i / segN;
+            float t1 = a0 + (a1 - a0) * (i + 1) / segN;
+            SDL_RenderLine(m_renderer,
+                           cx + rr * std::cos(t0), cy + rr * std::sin(t0),
+                           cx + rr * std::cos(t1), cy + rr * std::sin(t1));
+        }
+        // 箭头：50° 端点沿切线（指向缺口）+ 一根倒勾线
+        float ex = cx + rr * std::cos(a0);
+        float ey = cy + rr * std::sin(a0);
+        float tipX = ex + std::sin(a0) * rr * 0.9f;
+        float tipY = ey - std::cos(a0) * rr * 0.9f;
+        SDL_RenderLine(m_renderer, ex, ey, tipX, tipY);
+        SDL_RenderLine(m_renderer, tipX, tipY,
+                       tipX - std::cos(a0) * rr * 0.6f,
+                       tipY - std::sin(a0) * rr * 0.6f);
     }
 }
 

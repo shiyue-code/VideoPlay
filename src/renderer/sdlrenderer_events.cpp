@@ -454,11 +454,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             }
             int mx = static_cast<int>(event.wheel.mouse_x);
             int my = static_cast<int>(event.wheel.mouse_y);
-            bool overPlaylist = m_showPlaylistPanel && mx >= m_windowWidth - 284 && mx <= m_windowWidth - 24
+            // 面板随控制栏隐藏时不再响应滚动
+            bool overPlaylist = m_showControls && m_showPlaylistPanel && mx >= m_windowWidth - 284 && mx <= m_windowWidth - 24
                                 && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
-            bool overEpisode = m_showEpisodePanel && mx >= 24 && mx <= 284
+            bool overEpisode = m_showControls && m_showEpisodePanel && mx >= 24 && mx <= 284
                                && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
-            bool overSearch = m_showSearchPanel && mx >= m_windowWidth - 364 && mx <= m_windowWidth - 24
+            bool overSearch = m_showControls && m_showSearchPanel && mx >= m_windowWidth - 364 && mx <= m_windowWidth - 24
                                && my >= m_menuBarHeight + 10 && my <= m_windowHeight - m_controlHeight - 34;
             if (overSearch) {
                 m_searchScrollOffset -= static_cast<int>(event.wheel.y) * 40;
@@ -594,7 +595,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
             if (hit == ControlType::PlaylistItem) {
                 m_playlistDragTo = hitValue;
             } else if (m_playlistItemCount > 0) {
-                bool overPlaylist = m_showPlaylistPanel && x >= m_windowWidth - 284 && x <= m_windowWidth - 24
+                bool overPlaylist = m_showControls && m_showPlaylistPanel && x >= m_windowWidth - 284 && x <= m_windowWidth - 24
                     && y >= m_menuBarHeight + 10 && y <= m_windowHeight - m_controlHeight - 34;
                 if (overPlaylist) {
                     m_playlistDragTo = (y > m_playlistDragStartY) ? m_playlistItemCount - 1 : 0;
