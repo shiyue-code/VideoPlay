@@ -296,9 +296,6 @@ void VideoPlayerApp::stepFrame(int direction) {
     if (m_seekTargetPosition >= 0 &&
         (m_displayFrame.data.empty() ||
          std::llabs(m_displayFrame.pts - m_seekTargetPosition) >= 500)) {
-        logger().info("stepFrame {} ignored: seek not settled (target={} displayPts={})",
-                      direction, m_seekTargetPosition,
-                      m_displayFrame.data.empty() ? -1 : m_displayFrame.pts);
         return;
     }
 
@@ -307,7 +304,6 @@ void VideoPlayerApp::stepFrame(int direction) {
     // 就会少走一帧（先右再左回不到原位）
     if (m_stepping || m_waitingStepFrame) {
         m_pendingStepDir = std::clamp(m_pendingStepDir + direction, -8, 8);
-        logger().info("stepFrame {} queued in-flight (pending={})", direction, m_pendingStepDir);
         return;
     }
 
@@ -340,7 +336,6 @@ void VideoPlayerApp::stepFrame(int direction) {
         return;
     }
     m_player->seekStepBack(m_displayFrame.pts);
-    logger().info("stepFrame -1: seekStepBack anchor={}", m_displayFrame.pts);
     // 保留 m_displayFrame：落点帧到达前继续显示旧画面，避免黑屏闪烁
     m_waitingStepFrame = true;
     m_stepDeadline = deadline;

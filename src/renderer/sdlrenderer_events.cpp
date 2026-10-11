@@ -300,21 +300,6 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 
             //  内置快捷�?
             if (pressed) {
-                if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) {
-                    char modBuf[64];
-                    snprintf(modBuf, sizeof(modBuf), "%#x/%#x/%#x",
-                             static_cast<unsigned>(event.key.mod),
-                             static_cast<unsigned>(SDL_GetModState()),
-                             static_cast<unsigned>(mods));
-                    logger().info(std::string("key arrow pressed: mod=") + modBuf
-#ifdef _WIN32
-                                  + " asyncCtrl=" +
-                                  (((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) ? "1" : "0")
-                                  + " asyncShift=" +
-                                  (((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) ? "1" : "0")
-#endif
-                                  + " repeat=" + std::to_string(event.key.repeat));
-                }
                 switch (event.key.key) {
                     case SDLK_SPACE:
                         if (m_callbacks.playPause) m_callbacks.playPause();
