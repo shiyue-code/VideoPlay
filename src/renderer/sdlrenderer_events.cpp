@@ -281,6 +281,20 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
 
             //  内置快捷�?
             if (pressed) {
+                if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) {
+                    logger().info("key arrow pressed: eventMod={:#x} sdlMod={:#x} merged={:#x}"
+#ifdef _WIN32
+                                  " asyncCtrl={} asyncShift={}"
+#endif
+                                  , static_cast<unsigned>(event.key.mod)
+                                  , static_cast<unsigned>(SDL_GetModState())
+                                  , static_cast<unsigned>(mods)
+#ifdef _WIN32
+                                  , (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
+                                  , (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
+#endif
+                    );
+                }
                 switch (event.key.key) {
                     case SDLK_SPACE:
                         if (m_callbacks.playPause) m_callbacks.playPause();
