@@ -600,8 +600,26 @@ void WindowFrameWin32::setTitle(const char* title) {
 }
 
 void WindowFrameWin32::updateFrame() {
+    // 全屏期间 SDL 会置 WS_POPUP；若退出全屏后样式没还原，
+    // DWM 不再给窗口圆角/阴影，贴靠与最小化动画也会失效
+    if (!isFullscreenWindow()) {
+        restoreWindowedStyle();
+        applyDwmAttributes(true);
+    }
     refreshWindow();
     syncResizeRing();
+}
+
+void WindowFrameWin32::restoreWindowedStyle() {
+    if (!m_hwnd) return;
+
+    const LONG_PTR style = GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+    if (!(style & WS_POPUP)) return;
+
+    const LONG_PTR restored =
+        (style & ~WS_POPUP) | WS_CAPTION | WS_THICKFRAME |
+        WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+    SetWindowLongPtrW(m_hwnd, GWL_STYLE, restored);
 }
 
 void WindowFrameWin32::applyDwmAttributes(bool borderless) {

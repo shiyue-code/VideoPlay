@@ -68,6 +68,7 @@ private:
 
     void applyDwmAttributes(bool borderless);
     void refreshWindow();
+    void restoreWindowedStyle();
     bool isFullscreenWindow() const;
 
     LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, bool& handled);
