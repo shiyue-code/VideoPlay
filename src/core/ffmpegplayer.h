@@ -2,6 +2,7 @@
 
 #include "core/common.h"
 #include "core/audioplayer.h"
+#include "core/videoadjuster.h"
 
 #include <string>
 #include <memory>
@@ -108,6 +109,10 @@ public:
 
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
 
+    // 画面调节参数变化后用基础帧就地重算 frame.data（仅主线程调用）；
+    // 无需更新或无基础帧返回 false
+    bool refreshVideoFrame(VideoFrame& frame);
+
     // 进度条缩略图：独立解码，不占用主解码队列
     void requestPreview(int64_t ptsMs);
     bool takePreviewFrame(VideoFrame& frame);
@@ -137,14 +142,6 @@ private:
     };
 
     struct VideoContext : StreamContext {
-        SwsContext* swsContext = nullptr;
-        int lastWidth = 0;
-        int lastHeight = 0;
-        AVPixelFormat lastFormat = AV_PIX_FMT_NONE;
-        int lastColorSpace = SWS_CS_DEFAULT;
-        int lastSrcRange = 0;
-        std::vector<uint8_t> swsBuffer;
-        int swsStride = 0;
     };
 
     struct AudioContext : StreamContext {
@@ -210,7 +207,8 @@ private:
     double m_audioFilterTempo = 1.0;   // 当前滤镜图实际生效的 atempo（m_audioFilterMutex 保护）
     mutable std::mutex m_audioFilterMutex;
 
-    // 视频基础参数滤镜 (eq / hue)
+    // 阶段 1 视频滤镜（HDR 映射/去隔行，解码线程内构建）
+    // 阶段 2 画面调节（eq/hue + BGRA）由两个 VideoAdjuster 分别承担
     VideoFilterConfig m_videoFilterConfig;
     mutable std::mutex m_videoFilterMutex;
     AVFilterGraph* m_videoFilterGraph = nullptr;
@@ -220,6 +218,10 @@ private:
     int m_videoFilterHeight = 0;
     AVPixelFormat m_videoFilterFormat = AV_PIX_FMT_NONE;
     std::string m_videoFilterDescription;
+    // 画面调节代次：eq/hue 相关参数变化时 +1，帧上记录生成时的代次
+    std::atomic<uint64_t> m_videoAdjustGeneration{1};
+    VideoAdjuster m_decodeAdjuster;    // 解码线程专用
+    VideoAdjuster m_refreshAdjuster;   // 主线程专用（refreshVideoFrame）
 
     MediaInfo m_mediaInfo;
     AVBufferRef* m_hwDeviceCtx = nullptr;

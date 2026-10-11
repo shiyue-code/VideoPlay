@@ -276,9 +276,12 @@ bool VideoPlayerApp::initialize() {
             case 'c': clearLoop(); break;
         }
     });
+    // 画面调节配置变化时更新设置；拖动滑杆会连续触发，延迟 500ms 落盘防抖
     cb.videoFilterConfig = ([this](const VideoFilterConfig& config) {
         Settings::instance().setVideoFilterConfig(config);
-        Settings::instance().save();
+        m_videoFilterSavePending = true;
+        m_videoFilterSaveDeadline = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(500);
         if (m_player) {
             m_player->setVideoFilterConfig(config);
         }
@@ -437,6 +440,12 @@ void VideoPlayerApp::shutdown() {
     persistPlaylist();
     Settings::instance().clearLastSession();
 
+    // 拖动画面调节滑杆的防抖保存，退出前补齐落盘
+    if (m_videoFilterSavePending) {
+        m_videoFilterSavePending = false;
+        Settings::instance().save();
+    }
+
     if (m_player) {
         m_player->stop();
     }
@@ -581,6 +590,13 @@ void VideoPlayerApp::render() {
         }
     }
 
+    // 画面调节配置的防抖落盘（拖动滑杆结束后 500ms 写一次）
+    if (m_videoFilterSavePending &&
+        std::chrono::steady_clock::now() >= m_videoFilterSaveDeadline) {
+        m_videoFilterSavePending = false;
+        Settings::instance().save();
+    }
+
     auto t0 = HRClock::now();
     // 用音频播放进度作为当前显示时间和 UI 时间（考虑倍速）
     if (m_player) {
@@ -651,7 +667,12 @@ void VideoPlayerApp::render() {
             m_displayFrame = std::move(frame);
         }
     }
-    
+
+    // 画面调节参数变化时用保留的基础帧就地重算，拖动滑杆与暂停时都立即生效
+    if (m_player && !m_displayFrame.data.empty()) {
+        m_player->refreshVideoFrame(m_displayFrame);
+    }
+
     // 停止状态清空显示帧，确保画面归零
     if (!m_isPlaying && m_position == 0) {
         m_displayFrame = VideoFrame();

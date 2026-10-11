@@ -7,7 +7,10 @@
 #include <functional>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <vector>
+
+struct AVFrame;
 
 namespace VideoPlay {
 
@@ -17,6 +20,9 @@ struct VideoFrame {
     int width = 0;
     int height = 0;
     int64_t pts = 0;
+    // 画面调节前的基础帧（软件帧，已完成去隔行/HDR 映射）；画面参数变化时据此就地重算 data
+    std::shared_ptr<AVFrame> base;
+    uint64_t adjustGeneration = 0;   // 生成 data 时所用画面调节参数的代次
 };
 
 // 图形字幕（PGS/DVB）位图

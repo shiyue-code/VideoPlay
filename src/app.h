@@ -164,6 +164,10 @@ private:
     VideoFrame m_displayFrame;
     VideoFrame m_pendingFrame;
 
+    // 画面调节配置延迟落盘（拖动滑杆连续触发回调，500ms 防抖）
+    bool m_videoFilterSavePending = false;
+    std::chrono::steady_clock::time_point m_videoFilterSaveDeadline;
+
     // AB 循环
     int64_t m_loopA = -1;
     int64_t m_loopB = -1;

@@ -203,6 +203,62 @@ TEST_F(PlaybackTest, SeekAudioVideoSync)
     player.stop();
 }
 
+// BGRA 三通道整体均值
+static double meanBgr(const VideoFrame& frame)
+{
+    if (frame.data.empty()) {
+        return 0.0;
+    }
+    double sum = 0.0;
+    size_t count = 0;
+    for (size_t i = 0; i + 3 < frame.data.size(); i += 4) {
+        sum += frame.data[i] + frame.data[i + 1] + frame.data[i + 2];
+        count += 3;
+    }
+    return count ? sum / static_cast<double>(count) : 0.0;
+}
+
+TEST_F(PlaybackTest, PausedRefreshAppliesVideoAdjust)
+{
+    FFmpegPlayer player;
+    ASSERT_TRUE(player.loadFile(s_file3));
+    player.play();
+
+    // 泵到取到第一帧后暂停，保留该帧验证暂停态画面调节立即生效
+    VideoFrame frame;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline && frame.data.empty()) {
+        player.checkPreloadComplete();
+        const int64_t pos = player.audioPositionMs();
+        player.getVideoFrame(pos, frame);
+        if (frame.data.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+    }
+    ASSERT_FALSE(frame.data.empty()) << "3 秒内没有取到视频帧";
+    ASSERT_TRUE(static_cast<bool>(frame.base)) << "帧未携带调节基础帧";
+    player.pause();
+
+    const int64_t pts = frame.pts;
+    const double before = meanBgr(frame);
+
+    VideoFilterConfig cfg;
+    cfg.enabled = true;
+    cfg.brightness = -0.4f;
+    player.setVideoFilterConfig(cfg);
+
+    EXPECT_TRUE(player.refreshVideoFrame(frame));
+    const double after = meanBgr(frame);
+    std::cerr << "[measured] brightness=-0.4: BGR mean " << before
+              << " -> " << after << std::endl;
+    EXPECT_GE(before - after, 20.0) << "before=" << before << " after=" << after;
+    EXPECT_EQ(frame.pts, pts);
+    // 代次未再变化，第二次刷新应直接返回 false
+    EXPECT_FALSE(player.refreshVideoFrame(frame));
+
+    player.stop();
+}
+
 TEST_F(PlaybackTest, EofDrainsPlayback)
 {
     FFmpegPlayer player;

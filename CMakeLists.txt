@@ -130,6 +130,7 @@ set(SOURCES
     src/core/ffmpegplayer_filters.cpp
     src/core/ffmpegplayer_tracks.cpp
     src/core/ffmpegplayer_preview.cpp
+    src/core/videoadjuster.cpp
     src/core/audioclock.cpp
     src/core/audioplayer.cpp
     src/core/settings.cpp
@@ -172,6 +173,7 @@ set(HEADERS
     src/app.h
     src/core/ffmpegplayer.h
     src/core/ffmpegplayer_internal.h
+    src/core/videoadjuster.h
     src/core/audioclock.h
     src/core/audioplayer.h
     src/core/settings.h

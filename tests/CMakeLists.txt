@@ -104,14 +104,39 @@ target_include_directories(test_settings PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
 target_link_libraries(test_settings PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_settings)
 
-# 集成测试依赖 cmd /c 与内置 ffmpeg.exe，仅 Windows 可构建运行
+# FFmpeg 相关测试仅 Windows 构建：集成测试依赖 cmd /c 与内置 ffmpeg.exe，
+# 且目标文件需拷 FFmpeg/SDL3 DLL 才能跑
 if(WIN32)
+
+# 运行期依赖 FFmpeg / SDL3 动态库，构建后拷到目标目录再让 gtest 发现用例
+function(videoplay_copy_test_runtime target)
+    set(VIDEOPLAY_FFMPEG_BIN_DIR "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}/bin")
+    if(EXISTS ${VIDEOPLAY_FFMPEG_BIN_DIR})
+        file(GLOB VIDEOPLAY_TEST_FFMPEG_DLLS "${VIDEOPLAY_FFMPEG_BIN_DIR}/*.dll")
+        foreach(VIDEOPLAY_TEST_DLL ${VIDEOPLAY_TEST_FFMPEG_DLLS})
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${VIDEOPLAY_TEST_DLL}
+                    $<TARGET_FILE_DIR:${target}>
+            )
+        endforeach()
+    endif()
+    if(TARGET SDL3::SDL3)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL3::SDL3>
+                $<TARGET_FILE_DIR:${target}>
+        )
+    endif()
+endfunction()
+
 add_executable(test_ffmpegplayer_playback
     test_ffmpegplayer_playback_gtest.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ffmpegplayer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ffmpegplayer_filters.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ffmpegplayer_tracks.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ffmpegplayer_preview.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/videoadjuster.cpp
     ${CMAKE_SOURCE_DIR}/src/core/audioclock.cpp
     ${CMAKE_SOURCE_DIR}/src/core/audioplayer.cpp
     ${CMAKE_SOURCE_DIR}/src/subtitles/subtitleparser.cpp
@@ -132,26 +157,26 @@ target_compile_definitions(test_ffmpegplayer_playback PRIVATE
     VIDEOPLAY_FFMPEG_EXE="${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}/bin/ffmpeg.exe"
 )
 
-# 运行期依赖 FFmpeg / SDL3 动态库，先拷到测试目录再让 gtest 发现用例
-set(VIDEOPLAY_FFMPEG_BIN_DIR "${VIDEOPLAY_BUNDLED_FFMPEG_ROOT}/bin")
-if(EXISTS ${VIDEOPLAY_FFMPEG_BIN_DIR})
-    file(GLOB VIDEOPLAY_TEST_FFMPEG_DLLS "${VIDEOPLAY_FFMPEG_BIN_DIR}/*.dll")
-    foreach(VIDEOPLAY_TEST_DLL ${VIDEOPLAY_TEST_FFMPEG_DLLS})
-        add_custom_command(TARGET test_ffmpegplayer_playback POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${VIDEOPLAY_TEST_DLL}
-                $<TARGET_FILE_DIR:test_ffmpegplayer_playback>
-        )
-    endforeach()
-endif()
-if(TARGET SDL3::SDL3)
-    add_custom_command(TARGET test_ffmpegplayer_playback POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL3::SDL3>
-            $<TARGET_FILE_DIR:test_ffmpegplayer_playback>
-    )
-endif()
+videoplay_copy_test_runtime(test_ffmpegplayer_playback)
 
 gtest_discover_tests(test_ffmpegplayer_playback)
+
+add_executable(test_videoadjuster
+    test_videoadjuster_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/videoadjuster.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_videoadjuster PRIVATE
+    ${VIDEOPLAY_TEST_INCLUDE_DIRS}
+    ${FFMPEG_INCLUDE_DIRS}
+)
+target_link_libraries(test_videoadjuster PRIVATE
+    ${VIDEOPLAY_GTEST_MAIN_TARGET}
+    ${FFMPEG_LIBRARIES}
+)
+
+videoplay_copy_test_runtime(test_videoadjuster)
+
+gtest_discover_tests(test_videoadjuster)
 endif()
 

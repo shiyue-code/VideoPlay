@@ -40,7 +40,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 FFmpeg 默认指向 `3rdparty/FFmpeg/`。输出在 `build/bin/<Config>/`。添加源文件必须改根目录 `CMakeLists.txt` 的 `SOURCES` / `HEADERS`，不要用 `file(GLOB)`。
 
-当前测试 10 个 gtest 目标、共 101 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具、Settings 读写/容错/AI 配置归一化、剧集识别。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
+当前测试 11 个 gtest 目标、共 108 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`、`test_videoadjuster`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具、Settings 读写/容错/AI 配置归一化、剧集识别、画面调节（eq/hue + BGRA）。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
 
 ## 源码结构
 
@@ -53,10 +53,11 @@ src/
 ├── app_events.cpp               # 菜单、字幕、AI、帮助
 ├── core/
 │   ├── ffmpegplayer.h/cpp       # 解码、音视频同步、预缓冲
-│   ├── ffmpegplayer_filters.cpp # eq/hue/bwdif/yadif 滤镜链
+│   ├── ffmpegplayer_filters.cpp # HDR/去隔行/音频滤镜链
 │   ├── ffmpegplayer_tracks.cpp  # 轨道扫描/切换、字幕流
 │   ├── ffmpegplayer_preview.cpp # 进度条缩略图预览解码
 │   ├── ffmpegplayer_internal.h  # 拆分文件共享的内部助手
+│   ├── videoadjuster.h/cpp      # 画面调节（eq/hue）+ BGRA 转换
 │   ├── audioclock.h/cpp         # 音频媒体时钟（按入队采样推算位置）
 │   ├── audioplayer.h/cpp        # SDL3 音频
 │   ├── settings.h/cpp           # JSON 配置单例
@@ -116,7 +117,9 @@ VideoPlayerApp
 - 预缓冲：`play()` 设 `m_preloading = true`，主循环每帧调 `checkPreloadComplete()`。视频队列 ≥1 帧且音频缓冲 ≥40ms 才启动音频；超时 1 秒强制开播
 - 背压：音视频队列满时解码线程阻塞等待（暂停态补解码例外，音频满仍丢包）
 - EOF：先给解码器 send NULL 收完尾帧，再等视频队列与音频缓冲排空才置 Stopped；排空期间 abort 直接退出、不再发 Stopped 回调
-- 画面参数走 FFmpeg `eq` / `hue` 滤镜；去隔行走 `bwdif` / `yadif`（硬解帧先转到软件再滤）
+- 视频画面处理分两阶段：阶段 1 在解码线程完成硬解转存、HDR 色调映射、去隔行（`bwdif` / `yadif`）；阶段 2 由 `VideoAdjuster` 做 `eq` / `hue` 调节再转 BGRA，解码线程与主线程各持一个实例（实例非线程安全）
+- 每个 `VideoFrame` 持有阶段 1 基础帧 `base` 与 `adjustGeneration`；主线程每次渲染前调 `refreshVideoFrame`，代次过时就拿 `base` 就地重算 `data`，画面调节在拖动中与暂停时立即生效。去隔行/HDR 改动仍只作用于新解码帧；代价是视频队列同时保留基础帧，内存随之增加
+- 画面调节配置写盘有 500ms 防抖（拖动滑杆连续触发回调），退出时若仍有 pending 会补落盘
 - 音频滤镜走 `avfilter`；FFmpeg 8 下 `abuffer`/`abuffersink` 必须 `avfilter_graph_alloc_filter` → `av_buffersrc_parameters_set` → `avfilter_init_dict`，不能直接用 `avfilter_graph_create_filter`
 
 ### 渲染与交互

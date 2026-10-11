@@ -287,11 +287,10 @@ void FFmpegPlayer::closeFile() {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     m_audioPlayer.reset();
-    
-    if (m_videoCtx.swsContext) {
-        sws_freeContext(m_videoCtx.swsContext);
-        m_videoCtx.swsContext = nullptr;
-    }
+
+    // stop() 已 join 解码线程；closeFile 只在主线程调用，两个调节器都可安全重置
+    m_decodeAdjuster.reset();
+    m_refreshAdjuster.reset();
     releaseHardwareDecoder();
     cleanupVideoFilterGraph();
     if (m_videoCtx.codecContext) {
@@ -1210,7 +1209,7 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
         sourceFrame = transferredFrame.get();
     }
 
-    // 应用视频基础参数滤镜（eq / hue）
+    // 阶段 1：HDR 色调映射 / 去隔行（仅解码线程内构建滤镜图）
     AVFrame* filterOut = processVideoFilter(sourceFrame);
     if (filterOut != sourceFrame) {
         filteredFrame.reset(filterOut);
@@ -1218,120 +1217,78 @@ VideoFrame FFmpegPlayer::convertVideoFrame(AVFrame* frame) {
     }
 
     if (!sourceFrame->data[0]) return result;
-    
+
     int width = sourceFrame->width;
     int height = sourceFrame->height;
     if (width <= 0 || height <= 0) return result;
-    AVPixelFormat srcFormat = static_cast<AVPixelFormat>(sourceFrame->format);
-    // 使用 BGRA 以匹配 SDL 纹理格式 (Windows 小端字节序)
-    AVPixelFormat dstFormat = AV_PIX_FMT_BGRA;
-    
-    // Determine color space and range from frame metadata
-    int colorSpace = SWS_CS_DEFAULT;
-    int srcRange = 0;  // 0 = limited (16-235), 1 = full (0-255)
-    
-    // Check frame-level color range first
-    if (sourceFrame->color_range == AVCOL_RANGE_MPEG) {
-        srcRange = 0;  // Limited range (TV range)
-    } else if (sourceFrame->color_range == AVCOL_RANGE_JPEG) {
-        srcRange = 1;  // Full range (PC range)
+
+    // 保留阶段 1 输出作为基础帧：解码器自产帧克隆引用（调用方随后 unref），
+    // 转存/过滤产物直接转移所有权，均不额外复制像素
+    std::shared_ptr<AVFrame> base;
+    if (sourceFrame == frame) {
+        base.reset(av_frame_clone(frame), frameDeleter);
+        if (!base) {
+            logger().warning("Failed to clone frame for adjust base");
+            return result;
+        }
+    } else if (sourceFrame == filteredFrame.get()) {
+        base = std::shared_ptr<AVFrame>(filteredFrame.release(), frameDeleter);
     } else {
-        // Default: most video files use limited range
-        srcRange = 0;
-    }
-    
-    // Determine color space (BT.601 vs BT.709)
-    if (sourceFrame->colorspace == AVCOL_SPC_BT709) {
-        colorSpace = SWS_CS_ITU709;
-    } else if (sourceFrame->colorspace == AVCOL_SPC_BT470BG || 
-               sourceFrame->colorspace == AVCOL_SPC_SMPTE170M) {
-        colorSpace = SWS_CS_ITU601;
-    } else {
-        AVCodecContext* codecCtx = m_videoCtx.codecContext;
-        if (codecCtx && codecCtx->colorspace != AVCOL_SPC_UNSPECIFIED) {
-            if (codecCtx->colorspace == AVCOL_SPC_BT709) {
-                colorSpace = SWS_CS_ITU709;
-            } else if (codecCtx->colorspace == AVCOL_SPC_BT470BG || 
-                       codecCtx->colorspace == AVCOL_SPC_SMPTE170M) {
-                colorSpace = SWS_CS_ITU601;
-            }
-        }
-    }
-    
-    // HD videos (>= 1280 width) typically use BT.709
-    if (colorSpace == SWS_CS_DEFAULT && width >= 1280) {
-        colorSpace = SWS_CS_ITU709;
-    }
-    
-    if (!m_videoCtx.swsContext || 
-        m_videoCtx.lastWidth != width || 
-        m_videoCtx.lastHeight != height || 
-        m_videoCtx.lastFormat != srcFormat ||
-        m_videoCtx.lastColorSpace != colorSpace ||
-        m_videoCtx.lastSrcRange != srcRange) {
-        
-        if (m_videoCtx.swsContext) {
-            sws_freeContext(m_videoCtx.swsContext);
-        }
-        
-        // Fast bilinear only for real-time performance
-        int flags = SWS_FAST_BILINEAR;
-        
-        m_videoCtx.swsContext = sws_getContext(
-            width, height, srcFormat,
-            width, height, dstFormat,
-            flags, nullptr, nullptr, nullptr);
-        
-        // Try to set color space details - this may not work on all FFmpeg builds
-        // If it fails, the video might appear darker than expected
-        if (m_videoCtx.swsContext) {
-            const int* coefs = sws_getCoefficients(colorSpace);
-            int dstRange = 1;  // Full range output (0-255)
-            
-            // Note: Some FFmpeg builds ignore these settings
-            sws_setColorspaceDetails(m_videoCtx.swsContext, 
-                                     coefs, srcRange, 
-                                     coefs, dstRange, 
-                                     0, 1 << 16, 1 << 16);
-            
-            logger().debug("SWS context created: colorspace=" + std::to_string(colorSpace) + 
-                                     " srcRange=" + std::to_string(srcRange));
-        }
-        
-        m_videoCtx.lastWidth = width;
-        m_videoCtx.lastHeight = height;
-        m_videoCtx.lastFormat = srcFormat;
-        m_videoCtx.lastColorSpace = colorSpace;
-        m_videoCtx.lastSrcRange = srcRange;
-    }
-    
-    if (!m_videoCtx.swsContext) return result;
-    
-    int dstBytesPerRow = width * 4;
-    int dstBufferSize = dstBytesPerRow * height;
-    
-    // Reuse persistent buffer instead of allocating every frame
-    if ((int)m_videoCtx.swsBuffer.size() < dstBufferSize) {
-        m_videoCtx.swsBuffer.resize(dstBufferSize);
-    }
-    m_videoCtx.swsStride = dstBytesPerRow;
-    
-    uint8_t* dstData[4] = { m_videoCtx.swsBuffer.data(), nullptr, nullptr, nullptr };
-    int dstStride[4] = { dstBytesPerRow, 0, 0, 0 };
-    
-    int swsRet = sws_scale(m_videoCtx.swsContext, sourceFrame->data, sourceFrame->linesize, 0, height, dstData, dstStride);
-    if (swsRet <= 0) {
-        logger().warning("sws_scale failed or returned 0 lines");
-        return result;
+        base = std::shared_ptr<AVFrame>(transferredFrame.release(), frameDeleter);
     }
 
-    result.width = width;
-    result.height = height;
-    // Copy buffer data to preserve swsBuffer for reuse.
-    // This avoids reallocating ~8MB per frame when move leaves swsBuffer empty.
-    result.data.assign(m_videoCtx.swsBuffer.data(), m_videoCtx.swsBuffer.data() + dstBufferSize);
-    
+    // 帧未携带色彩空间时回填 codec 的（clone/产物都是独立 AVFrame，改字段安全），
+    // 否则 VideoAdjuster 的 BGRA 转换会按错误矩阵走
+    if (base->colorspace == AVCOL_SPC_UNSPECIFIED &&
+        m_videoCtx.codecContext &&
+        m_videoCtx.codecContext->colorspace != AVCOL_SPC_UNSPECIFIED) {
+        base->colorspace = m_videoCtx.codecContext->colorspace;
+    }
+
+    // 转换前快照配置与代次，保证 data 与 adjustGeneration 一致
+    VideoFilterConfig config;
+    uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+        config = m_videoFilterConfig;
+        generation = m_videoAdjustGeneration.load();
+    }
+
+    // 阶段 2：画面调节（eq/hue）+ sws 转 BGRA
+    result = m_decodeAdjuster.convert(base.get(), config);
+    if (result.data.empty()) {
+        return result;
+    }
+    result.base = std::move(base);
+    result.adjustGeneration = generation;
     return result;
+}
+
+bool FFmpegPlayer::refreshVideoFrame(VideoFrame& frame) {
+    if (!frame.base) {
+        return false;
+    }
+
+    VideoFilterConfig config;
+    uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+        generation = m_videoAdjustGeneration.load();
+        if (frame.adjustGeneration == generation) {
+            return false;
+        }
+        config = m_videoFilterConfig;
+    }
+
+    VideoFrame refreshed = m_refreshAdjuster.convert(frame.base.get(), config);
+    if (refreshed.data.empty()) {
+        return false;
+    }
+    frame.data = std::move(refreshed.data);
+    frame.width = refreshed.width;
+    frame.height = refreshed.height;
+    frame.adjustGeneration = generation;
+    return true;
 }
 
 std::vector<float> FFmpegPlayer::processAudioFrame(AVFrame* frame) {

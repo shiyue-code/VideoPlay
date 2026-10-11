@@ -256,9 +256,21 @@ AudioFilterConfig FFmpegPlayer::audioFilterConfig() const {
 
 void FFmpegPlayer::setVideoFilterConfig(const VideoFilterConfig& config) {
     std::lock_guard<std::mutex> lock(m_videoFilterMutex);
+    // 画面调节（eq/hue）参数变化才推进代次，让已出队帧可被 refreshVideoFrame 重算；
+    // 去隔行/HDR 属阶段 1，仍只作用于新解码的帧
+    const VideoFilterConfig& old = m_videoFilterConfig;
+    if (config.enabled != old.enabled ||
+        config.brightness != old.brightness ||
+        config.contrast != old.contrast ||
+        config.saturation != old.saturation ||
+        config.hue != old.hue ||
+        config.gamma != old.gamma) {
+        ++m_videoAdjustGeneration;
+    }
+    // 阶段 1 图在 ensureVideoFilterGraph 中按描述串比对重建；只调 eq/hue 时不重建，
+    // 避免拖动滑杆时 bwdif 反复丢失前后帧状态
     m_videoFilterConfig = config;
-    m_videoFilterDescription.clear();  // 下次 convert 时重建 graph
-    logger().info("Video filter config updated");
+    logger().debug("Video filter config updated");
 }
 
 VideoFilterConfig FFmpegPlayer::videoFilterConfig() const {
@@ -318,8 +330,8 @@ bool FFmpegPlayer::isHdrFrame(const AVFrame* frame) const {
 }
 
 std::string FFmpegPlayer::buildVideoFilterDescription(const AVFrame* frame) const {
+    // 阶段 1 滤镜：HDR 色调映射与去隔行。eq/hue 属阶段 2，由 VideoAdjuster 承担
     const bool needDeint = m_videoFilterConfig.deinterlace != DeinterlaceMode::Off;
-    const bool needEq = m_videoFilterConfig.enabled && !m_videoFilterConfig.eqIsIdentity();
 
     bool needToneMap = false;
     if (m_videoFilterConfig.hdrToneMap == HdrToneMapMode::On) {
@@ -328,7 +340,7 @@ std::string FFmpegPlayer::buildVideoFilterDescription(const AVFrame* frame) cons
         needToneMap = isHdrFrame(frame);
     }
 
-    if (!needDeint && !needEq && !needToneMap) {
+    if (!needDeint && !needToneMap) {
         return {};
     }
 
@@ -390,13 +402,6 @@ std::string FFmpegPlayer::buildVideoFilterDescription(const AVFrame* frame) cons
         }
     }
 
-    if (needEq) {
-        desc << ",eq=brightness=" << m_videoFilterConfig.brightness
-             << ":contrast=" << m_videoFilterConfig.contrast
-             << ":saturation=" << m_videoFilterConfig.saturation
-             << ":gamma=" << m_videoFilterConfig.gamma;
-        desc << ",hue=h=" << m_videoFilterConfig.hue;
-    }
     return desc.str();
 }
 
