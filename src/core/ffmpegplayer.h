@@ -12,6 +12,8 @@
 #include <atomic>
 #include <vector>
 #include <deque>
+#include <map>
+#include <iterator>
 #include <optional>
 
 extern "C" {
@@ -116,6 +118,11 @@ public:
     // 普通 seek 取队首（pts 最小）；回退落点取队尾（pts < anchor 最大），
     // 队列为空且回退落点就绪时返回 true 且 frame 为空（已是第一帧）
     bool getStepLandingFrame(VideoFrame& frame);
+    // +1 步进专用：取 pts 大于 prevPtsMs 的第一帧（逐帧步进的下一帧）。
+    // 更早的帧不移除（它们构成 -1 落点可直接命中的回退窗口）；
+    // 若队列里没有更晚的帧，顺带把已消费的最旧帧迁入历史腾队位，
+    // 让暂停态下被背压停住的解码线程继续产帧
+    bool getStepForwardFrame(int64_t prevPtsMs, VideoFrame& frame);
 
     // 画面调节参数变化后用基础帧就地重算 frame.data（仅主线程调用）；
     // 无需更新或无基础帧返回 false
@@ -305,6 +312,17 @@ private:
     int64_t m_stepBackDecodedMaxMs = -1;          // 回退窗口内已解出的最大 pts（仅解码线程）
     int m_stepBackFwdCount = 0;                   // 回退窗口内已解出的 >=anchor 帧数（仅解码线程）
     static constexpr int kStepBackFwdKeep = 32;   // 回退补解码保留的锚点后帧数（覆盖重排+步进缓冲）
+
+    // 步进历史（均持 m_videoQueueMutex）：离开队列的消费帧按 pts 入此表，
+    // 与队列并集构成连续的已解码窗口——-1 落点可直接命中解码序上的相邻
+    // 前帧，免 seek、免解码。被丢弃而未入历史的帧抬 m_stepDropWatermark：
+    // 水位以下的候选可能与锚点隔着被挤掉的帧，不可信，回退走真实 seek
+    std::map<int64_t, VideoFrame> m_stepHistory;
+    int64_t m_stepDropWatermark = -1;
+    size_t m_stepHistBytes = 0;
+    static constexpr size_t kStepHistByteCap = 256ull * 1024 * 1024;
+    void pushStepHistory(VideoFrame frame);
+
     static constexpr int kMaxAudioQueueMs = 1000;
     static constexpr int kPreloadAudioMs = 40;
     static constexpr int kPreloadTimeoutMs = 1000;

@@ -340,6 +340,9 @@ void FFmpegPlayer::closeFile() {
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
+        m_stepHistory.clear();
+        m_stepHistBytes = 0;
+        m_stepDropWatermark = -1;
     }
     m_decodeCondition.notify_all();
 }
@@ -595,6 +598,9 @@ void FFmpegPlayer::stop() {
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
+        m_stepHistory.clear();
+        m_stepHistBytes = 0;
+        m_stepDropWatermark = -1;
     }
 
     if (!wasAlreadyStopped) {
@@ -617,6 +623,30 @@ void FFmpegPlayer::seek(int64_t positionMs) {
 
 void FFmpegPlayer::seekStepBack(int64_t anchorPtsMs) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    // 窗口命中：队列/历史里已有可信的 pts < anchor 前帧时免 seek、
+    // 免解码，直接标就绪——连续 -1（含暂停后首击）零解码开销
+    if (!m_seekRequested.load() && !m_seekBurstActive.load()) {
+        std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
+        int64_t predPts = -1;
+        for (auto it = m_videoFrameQueue.rbegin();
+             it != m_videoFrameQueue.rend(); ++it) {
+            if (it->pts < anchorPtsMs) {
+                predPts = it->pts;
+                break;
+            }
+        }
+        auto hit = m_stepHistory.lower_bound(anchorPtsMs);
+        if (hit != m_stepHistory.begin()) {
+            const int64_t histPrev = std::prev(hit)->first;
+            predPts = std::max(predPts, histPrev);
+        }
+        if (predPts > m_stepDropWatermark) {
+            // 落点标志最后置位，作为对消费端的"发布"
+            m_landingIsStepBack = true;
+            m_seekLandingReady = anchorPtsMs;
+            return;
+        }
+    }
     // 锚点先置位再发请求：解码线程处理 handleSeek 时按回退模式裁剪，
     // 队列只留 pts < anchor 的帧，落点取队尾（真正的上一帧）
     m_stepBackAnchorMs = anchorPtsMs;
@@ -660,6 +690,10 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
     {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
+        // seek 后旧窗口不再连续：历史清空、水位归零，新的解码窗口重建
+        m_stepHistory.clear();
+        m_stepHistBytes = 0;
+        m_stepDropWatermark = -1;
     }
     // 新 seek 使未消费的落点就绪标志失效
     m_seekLandingReady = -1;
@@ -1694,6 +1728,19 @@ void FFmpegPlayer::setNetworkStateCallback(NetworkStateCallback callback) {
     m_networkStateCallback = callback;
 }
 
+void FFmpegPlayer::pushStepHistory(VideoFrame frame) {
+    // 调用方必须持 m_videoQueueMutex；按字节容量逐出最旧帧
+    m_stepHistBytes += frame.data.size();
+    m_stepHistory.emplace(frame.pts, std::move(frame));
+    while (m_stepHistBytes > kStepHistByteCap && m_stepHistory.size() > 1) {
+        auto it = m_stepHistory.begin();
+        m_stepHistBytes -= it->second.data.size();
+        // 历史逐出等同于未捕获的丢帧：抬水位
+        m_stepDropWatermark = std::max(m_stepDropWatermark, it->first);
+        m_stepHistory.erase(it);
+    }
+}
+
 void FFmpegPlayer::pushVideoFrame(VideoFrame&& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
     // 满时丢 pts 最小（最旧）的一帧；补解码窗口内放宽上限，
@@ -1701,6 +1748,10 @@ void FFmpegPlayer::pushVideoFrame(VideoFrame&& frame) {
     const size_t limit = m_seekBurstActive.load() ? kSeekBurstQueueSize
                                                   : kMaxVideoQueueSize;
     if (m_videoFrameQueue.size() >= limit) {
+        // 未消费即被挤掉的帧抬水位：队列/历史里 pts 更小的旧帧
+        // 与锚点间可能隔着这个空洞，不能再当 -1 的落点
+        m_stepDropWatermark = std::max(m_stepDropWatermark,
+                                       m_videoFrameQueue.front().pts);
         m_videoFrameQueue.pop_front();
     }
     // 按 pts 有序插入：B 帧重排的解码顺序（如 P320 早于 B200 入队）
@@ -1746,17 +1797,18 @@ bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     
     // 特殊值 targetPtsMs < 0：启动 fallback，直接取最早的一帧避免黑屏
     if (targetPtsMs < 0) {
+        pushStepHistory(m_videoFrameQueue.front());
         frame = std::move(m_videoFrameQueue.front());
         m_videoFrameQueue.pop_front();
         m_decodeCondition.notify_one();
         return true;
     }
-    
+
     // 严格同步：所有帧都还没到时间，保持当前显示帧（不提前显示未来帧）
     if (m_videoFrameQueue.front().pts > targetPtsMs) {
         return false;
     }
-    
+
     // 找到 PTS <= targetPtsMs 的最后一帧，并丢弃前面的旧帧
     size_t index = 0;
     for (size_t i = 0; i < m_videoFrameQueue.size(); ++i) {
@@ -1766,7 +1818,13 @@ bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
             break;
         }
     }
-    
+
+    // 所有被消费的帧（含返回帧）进步进历史：历史 ∪ 队列保持连续的
+    // 已解码窗口，暂停后 -1 落点可以直接命中前帧，不用重新 seek
+    for (size_t i = 0; i < index; ++i) {
+        pushStepHistory(std::move(m_videoFrameQueue[i]));
+    }
+    pushStepHistory(m_videoFrameQueue[index]);
     frame = std::move(m_videoFrameQueue[index]);
     m_videoFrameQueue.erase(m_videoFrameQueue.begin(), m_videoFrameQueue.begin() + index + 1);
     m_decodeCondition.notify_one();
@@ -1787,39 +1845,82 @@ bool FFmpegPlayer::getStepLandingFrame(VideoFrame& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
     if (m_landingIsStepBack.load()) {
         // 回退落点：pts < anchor 的最大帧（队列按 pts 有序，
-        // 锚点即 m_seekLandingReady 存的 seek 位置）
+        // 锚点即 m_seekLandingReady 存的锚点位置）。候选从队列与
+        // 步进历史的并集里取——消费过的帧（如 +1 走过的）在历史里，
+        // 它们才保证解码序相邻；低于丢弃水位的候选不可信
         const int64_t anchor = m_seekLandingReady.load();
-        size_t index = 0;
-        bool found = false;
-        for (size_t i = 0; i < m_videoFrameQueue.size(); ++i) {
-            if (m_videoFrameQueue[i].pts < anchor) {
-                index = i;
-                found = true;
-            } else {
+        const VideoFrame* cand = nullptr;
+        for (auto it = m_videoFrameQueue.rbegin();
+             it != m_videoFrameQueue.rend(); ++it) {
+            if (it->pts < anchor) {
+                if (it->pts > m_stepDropWatermark) cand = &*it;
                 break;
             }
         }
-        if (!found) {
-            // 已是第一帧：pts < anchor 的帧不存在，
-            // 返回空帧让调用方取消步进
+        auto hit = m_stepHistory.lower_bound(anchor);
+        if (hit != m_stepHistory.begin()) {
+            auto prev = std::prev(hit);
+            if (prev->first > m_stepDropWatermark &&
+                (!cand || prev->first > cand->pts)) {
+                cand = &prev->second;
+            }
+        }
+        if (!cand) {
+            // 已是第一帧（或窗口内无可信前帧）：返回空帧让调用方取消步进
             m_seekLandingReady = -1;
             m_landingIsStepBack = false;
             return true;
         }
-        frame = std::move(m_videoFrameQueue[index]);
-        // 丢弃落点之前的旧帧；保留 >=anchor 的缓冲窗口，
-        // +1 步进靠它精确回到锚点帧
-        m_videoFrameQueue.erase(m_videoFrameQueue.begin(),
-                                m_videoFrameQueue.begin() + index + 1);
+        // 只取不删：落点与前驱都留在窗口里，连续 -1/+1 继续命中
+        frame = *cand;
     } else {
         if (m_videoFrameQueue.empty()) {
             return false;
         }
+        pushStepHistory(m_videoFrameQueue.front());
         frame = std::move(m_videoFrameQueue.front());
         m_videoFrameQueue.pop_front();
     }
     m_seekLandingReady = -1;
     m_landingIsStepBack = false;
+    m_decodeCondition.notify_one();
+    return true;
+}
+
+bool FFmpegPlayer::getStepForwardFrame(int64_t prevPtsMs, VideoFrame& frame) {
+    std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+    // seek 请求未处理前，队列里仍是旧位置帧，不能取
+    if (m_seekRequested.load()) {
+        return false;
+    }
+    // 取 pts > prevPtsMs 的第一帧：已消费的帧在历史里（比如
+    // +1 走过后又 -1 回去），未消费的在队列里，两边都要看
+    auto qit = std::upper_bound(m_videoFrameQueue.begin(),
+                                m_videoFrameQueue.end(), prevPtsMs,
+                                [](int64_t pts, const VideoFrame& f) {
+                                    return pts < f.pts;
+                                });
+    auto hit = m_stepHistory.upper_bound(prevPtsMs);
+    if (hit != m_stepHistory.end() &&
+        (qit == m_videoFrameQueue.end() || hit->first < qit->pts)) {
+        // 历史命中：只取不删，帧留在窗口里供 -1 继续命中
+        frame = hit->second;
+        return true;
+    }
+    if (qit == m_videoFrameQueue.end()) {
+        // 还没有更晚的帧：把已消费的最旧帧迁入历史腾队位，
+        // 解除暂停态背压让解码线程继续产出后续帧
+        for (int moved = 0; moved < 4 && !m_videoFrameQueue.empty() &&
+             m_videoFrameQueue.front().pts <= prevPtsMs; ++moved) {
+            pushStepHistory(std::move(m_videoFrameQueue.front()));
+            m_videoFrameQueue.pop_front();
+        }
+        m_decodeCondition.notify_one();
+        return false;
+    }
+    pushStepHistory(*qit);
+    frame = std::move(*qit);
+    m_videoFrameQueue.erase(qit);
     m_decodeCondition.notify_one();
     return true;
 }

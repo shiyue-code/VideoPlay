@@ -293,12 +293,14 @@ TEST_F(PlaybackTest, StepBackLandingIsPreviousFrame)
     // 模拟 app 逐帧步进：暂停 → seekStepBack(显示帧 pts) → getStepLandingFrame。
     // 素材是 x264 默认编码（含 B 帧），解码顺序 ≠ pts 顺序——
     // 落点必须是解码序上 anchor 的上一帧（pts 恰好少一档），
-    // 而不是重排后的下一个 P 帧，也不是上一个被取用的帧
+    // 而不是重排后的下一个 P 帧，也不是上一个被取用的帧。
+    // 先做一次普通 seek：历史/队列被清空，第一次 -1 必然走真实补解码，
+    // 之后连续 -1 命中已解码窗口（免 seek、免解码）
     FFmpegPlayer player;
     ASSERT_TRUE(player.loadFile(s_file12));
     player.play();
 
-    // 播到 ~2s，记录当前显示帧 pts（素材 25fps，帧间隔 40ms）
+    // 播到 ~2s，确认出帧正常
     int64_t shownPts = -1;
     const auto t0 = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     while (std::chrono::steady_clock::now() < t0 && shownPts < 2000) {
@@ -313,7 +315,19 @@ TEST_F(PlaybackTest, StepBackLandingIsPreviousFrame)
     ASSERT_GE(shownPts, 2000) << "没取到足够的帧";
     player.pause();
 
-    // -1：以显示帧 pts 为锚做回退落点 seek
+    // 普通 seek 到 6s：清空已解码窗口，落点消费后 -1 必须真实补解码
+    player.seek(6000);
+    VideoFrame seekLanding;
+    const auto d0 = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < d0 && seekLanding.data.empty()) {
+        if (!player.getStepLandingFrame(seekLanding)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(seekLanding.data.empty()) << "暂停 seek 没等到落点";
+    shownPts = seekLanding.pts;
+
+    // -1：以显示帧 pts 为锚做回退落点 seek（真实解码路径）
     player.seekStepBack(shownPts);
 
     VideoFrame landing;
@@ -334,7 +348,7 @@ TEST_F(PlaybackTest, StepBackLandingIsPreviousFrame)
     VideoFrame next;
     const auto d2 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < d2 && next.data.empty()) {
-        if (!player.getVideoFrame(-1, next)) {
+        if (!player.getStepForwardFrame(landing.pts, next)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
         }
     }
@@ -345,12 +359,30 @@ TEST_F(PlaybackTest, StepBackLandingIsPreviousFrame)
     VideoFrame next2;
     const auto d3 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < d3 && next2.data.empty()) {
-        if (!player.getVideoFrame(-1, next2)) {
+        if (!player.getStepForwardFrame(next.pts, next2)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
         }
     }
     ASSERT_FALSE(next2.data.empty());
     EXPECT_EQ(next2.pts, shownPts + 40) << "next2=" << next2.pts;
+
+    // 连续 -1：窗口里已有前帧，直接命中（免解码）。
+    // 跨过刚 +1 走过的帧验证历史与队列并集取前驱的正确性
+    int64_t anchor = next2.pts;
+    for (int i = 1; i <= 3; ++i) {
+        player.seekStepBack(anchor);
+        VideoFrame back;
+        const auto d4 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < d4 && back.data.empty()) {
+            if (!player.getStepLandingFrame(back)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(8));
+            }
+        }
+        ASSERT_FALSE(back.data.empty()) << "第 " << i << " 次回退没落点";
+        EXPECT_EQ(back.pts, anchor - 40)
+            << "i=" << i << " back=" << back.pts << " anchor=" << anchor;
+        anchor = back.pts;
+    }
     player.stop();
 }
 
@@ -363,7 +395,7 @@ TEST_F(PlaybackTest, StepBackAfterInstantPause)
     player.play();
     player.pause();
 
-    // +1 两次：恢复播放 → getVideoFrame(-1) 最早出队 → 暂停
+    // +1 两次：恢复播放 → getStepForwardFrame 取下一帧 → 暂停
     // （第一帧 pts=0 没有上一帧，测 -1 需要展示第二帧）
     VideoFrame shown;
     for (int i = 0; i < 2 && shown.pts <= 0; ++i) {
@@ -371,7 +403,7 @@ TEST_F(PlaybackTest, StepBackAfterInstantPause)
         const auto d1 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         while (std::chrono::steady_clock::now() < d1 && shown.pts <= 0) {
             VideoFrame f;
-            if (player.getVideoFrame(-1, f)) {
+            if (player.getStepForwardFrame(shown.data.empty() ? -1 : shown.pts, f)) {
                 shown = std::move(f);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(8));
@@ -400,7 +432,7 @@ TEST_F(PlaybackTest, StepBackAfterInstantPause)
     VideoFrame back;
     const auto d3 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < d3 && back.data.empty()) {
-        if (!player.getVideoFrame(-1, back)) {
+        if (!player.getStepForwardFrame(landing.pts, back)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
         }
     }

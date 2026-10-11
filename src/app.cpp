@@ -686,36 +686,30 @@ void VideoPlayerApp::render() {
     bool gotFrame = false;
     if (m_player) {
         if (m_waitingStepFrame || m_stepping) {
-            // 步进专用通道：最早出队，不走时钟同步。
-            // -1：seek 后队首即落点帧；+1：恢复播放后队首即下一帧。
-            // 音频时钟可能领先显示帧，走时钟同步会一次吐出多帧造成跳步
+            // 步进专用通道：按 pts 取帧，不走时钟同步。
+            // -1：落点帧 = pts < anchor 的最大帧（队列/历史里解码序相邻）；
+            // +1：取 pts > 当前显示帧的第一帧。音频时钟可能领先显示帧，
+            // 走时钟同步会一次吐出多帧造成跳步
             bool stepFinished = false;
-            while ((m_waitingStepFrame || m_stepping) &&
-                   (m_waitingStepFrame
-                        ? m_player->getStepLandingFrame(frame)
-                        : m_player->getVideoFrame(-1, frame))) {
-                if (m_waitingStepFrame) {
+            if (m_waitingStepFrame) {
+                if (m_player->getStepLandingFrame(frame)) {
                     if (frame.data.empty()) {
                         // 已是第一帧：落点就绪但无更早帧，取消步进
                         m_waitingStepFrame = false;
-                        stepFinished = true;
-                        break;
+                    } else {
+                        m_displayFrame = std::move(frame);
+                        m_position = m_displayFrame.pts;
+                        m_seekTargetPosition = -1;
+                        m_waitingStepFrame = false;
+                        if (m_renderer) {
+                            m_renderer->showOSD(OSDType::SeekBackward,
+                                                formatTime(m_displayFrame.pts));
+                        }
                     }
-                    m_displayFrame = std::move(frame);
-                    m_position = m_displayFrame.pts;
-                    m_seekTargetPosition = -1;
-                    m_waitingStepFrame = false;
                     stepFinished = true;
-                    if (m_renderer) {
-                        m_renderer->showOSD(OSDType::SeekBackward,
-                                            formatTime(m_displayFrame.pts));
-                    }
-                    break;
                 }
-                // +1：丢弃 pts 不前进的过期帧，第一帧新画面到位即暂停
-                if (m_stepPrevPts >= 0 && frame.pts <= m_stepPrevPts) {
-                    continue;
-                }
+            } else if (m_player->getStepForwardFrame(m_stepPrevPts, frame)) {
+                // +1：第一帧新画面到位即暂停
                 m_displayFrame = std::move(frame);
                 m_position = m_displayFrame.pts;
                 m_stepping = false;
@@ -725,7 +719,6 @@ void VideoPlayerApp::render() {
                     m_renderer->showOSD(OSDType::SeekForward,
                                         formatTime(m_displayFrame.pts));
                 }
-                break;
             }
             // 飞行期记下的按键在落点后逐帧执行，保证按几次走几帧
             if (stepFinished && m_pendingStepDir != 0) {
