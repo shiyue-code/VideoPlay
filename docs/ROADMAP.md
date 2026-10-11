@@ -167,7 +167,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | `autoAnalyze` | 配置有字段，打开文件不会自动分析 |
 | 证书校验关闭 | WinHTTP `SECURITY_FLAG_IGNORE_*` |
 | CI | 只构建 Windows |
-| 测试 | 11 个目标 108 个用例；剧集识别、Settings 读写、ASS、画面调节已有单测 |
+| 测试 | 14 个目标 193 个用例；剧集识别、Settings 读写、ASS、画面调节、ai_utils、SearchEngine、common.h 助手已有单测 |
 | ~~帮助文本~~ ✅ | F1 已补齐 Shift+G/H、Ctrl+B/Shift+B、Ctrl+F、C/F6、Ctrl(±Shift)+方向键、Ctrl+0、Delete |
 | ~~渲染循环~~ ✅ | 已开 vsync（`SDL_SetRenderVSync`）；vsync 下最小帧间隔 4ms，present 未阻塞时补睡 |
 

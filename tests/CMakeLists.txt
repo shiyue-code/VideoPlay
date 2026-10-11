@@ -77,6 +77,30 @@ target_include_directories(test_string_utils PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DI
 target_link_libraries(test_string_utils PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_string_utils)
 
+add_executable(test_common
+    test_common_gtest.cpp
+)
+target_include_directories(test_common PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_common PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_common)
+
+add_executable(test_ai_utils
+    test_ai_utils_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_ai_utils PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_ai_utils PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_ai_utils)
+
+add_executable(test_searchengine
+    test_searchengine_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/searchengine.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_searchengine PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_searchengine PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_searchengine)
+
 add_executable(test_settings_maintenance
     test_settings_maintenance_gtest.cpp
     ${CMAKE_SOURCE_DIR}/src/core/settings_maintenance.cpp

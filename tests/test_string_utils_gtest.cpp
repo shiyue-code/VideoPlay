@@ -90,3 +90,92 @@ TEST(StringUtils, SplitTimestampTokensUnclosedBracket)
     EXPECT_EQ(tokens[0].text, "前面 [12:34");
     EXPECT_FALSE(tokens[0].isTimestamp);
 }
+
+TEST(StringUtils, SplitTimestampTokensInvalidThenValid)
+{
+    // 解析失败的 "[...]" 归入普通文本，后面的合法时间戳仍被识别
+    auto tokens = splitTimestampTokens("[abc] [0:05]");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_FALSE(tokens[0].isTimestamp);
+    EXPECT_EQ(tokens[0].text, "[abc] ");
+    EXPECT_TRUE(tokens[1].isTimestamp);
+    EXPECT_EQ(tokens[1].ms, 5000);
+}
+
+TEST(StringUtils, SplitTimestampTokensAdjacent)
+{
+    auto tokens = splitTimestampTokens("[0:05][1:10] 文本");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_TRUE(tokens[0].isTimestamp);
+    EXPECT_EQ(tokens[0].ms, 5000);
+    EXPECT_TRUE(tokens[1].isTimestamp);
+    EXPECT_EQ(tokens[1].ms, 70000);
+    EXPECT_EQ(tokens[2].text, " 文本");
+    EXPECT_FALSE(tokens[2].isTimestamp);
+}
+
+TEST(StringUtils, ParseBracketTimestampMsMinutesSeconds)
+{
+    int64_t ms = 0;
+    EXPECT_TRUE(parseBracketTimestampMs("[0:07]", ms));
+    EXPECT_EQ(ms, 7000);
+    EXPECT_TRUE(parseBracketTimestampMs("[01:23]", ms));
+    EXPECT_EQ(ms, 83000);
+}
+
+TEST(StringUtils, ParseBracketTimestampMsHours)
+{
+    int64_t ms = 0;
+    EXPECT_TRUE(parseBracketTimestampMs("[1:02:03]", ms));
+    EXPECT_EQ(ms, 3723000);
+}
+
+TEST(StringUtils, ParseBracketTimestampMsRejectsMalformed)
+{
+    int64_t ms = -1;
+    EXPECT_FALSE(parseBracketTimestampMs("", ms));
+    EXPECT_FALSE(parseBracketTimestampMs("[]", ms));
+    EXPECT_FALSE(parseBracketTimestampMs("[abc]", ms));
+    EXPECT_FALSE(parseBracketTimestampMs("[ab:cd]", ms));
+    EXPECT_FALSE(parseBracketTimestampMs("[1:2:3:4]", ms));  // 多于两个冒号
+    EXPECT_FALSE(parseBracketTimestampMs("1:23", ms));        // 缺括号
+}
+
+TEST(StringUtils, ParseBracketTimestampMsUnclosedStillMatches)
+{
+    // sscanf 只统计转换成功的个数，结尾 ']' 未匹配不影响返回值：
+    // 直接调用时未闭合的 "[mm:ss" 也返回 true（splitTimestampTokens 只喂闭合片段）
+    int64_t ms = 0;
+    EXPECT_TRUE(parseBracketTimestampMs("[12:34", ms));
+    EXPECT_EQ(ms, 754000);
+}
+
+TEST(StringUtils, ParseHmsTimestampMs)
+{
+    int ms = 0;
+    EXPECT_TRUE(parseHmsTimestampMs("1:05", ms));
+    EXPECT_EQ(ms, 65000);
+    EXPECT_TRUE(parseHmsTimestampMs("01:02:03", ms));
+    EXPECT_EQ(ms, 3723000);
+    EXPECT_TRUE(parseHmsTimestampMs("0:07", ms));
+    EXPECT_EQ(ms, 7000);
+}
+
+TEST(StringUtils, ParseHmsTimestampMsToleratesMarkers)
+{
+    int ms = 0;
+    // 首尾非数字字符与 '*' 会被剥掉
+    EXPECT_TRUE(parseHmsTimestampMs("*1:05*", ms));
+    EXPECT_EQ(ms, 65000);
+    EXPECT_TRUE(parseHmsTimestampMs("abc2:30xyz", ms));
+    EXPECT_EQ(ms, 150000);
+}
+
+TEST(StringUtils, ParseHmsTimestampMsRejectsInvalid)
+{
+    int ms = -1;
+    EXPECT_FALSE(parseHmsTimestampMs("", ms));
+    EXPECT_FALSE(parseHmsTimestampMs("abc", ms));
+    EXPECT_FALSE(parseHmsTimestampMs("12", ms));       // 没有冒号
+    EXPECT_FALSE(parseHmsTimestampMs("1:2:3:4", ms));  // 多于两个冒号
+}
