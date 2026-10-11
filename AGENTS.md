@@ -182,7 +182,7 @@ Linux 仍是自绘拖动，`usesNativeResize()` 为 false。
 4. 进度条缩略图由 `FFmpegPlayer` 独立预览解码线程生成，不要从主视频队列 `getVideoFrame` 里抽帧。
 5. `AIConfig::autoAnalyze` 已写入配置，打开文件时不会自动分析。
 6. HTTPS 请求忽略证书错误（`SECURITY_FLAG_IGNORE_*`），不要在新代码里扩大这个范围。
-7. 应用内帮助文本仍把 `[` / `]` 同时写成调速和 AB 循环；实际按键以 [`README.md`](README.md) 为准（`.` 调速，`[` `]` 为 AB 循环）。
+7. 应用内帮助文本（F1）已与实际按键一致：`.` 调速，`[` `]` `\` 为 AB 循环；改键位时同步更新 `app_events.cpp` 的帮助表与 README。
 8. 文件关联（`fileassoc.*`）只写 `HKCU\Software\Classes` 与 `HKCU\Software\RegisteredApplications`，不写 HKLM/HKCR、不要管理员权限；扩展名默认值被其它应用占用时只加 `OpenWithProgids`，不抢占。
 
 ## 安全

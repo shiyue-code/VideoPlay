@@ -592,6 +592,7 @@ void VideoPlayerApp::showHelp() {
     section("其它");
     row("T", "窗口置顶");
     row("Tab", "媒体信息");
+    row("I", "显隐右上角同步/统计信息");
     row("F12", "截图");
     row("Shift+F12", "复制截图到剪贴板");
     row("Ctrl+F", "搜索内容");
@@ -602,6 +603,7 @@ void VideoPlayerApp::showHelp() {
 
     section("鼠标操作");
     row("左键", "点击控制栏按钮");
+    row("双击", "视频画面切换全屏");
     row("拖动", "进度条跳转");
     row("滚轮", "调节音量");
     row("拖放", "拖放文件到窗口播放");

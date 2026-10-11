@@ -26,7 +26,7 @@
 | 字幕 | SRT/ASS/VTT/PGS、内封轨、同名外挂自动加载、字幕同步 |
 | 音频 | 音量/静音、多音轨、音频同步、音频滤镜预设 |
 | 导航 | 用户书签、媒体信息（Tab）、进度记忆 |
-| 界面 | 全屏、无边框、置顶、截图、菜单栏、控制栏 |
+| 界面 | 全屏、无边框、置顶、截图、菜单栏、控制栏、逐帧步进、按时间跳转、右上角同步/统计信息 |
 | 网络 | http/https 播放、断线重连 |
 | AI | MiMo / Gemini 分析、搜索、缓存 |
 
@@ -77,8 +77,8 @@
 | 播放列表持久化 | P1 | 已完成 | 写入 `VideoPlay.json` 的 `playlist` |
 | 播放列表拖拽排序 | P1 | 已完成 | 列表项拖拽调整顺序 |
 | 睡眠定时 | P2 | 未开始 | |
-| 逐帧步进 | P1 | 未开始 | 需先修「暂停时 seek 不生效」 |
-| 跳转时间对话框 | P1 | 未开始 | 输入 hh:mm:ss 定位 |
+| 逐帧步进 | P1 | 已完成 | `,` / `Ctrl+←` / `Ctrl+→`，暂停态精确到解码序相邻帧；`-1` 命中已解码窗口缓存零解码，未命中回退关键帧补解码 |
+| 跳转时间对话框 | P1 | 已完成 | `Ctrl+G`，`InputDialog` 输入 hh:mm:ss(.ff) 定位 |
 | ~~打开 URL 对话框~~ | P1 | 已完成 | 文件菜单「打开 URL...」/ Ctrl+U，`InputDialog` 模态输入框；拖入 .srt/.ass/.ssa/.vtt 自动加载为外挂字幕 |
 | 缩略图导航视图 | P3 | 未开始 | |
 
@@ -97,7 +97,7 @@
 | GIF 片段 | P1 | 未开始 | 可复用 AB 区间 |
 | 视频录制 | P2 | 未开始 | |
 | 帧序列导出 | P2 | 未开始 | |
-| 实时统计（fps/码率/丢帧） | P1 | 未开始 | 不要和已有 Tab 媒体信息混为一谈 |
+| 实时统计（fps/码率/丢帧） | P1 | 已完成 | 右上角 A/V/Diff 下固定列宽 F/B/Q/Aq 行（上屏帧率/码率/视频队列/音频缓冲），`I` 键显隐；无丢帧计数 |
 | 快捷键自定义 / 皮肤 | P3 | 未开始 | |
 
 ## 阶段
@@ -130,7 +130,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 2. ~~外挂字幕编码探测（GBK/UTF-16）；内封文本字幕走 `removeFormatting`~~ ✅ 已修
 3. ~~半成品功能接线：音量/窗口尺寸持久化、`MenuId::Borderless`、help 文本~~ ✅ 已修（字幕样式 UI 未做）
 4. ~~给 `EpisodeDetector`、Settings、ASS 补测试~~ ✅ 已补
-5. 打开 URL 对话框、逐帧步进、跳转时间、截图到剪贴板等低成本交互项
+5. ~~打开 URL 对话框、逐帧步进、跳转时间、截图到剪贴板等低成本交互项~~ ✅ 已做（含 mm:ss.ff 帧号显示、I 键统计显隐）
 
 ## 已知缺陷（2026-10-09 审核）
 
@@ -167,7 +167,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | `autoAnalyze` | 配置有字段，打开文件不会自动分析 |
 | 证书校验关闭 | WinHTTP `SECURITY_FLAG_IGNORE_*` |
 | CI | 只构建 Windows |
-| 测试 | 14 个目标 193 个用例；剧集识别、Settings 读写、ASS、画面调节、ai_utils、SearchEngine、common.h 助手已有单测 |
+| 测试 | 15 个目标 205 个用例；剧集识别、Settings 读写、ASS、画面调节、ai_utils、SearchEngine、common.h 助手、步进落点已有单测 |
 | ~~帮助文本~~ ✅ | F1 已补齐 Shift+G/H、Ctrl+B/Shift+B、Ctrl+F、C/F6、Ctrl(±Shift)+方向键、Ctrl+0、Delete |
 | ~~渲染循环~~ ✅ | 已开 vsync（`SDL_SetRenderVSync`）；vsync 下最小帧间隔 4ms，present 未阻塞时补睡 |
 
