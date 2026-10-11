@@ -114,11 +114,12 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
             m_mediaInfo.container = m_formatContext->iformat->name;
         }
     }
+    // 先记录 filePath 再触发回调：上层按回调定位文件时用 filePath() 作键，
+    // 时序颠倒会把新文件的时长写到旧文件名下（污染 resume 判断）
+    m_filePath = filePath;
     if (m_durationCallback && m_duration > 0) {
         m_durationCallback(m_duration);
     }
-    
-    m_filePath = filePath;
     
     // 读取章节信息
     m_chapters.clear();
@@ -323,6 +324,13 @@ void FFmpegPlayer::closeFile() {
     setNetworkState(NetworkState::Idle);
     m_position = 0;
     m_audioSyncOffsetMs = 0;
+    // 裁剪与补解码状态随文件复位（视频裁剪现已持续生效，不会自动解除）
+    m_videoTrimBeforeMs = -1;
+    m_audioTrimBeforeMs = -1;
+    m_seekBurstActive = false;
+    m_seekLandingReady = -1;
+    m_landingIsStepBack = false;
+    m_stepBackAnchorMs = -1;
     m_state = PlaybackState::Stopped;
     m_chapters.clear();
     m_audioTracks.clear();
@@ -479,6 +487,9 @@ void FFmpegPlayer::play() {
         if (m_decodeThread.joinable()) {
             m_decodeThread.join();
         }
+        // 丢弃 Stopped 期间堆积的 seek 请求（进度条点击/步进），
+        // 否则新解码线程启动后先消费旧 seek 跳到原位置，EOF 场景会立刻再次播完
+        m_seekRequested = false;
         if (m_formatContext) {
             handleSeek(0);
         }
@@ -520,7 +531,11 @@ void FFmpegPlayer::pause() {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     if (m_state != PlaybackState::Playing) return;
-    
+
+    // 预缓冲期间用户主动暂停 = 放弃自动开播：否则 checkPreloadComplete
+    // 会在缓冲满/超时后强制起音频并回调 Playing，app 的 m_isPlaying
+    // 被置回 true，画面却冻着——暂停后逐帧步进全部失效
+    m_preloading = false;
     m_state = PlaybackState::Paused;
     
     if (m_audioPlayer) {
@@ -558,6 +573,11 @@ void FFmpegPlayer::stop() {
 
     m_preloading = false;
     m_fallbackClockRunning = false;
+    m_seekBurstActive = false;
+    m_seekLandingReady = -1;
+    m_landingIsStepBack = false;
+    m_stepBackAnchorMs = -1;
+    m_videoTrimBeforeMs = -1;
 
     if (m_audioPlayer) {
         m_audioPlayer->stop();
@@ -589,8 +609,19 @@ void FFmpegPlayer::stop() {
 
 void FFmpegPlayer::seek(int64_t positionMs) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    m_stepBackAnchorMs = -1;  // 普通 seek 取消挂起的逐帧回退模式
     m_seekRequested = true;
     m_seekPosition = positionMs;
+    m_condition.notify_all();
+}
+
+void FFmpegPlayer::seekStepBack(int64_t anchorPtsMs) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // 锚点先置位再发请求：解码线程处理 handleSeek 时按回退模式裁剪，
+    // 队列只留 pts < anchor 的帧，落点取队尾（真正的上一帧）
+    m_stepBackAnchorMs = anchorPtsMs;
+    m_seekRequested = true;
+    m_seekPosition = anchorPtsMs;
     m_condition.notify_all();
 }
 
@@ -630,13 +661,23 @@ void FFmpegPlayer::handleSeek(int64_t positionMs) {
         std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
         m_videoFrameQueue.clear();
     }
+    // 新 seek 使未消费的落点就绪标志失效
+    m_seekLandingReady = -1;
+    m_landingIsStepBack = false;
 
     // 音频媒体时间跟踪复位：目标之前的整帧音频被丢弃
     m_audioNextPtsMs = -1.0;
     m_audioInputExpectedMs = -1.0;
     m_audioTrimBeforeMs = positionMs;
-    // 视频同样裁剪掉 seek 目标之前的帧
-    m_videoTrimBeforeMs = positionMs;
+    if (m_stepBackAnchorMs.load() >= 0) {
+        // 逐帧回退：正向裁剪关闭，handleDecodedVideoFrame 改按锚点统计进度
+        m_videoTrimBeforeMs = -1;
+        m_stepBackDecodedMaxMs = -1;
+        m_stepBackFwdCount = 0;
+    } else {
+        // 视频同样裁剪掉 seek 目标之前的帧（持续生效，见 handleDecodedVideoFrame）
+        m_videoTrimBeforeMs = positionMs;
+    }
 
     m_position = positionMs;
     m_audioBaseMs = positionMs;
@@ -685,6 +726,11 @@ bool FFmpegPlayer::checkPreloadComplete() {
     
     if ((videoReady && audioReady) || timeout) {
         m_preloading = false;
+        // 已不在 Playing（暂停时已清掉预缓冲标志，这里兜底）：
+        // 只收尾不起播，也不要回报完成——true 会让 app 误置 m_isPlaying
+        if (m_state != PlaybackState::Playing) {
+            return false;
+        }
         if (m_audioPlayer) {
             m_audioPlayer->play();
         } else {
@@ -773,18 +819,38 @@ void FFmpegPlayer::decodeLoop() {
                 // 上限要覆盖长 GOP：关键帧间隔长的文件可能要解几百个包才到目标帧
                 pausedBurstPackets = 4096;
                 pausedSeekTargetMs = m_seekPosition.load();
+                m_seekBurstActive = true;
             }
             continue;
         }
 
-        // 补解码到目标帧就位即停（seek 后首帧常是关键帧，pts 会早于目标，
-        // 需继续解到 pts >= 目标才停），避免暂停态持续解码
+        // 补解码到目标后还要再补约 800ms：B 帧重排时目标附近的 B 帧在
+        // 下一个 P/I 帧之后才解出，过早停止会让落点帧根本不在队列里
         if (pausedBurstPackets > 0) {
-            std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
-            if (!m_videoFrameQueue.empty() &&
-                m_videoFrameQueue.back().pts >= pausedSeekTargetMs) {
-                pausedBurstPackets = 0;
+            if (m_stepBackAnchorMs.load() >= 0) {
+                // 回退落点收齐：锚点及之后已入队 32 帧（远超重排深度，
+                // 且为 +1 步进留缓冲）；或解码输出越过锚点+保护窗兜底（EOF 等）
+                if (m_stepBackFwdCount >= kStepBackFwdKeep ||
+                    m_stepBackDecodedMaxMs >=
+                        m_stepBackAnchorMs.load() + kSeekGuardMs) {
+                    pausedBurstPackets = 0;
+                }
+            } else {
+                std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
+                if (!m_videoFrameQueue.empty() &&
+                    m_videoFrameQueue.back().pts >=
+                        pausedSeekTargetMs + kSeekGuardMs) {
+                    pausedBurstPackets = 0;
+                }
             }
+        }
+        if (pausedBurstPackets == 0 && m_seekBurstActive.exchange(false)) {
+            // 重排窗口收齐：普通 seek 取队首（最小 pts）；
+            // 回退落点取队尾（pts < anchor 的最大值）
+            m_landingIsStepBack = m_stepBackAnchorMs.load() >= 0;
+            m_seekLandingReady = pausedSeekTargetMs;
+            // 锚点使命完成：恢复解码后锚点及之后的帧正常入队（+1 需要）
+            m_stepBackAnchorMs = -1;
         }
 
         if (!m_formatContext) {
@@ -876,18 +942,27 @@ bool FFmpegPlayer::waitForDecodeSlot() {
     for (;;) {
         if (m_abortRequest.load()) return false;
         if (m_seekRequested.load()) return true;
+        // 补解码窗口内用更大的上限，否则暂停态无人消费、队列到 10
+        // 就背压死锁，落点帧永远收不齐
+        const size_t videoLimit = m_seekBurstActive.load()
+                                      ? kSeekBurstQueueSize : kMaxVideoQueueSize;
         bool videoHasSpace;
-        {
+        if (m_stepBackAnchorMs.load() >= 0) {
+            // 逐帧回退补解码：队列只起到上限内的环形缓冲作用，
+            // 满时 pushVideoFrame 丢队首保尾部落点，不能背压停解码
+            videoHasSpace = true;
+        } else {
             std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
-            videoHasSpace = m_videoFrameQueue.size() < kMaxVideoQueueSize;
+            videoHasSpace = m_videoFrameQueue.size() < videoLimit;
         }
         bool audioOk = !m_audioPlayer || m_audioPlayer->isPaused() ||
                        m_audioPlayer->queuedMs() <= kMaxAudioQueueMs;
         if (videoHasSpace && audioOk) return true;
         std::unique_lock<std::mutex> vqLock(m_videoQueueMutex);
-        m_decodeCondition.wait_for(vqLock, std::chrono::milliseconds(5), [this] {
+        m_decodeCondition.wait_for(vqLock, std::chrono::milliseconds(5),
+                                   [this, videoLimit] {
             return m_abortRequest.load() || m_seekRequested.load() ||
-                   m_videoFrameQueue.size() < kMaxVideoQueueSize;
+                   m_videoFrameQueue.size() < videoLimit;
         });
     }
 }
@@ -922,10 +997,12 @@ void FFmpegPlayer::drainEndOfStream(AVFrame* vframe, AVFrame* aframe) {
         }
     }
 
-    // 等队列播完：暂停态继续等；有 seek 请求则交回主循环处理
+    // 等队列播完：有 seek 请求则交回主循环处理；暂停态下队列永远不会
+    // 排空（消费停止、音频安全阀也不生效），直接放弃排空进入 Stopped
     int64_t lastAudioQueuedMs = -1;
     int audioStallMs = 0;
     while (!m_abortRequest && !m_seekRequested) {
+        if (m_state == PlaybackState::Paused) break;
         size_t videoQueued;
         {
             std::lock_guard<std::mutex> vqLock(m_videoQueueMutex);
@@ -997,11 +1074,23 @@ void FFmpegPlayer::handleDecodedVideoFrame(AVFrame* frame, double dtRead) {
     int64_t rawPts = frame->pts;
     if (rawPts == AV_NOPTS_VALUE) rawPts = frame->best_effort_timestamp;
     const int64_t rawPtsMs = streamPtsToMs(m_videoCtx.stream, rawPts);
-    if (m_videoTrimBeforeMs >= 0) {
-        if (rawPts != AV_NOPTS_VALUE && rawPtsMs < m_videoTrimBeforeMs) {
-            return;
+    const int64_t stepBackAnchor = m_stepBackAnchorMs.load();
+    if (stepBackAnchor >= 0) {
+        // 逐帧回退：锚点及之后的帧同样入队——落点取 pts < anchor 的最大帧，
+        // 而 +1 步进靠队列里锚点起的缓冲窗口精确回位，不能丢。
+        // 只跟踪解码进度：>=anchor 的帧数够覆盖重排深度即收齐
+        if (rawPts != AV_NOPTS_VALUE && rawPtsMs >= stepBackAnchor) {
+            m_stepBackFwdCount++;
         }
-        m_videoTrimBeforeMs = -1;
+        if (rawPts != AV_NOPTS_VALUE && rawPtsMs > m_stepBackDecodedMaxMs) {
+            m_stepBackDecodedMaxMs = rawPtsMs;
+        }
+    } else if (m_videoTrimBeforeMs >= 0 &&
+        // 持续裁剪：B 帧重排时 pts < target 的帧可能在首个 >= target 的
+        // P/I 帧之后才解出，只裁到首个帧会把它漏进队列；裁剪保持生效，
+        // 由下一次 seek 覆盖新值（loadFile/stop 时复位）
+        rawPts != AV_NOPTS_VALUE && rawPtsMs < m_videoTrimBeforeMs) {
+        return;
     }
 
     auto t1 = HRClock::now();
@@ -1607,10 +1696,22 @@ void FFmpegPlayer::setNetworkStateCallback(NetworkStateCallback callback) {
 
 void FFmpegPlayer::pushVideoFrame(VideoFrame&& frame) {
     std::lock_guard<std::mutex> lock(m_videoQueueMutex);
-    if (m_videoFrameQueue.size() >= kMaxVideoQueueSize) {
+    // 满时丢 pts 最小（最旧）的一帧；补解码窗口内放宽上限，
+    // 防止 seek 落点帧（最小 pts）在 B 重排收齐前被挤掉
+    const size_t limit = m_seekBurstActive.load() ? kSeekBurstQueueSize
+                                                  : kMaxVideoQueueSize;
+    if (m_videoFrameQueue.size() >= limit) {
         m_videoFrameQueue.pop_front();
     }
-    m_videoFrameQueue.push_back(std::move(frame));
+    // 按 pts 有序插入：B 帧重排的解码顺序（如 P320 早于 B200 入队）
+    // 会让队首不是最小 pts，逐帧步进与严格同步都依赖单调 pts
+    auto it = std::lower_bound(m_videoFrameQueue.begin(), m_videoFrameQueue.end(),
+                               frame.pts,
+                               [](const VideoFrame& f, int64_t pts) {
+                                   return f.pts < pts;
+                               });
+    m_videoFrameQueue.insert(it, std::move(frame));
+    m_decodeCondition.notify_one();
 }
 
 std::vector<ChapterInfo> FFmpegPlayer::chapters() const {
@@ -1668,6 +1769,57 @@ bool FFmpegPlayer::getVideoFrame(int64_t targetPtsMs, VideoFrame& frame) {
     
     frame = std::move(m_videoFrameQueue[index]);
     m_videoFrameQueue.erase(m_videoFrameQueue.begin(), m_videoFrameQueue.begin() + index + 1);
+    m_decodeCondition.notify_one();
+    return true;
+}
+
+bool FFmpegPlayer::getStepLandingFrame(VideoFrame& frame) {
+    // 新 seek 请求未处理前不能取：上一次 seek 残留的就绪标志会让
+    // 消费端弹出旧队列的帧
+    if (m_seekRequested.load()) {
+        return false;
+    }
+    // paused seek 补解码窗口未收齐前不取帧：
+    // 队列按 pts 排序，收齐后队首即 seek 目标帧
+    if (m_seekLandingReady.load() < 0) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+    if (m_landingIsStepBack.load()) {
+        // 回退落点：pts < anchor 的最大帧（队列按 pts 有序，
+        // 锚点即 m_seekLandingReady 存的 seek 位置）
+        const int64_t anchor = m_seekLandingReady.load();
+        size_t index = 0;
+        bool found = false;
+        for (size_t i = 0; i < m_videoFrameQueue.size(); ++i) {
+            if (m_videoFrameQueue[i].pts < anchor) {
+                index = i;
+                found = true;
+            } else {
+                break;
+            }
+        }
+        if (!found) {
+            // 已是第一帧：pts < anchor 的帧不存在，
+            // 返回空帧让调用方取消步进
+            m_seekLandingReady = -1;
+            m_landingIsStepBack = false;
+            return true;
+        }
+        frame = std::move(m_videoFrameQueue[index]);
+        // 丢弃落点之前的旧帧；保留 >=anchor 的缓冲窗口，
+        // +1 步进靠它精确回到锚点帧
+        m_videoFrameQueue.erase(m_videoFrameQueue.begin(),
+                                m_videoFrameQueue.begin() + index + 1);
+    } else {
+        if (m_videoFrameQueue.empty()) {
+            return false;
+        }
+        frame = std::move(m_videoFrameQueue.front());
+        m_videoFrameQueue.pop_front();
+    }
+    m_seekLandingReady = -1;
+    m_landingIsStepBack = false;
     m_decodeCondition.notify_one();
     return true;
 }

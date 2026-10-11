@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -414,6 +415,15 @@ inline std::string formatTime(int64_t milliseconds) {
         snprintf(buffer, sizeof(buffer), "%d:%02d", minutes, seconds);
     }
     return std::string(buffer);
+}
+
+// 由帧率推导单帧时长（毫秒，四舍五入，至少 1ms）；fps<=0 时返回 fallbackMs
+inline int64_t frameDurationMs(double fps, int64_t fallbackMs = 40) {
+    if (fps <= 0.0) {
+        return fallbackMs;
+    }
+    int64_t ms = static_cast<int64_t>(std::llround(1000.0 / fps));
+    return ms > 0 ? ms : 1;
 }
 
 template<typename... Args>

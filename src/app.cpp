@@ -34,6 +34,7 @@ Logger& logger() {
     static auto logger = Logger::get("app");
     return *logger;
 }
+
 }
 
 
@@ -239,6 +240,15 @@ bool VideoPlayerApp::initialize() {
     });
     cb.screenshot = ([this]() {
         takeScreenshot();
+    });
+    cb.screenshotClipboard = ([this]() {
+        copyScreenshotToClipboard();
+    });
+    cb.frameStep = ([this](int direction) {
+        stepFrame(direction);
+    });
+    cb.gotoTime = ([this]() {
+        showGotoTimeDialog();
     });
     cb.loopMode = ([this](int mode) {
         Settings::instance().setLoopMode(static_cast<LoopMode>(mode));
@@ -495,7 +505,10 @@ int VideoPlayerApp::run(int argc, char* argv[]) {
             }
             m_progressCacheDirty = true;
             persistPlaylist();
-            if (m_player->loadFile(session.filePath)) {
+            m_loadingFile = session.filePath;
+            const bool sessionLoaded = m_player->loadFile(session.filePath);
+            m_loadingFile.clear();
+            if (sessionLoaded) {
                 m_currentFile = session.filePath;
                 m_renderer->setWindowTitle(
                     displayNameForSource(session.filePath) + " - " + APP_TITLE);
@@ -614,6 +627,12 @@ void VideoPlayerApp::render() {
         }
     }
 
+    // 暂停时以显示帧 pts 为准：音频时钟与画面可差一帧，
+    // UI 位置跟随实际呈现的画面（逐帧步进依赖这一对齐）
+    if (!m_isPlaying && !m_displayFrame.data.empty() && m_displayFrame.pts >= 0) {
+        m_position = m_displayFrame.pts;
+    }
+
     // AB 循环检查（仅在正常播放时触发，防止连续 seek）
     if (m_loopA >= 0 && m_loopB > m_loopA && !m_loopSeeking && m_position >= m_loopB) {
         if (m_player && m_isPlaying) {
@@ -652,15 +671,76 @@ void VideoPlayerApp::render() {
         }
     }
 
+    // 逐帧步进状态兜底清理：超时（1 秒未等到目标帧）或进入 Stopped 时解除
+    if ((m_stepping || m_waitingStepFrame) && m_player) {
+        if (std::chrono::steady_clock::now() >= m_stepDeadline ||
+            m_player->state() == PlaybackState::Stopped) {
+            m_stepping = false;
+            m_waitingStepFrame = false;
+            m_pendingStepDir = 0;
+        }
+    }
+
     // 根据当前播放时间从队列获取对应视频帧
     VideoFrame frame;
     bool gotFrame = false;
     if (m_player) {
-        gotFrame = m_player->getVideoFrame(m_position, frame);
+        if (m_waitingStepFrame || m_stepping) {
+            // 步进专用通道：最早出队，不走时钟同步。
+            // -1：seek 后队首即落点帧；+1：恢复播放后队首即下一帧。
+            // 音频时钟可能领先显示帧，走时钟同步会一次吐出多帧造成跳步
+            bool stepFinished = false;
+            while ((m_waitingStepFrame || m_stepping) &&
+                   (m_waitingStepFrame
+                        ? m_player->getStepLandingFrame(frame)
+                        : m_player->getVideoFrame(-1, frame))) {
+                if (m_waitingStepFrame) {
+                    if (frame.data.empty()) {
+                        // 已是第一帧：落点就绪但无更早帧，取消步进
+                        m_waitingStepFrame = false;
+                        stepFinished = true;
+                        break;
+                    }
+                    m_displayFrame = std::move(frame);
+                    m_position = m_displayFrame.pts;
+                    m_seekTargetPosition = -1;
+                    m_waitingStepFrame = false;
+                    stepFinished = true;
+                    if (m_renderer) {
+                        m_renderer->showOSD(OSDType::SeekBackward,
+                                            formatTime(m_displayFrame.pts));
+                    }
+                    break;
+                }
+                // +1：丢弃 pts 不前进的过期帧，第一帧新画面到位即暂停
+                if (m_stepPrevPts >= 0 && frame.pts <= m_stepPrevPts) {
+                    continue;
+                }
+                m_displayFrame = std::move(frame);
+                m_position = m_displayFrame.pts;
+                m_stepping = false;
+                stepFinished = true;
+                pause();
+                if (m_renderer) {
+                    m_renderer->showOSD(OSDType::SeekForward,
+                                        formatTime(m_displayFrame.pts));
+                }
+                break;
+            }
+            // 飞行期记下的按键在落点后逐帧执行，保证按几次走几帧
+            if (stepFinished && m_pendingStepDir != 0) {
+                const int dir = m_pendingStepDir > 0 ? 1 : -1;
+                m_pendingStepDir -= dir;
+                stepFrame(dir);
+            }
+        } else {
+            gotFrame = m_player->getVideoFrame(m_position, frame);
+        }
     }
     if (gotFrame) {
         m_displayFrame = std::move(frame);
-    } else if (m_displayFrame.data.empty() && m_player) {
+    } else if (m_displayFrame.data.empty() && m_player &&
+               !m_waitingStepFrame && !m_stepping) {
         // 启动时如果严格同步拿不到帧（音频时间还没到第一帧 pts），
         // fallback 取最早的一帧，避免黑屏
         if (m_player->getVideoFrame(-1, frame)) {
@@ -869,7 +949,10 @@ void VideoPlayerApp::openFile(const std::string& path) {
     m_progressCacheDirty = true;
 
     // 加载文件
-    if (m_player->loadFile(path)) {
+    m_loadingFile = path;
+    const bool loaded = m_player->loadFile(path);
+    m_loadingFile.clear();
+    if (loaded) {
         m_currentFile = path;
         auto it = std::find(m_playlist.begin(), m_playlist.end(), m_currentFile);
         if (it != m_playlist.end()) {
@@ -934,11 +1017,12 @@ void VideoPlayerApp::openFile(const std::string& path) {
         // 开始播放
         play();
 
-        // 恢复上次观看位置（如果记忆位置开启且未接近结尾）
+        // 恢复上次观看位置（如果记忆位置开启且未接近结尾）。
+        // 用刚加载的真实 m_duration 判断，不用存储值——历史版本可能
+        // 把时长错记到别的文件名下
         if (Settings::instance().rememberPosition()) {
             int64_t lastPos = Settings::instance().lastPosition(path);
-            int64_t lastDur = Settings::instance().lastDuration(path);
-            if (lastPos > 0 && lastDur > 0 && lastPos < lastDur - 5000) {
+            if (lastPos > 0 && m_duration > 0 && lastPos < m_duration - 5000) {
                 m_player->seek(lastPos);
                 m_seekTargetPosition = lastPos;
             }
@@ -990,7 +1074,7 @@ void VideoPlayerApp::openFileDialog() {
 void VideoPlayerApp::openUrlDialog() {
     if (!m_renderer) return;
 
-    m_renderer->showInputDialog("打开 URL", "http(s):// 或 rtsp:// 地址",
+    m_renderer->showInputDialog("打开 URL", "http(s):// 或 rtsp:// 地址", "",
         [this](const std::string& url) {
             // 取消返回空串；去掉首尾空白后必须是 URL 形式
             std::string trimmed = url;
@@ -1005,6 +1089,29 @@ void VideoPlayerApp::openUrlDialog() {
                 return;
             }
             openFile(trimmed);
+        });
+}
+
+void VideoPlayerApp::showGotoTimeDialog() {
+    if (!m_renderer || !m_player) return;
+
+    if (m_currentFile.empty() || m_duration <= 0) {
+        m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
+        return;
+    }
+
+    m_renderer->showInputDialog("跳转到时间", "hh:mm:ss", formatTime(m_position),
+        [this](const std::string& text) {
+            // 取消返回空串
+            std::string trimmed = trim(text);
+            if (trimmed.empty()) return;
+
+            int ms = 0;
+            if (!parseHmsTimestampMs(trimmed, ms) || ms < 0 || ms > m_duration) {
+                m_renderer->showOSD(OSDType::Info, "时间格式无效，请输入 hh:mm:ss");
+                return;
+            }
+            seek(static_cast<double>(ms) - static_cast<double>(m_position));
         });
 }
 
@@ -1118,8 +1225,12 @@ void VideoPlayerApp::onPositionChanged(int64_t position) {
 
 void VideoPlayerApp::onDurationChanged(int64_t duration) {
     m_duration = duration;
-    if (!m_currentFile.empty() && duration > 0) {
-        Settings::instance().setLastDuration(m_currentFile, duration);
+    // 回调在 loadFile 持锁内触发（不能回调 player，会死锁），
+    // 此时 m_currentFile 还是旧文件，用 m_loadingFile 作键
+    const std::string& path =
+        !m_loadingFile.empty() ? m_loadingFile : m_currentFile;
+    if (!path.empty() && duration > 0) {
+        Settings::instance().setLastDuration(path, duration);
         m_progressCacheDirty = true;
     }
     logger().info("Duration: " + std::to_string(duration) + "ms");

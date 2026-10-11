@@ -191,3 +191,18 @@ TEST(Common, IsNetworkUrl)
     EXPECT_FALSE(isNetworkUrl("ftp://example.com/a"));
     EXPECT_FALSE(isNetworkUrl(""));
 }
+
+TEST(Common, FrameDurationMs)
+{
+    // 常见帧率：四舍五入到整毫秒
+    EXPECT_EQ(frameDurationMs(25.0), 40);
+    EXPECT_EQ(frameDurationMs(30.0), 33);
+    EXPECT_EQ(frameDurationMs(23.976), 42);
+    EXPECT_EQ(frameDurationMs(60.0), 17);
+    // 非法/缺失帧率走 fallback
+    EXPECT_EQ(frameDurationMs(0.0), 40);
+    EXPECT_EQ(frameDurationMs(-1.0), 40);
+    EXPECT_EQ(frameDurationMs(0.0, 20), 20);
+    // 极高帧率不低于 1ms
+    EXPECT_EQ(frameDurationMs(5000.0), 1);
+}

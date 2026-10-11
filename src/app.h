@@ -49,6 +49,7 @@ private:
     void stop();
     void seek(double deltaMs);       // 相对跳转 (毫秒)
     void seekTo(double position);    // 绝对位置 (0-1)
+    void seekToMs(int64_t targetPos, OSDType osdType, float osdRatio = -1.0f); // 绝对定位统一出口
     void setVolume(int delta);
     void setVolumeTo(int value);
     void toggleMute();
@@ -56,6 +57,10 @@ private:
     void cycleSpeed();
     void toggleAlwaysOnTop();
     void takeScreenshot();
+    void copyScreenshotToClipboard();
+    VideoFrame captureCurrentFrame(); // 当前显示帧套用画面变换；失败返回空帧
+    void stepFrame(int direction);    // 逐帧步进：-1 上一帧 / +1 下一帧
+    void showGotoTimeDialog();        // Ctrl+G 跳转到时间
     void setLoopPointA();
     void setLoopPointB();
     void clearLoop();
@@ -138,7 +143,19 @@ private:
     std::string m_currentSubtitle;
     int64_t m_duration = 0;
     int64_t m_position = 0;
+    // loadFile 进行中的目标路径：duration 回调早于 m_currentFile 更新，
+    // 用它给 onDurationChanged 定位文件（回调持锁，不能回调 player）
+    std::string m_loadingFile;
     int64_t m_seekTargetPosition = -1; // seek 后用于覆盖 UI 位置，防止进度条跳回
+    // 逐帧步进（帧驱动，不经时间估算）：
+    //   +1 → m_stepping：暂停态下恢复播放，render() 采到 pts 更新的帧立即再暂停
+    //   -1 → m_waitingStepFrame：seekStepBack 后由 render() 经
+    //        getStepLandingFrame 取回落点帧（pts < 锚点的最大帧）
+    bool m_stepping = false;
+    int64_t m_stepPrevPts = -1;
+    bool m_waitingStepFrame = false;
+    std::chrono::steady_clock::time_point m_stepDeadline; // 步进超时（+1:1s，-1:8s）
+    int m_pendingStepDir = 0;   // 步进飞行期累计的方向键数，落点到达后逐帧执行
     bool m_isPlaying = false;
     int m_volume = 100;
     bool m_isMuted = false;

@@ -287,3 +287,164 @@ TEST_F(PlaybackTest, EofDrainsPlayback)
         << "lastFramePts=" << stats.lastFramePts.load();
     player.stop();
 }
+
+TEST_F(PlaybackTest, StepBackLandingIsPreviousFrame)
+{
+    // 模拟 app 逐帧步进：暂停 → seekStepBack(显示帧 pts) → getStepLandingFrame。
+    // 素材是 x264 默认编码（含 B 帧），解码顺序 ≠ pts 顺序——
+    // 落点必须是解码序上 anchor 的上一帧（pts 恰好少一档），
+    // 而不是重排后的下一个 P 帧，也不是上一个被取用的帧
+    FFmpegPlayer player;
+    ASSERT_TRUE(player.loadFile(s_file12));
+    player.play();
+
+    // 播到 ~2s，记录当前显示帧 pts（素材 25fps，帧间隔 40ms）
+    int64_t shownPts = -1;
+    const auto t0 = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < t0 && shownPts < 2000) {
+        player.checkPreloadComplete();
+        const int64_t pos = player.audioPositionMs();
+        VideoFrame f;
+        if (player.getVideoFrame(pos, f)) {
+            shownPts = f.pts;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
+    ASSERT_GE(shownPts, 2000) << "没取到足够的帧";
+    player.pause();
+
+    // -1：以显示帧 pts 为锚做回退落点 seek
+    player.seekStepBack(shownPts);
+
+    VideoFrame landing;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < deadline && landing.data.empty()) {
+        if (!player.getStepLandingFrame(landing)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(landing.data.empty()) << "8 秒内没有等到落点帧";
+    std::cerr << "[measured] stepback: shown=" << shownPts
+              << " landing=" << landing.pts << std::endl;
+    // 落点必须是解码序真正的上一帧：pts 恰好少一档（40ms）
+    EXPECT_EQ(landing.pts, shownPts - 40)
+        << "landing=" << landing.pts << " expected=" << (shownPts - 40);
+
+    // 落点后 +1 必须从缓冲窗口精确回到锚点帧
+    VideoFrame next;
+    const auto d2 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < d2 && next.data.empty()) {
+        if (!player.getVideoFrame(-1, next)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(next.data.empty());
+    EXPECT_EQ(next.pts, shownPts) << "next=" << next.pts;
+
+    // 再 +1 应继续走缓冲窗口内的下一帧
+    VideoFrame next2;
+    const auto d3 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < d3 && next2.data.empty()) {
+        if (!player.getVideoFrame(-1, next2)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(next2.data.empty());
+    EXPECT_EQ(next2.pts, shownPts + 40) << "next2=" << next2.pts;
+    player.stop();
+}
+
+TEST_F(PlaybackTest, StepBackAfterInstantPause)
+{
+    // 启动场景：play() 后立刻 pause()（预缓冲期间），随后像 app 一样
+    // +1（恢复播放取最早帧再暂停）、-1（seekStepBack 取落点）
+    FFmpegPlayer player;
+    ASSERT_TRUE(player.loadFile(s_file12));
+    player.play();
+    player.pause();
+
+    // +1 两次：恢复播放 → getVideoFrame(-1) 最早出队 → 暂停
+    // （第一帧 pts=0 没有上一帧，测 -1 需要展示第二帧）
+    VideoFrame shown;
+    for (int i = 0; i < 2 && shown.pts <= 0; ++i) {
+        player.play();
+        const auto d1 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < d1 && shown.pts <= 0) {
+            VideoFrame f;
+            if (player.getVideoFrame(-1, f)) {
+                shown = std::move(f);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(8));
+            }
+        }
+        player.pause();
+    }
+    ASSERT_FALSE(shown.data.empty()) << "恢复播放后没取到帧";
+    ASSERT_GT(shown.pts, 0) << "没取到第二帧";
+
+    // -1：落点必须是解码序真正的上一帧（pts - 40ms）
+    player.seekStepBack(shown.pts);
+    VideoFrame landing;
+    const auto d2 = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < d2 && landing.data.empty()) {
+        if (!player.getStepLandingFrame(landing)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(landing.data.empty()) << "启动即暂停后 -1 没落点";
+    std::cerr << "[measured] instant-pause stepback: shown=" << shown.pts
+              << " landing=" << landing.pts << std::endl;
+    EXPECT_EQ(landing.pts, shown.pts - 40) << "landing=" << landing.pts;
+
+    // +1 精确回位
+    VideoFrame back;
+    const auto d3 = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < d3 && back.data.empty()) {
+        if (!player.getVideoFrame(-1, back)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+    }
+    ASSERT_FALSE(back.data.empty());
+    EXPECT_EQ(back.pts, shown.pts) << "back=" << back.pts;
+    player.stop();
+}
+
+TEST_F(PlaybackTest, ReplayAfterEof)
+{
+    FFmpegPlayer player;
+    ASSERT_TRUE(player.loadFile(s_file3));
+    std::atomic<bool> stopped{false};
+    player.setStateCallback([&stopped](PlaybackState state) {
+        if (state == PlaybackState::Stopped) {
+            stopped = true;
+        }
+    });
+
+    player.play();
+    PumpStats stats;
+    pumpFor(player, stats, 15000, [&stopped] { return stopped.load(); });
+    ASSERT_TRUE(stopped.load()) << "15 秒内未收到 Stopped 回调";
+
+    // Stopped 期间发出的 seek 没有解码线程消费，重播时应被丢弃而不是
+    // 被新线程执行——否则跳到结尾附近立刻再次 EOF，表现为「无法再播放」
+    player.seek(2500);
+
+    // 自然播完后再次 play：应从头重新解码出帧
+    player.play();
+    PumpStats stats2;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline &&
+           stats2.framesTaken.load() == 0) {
+        pumpOnce(player, stats2);
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    std::cerr << "[measured] replay: framesTaken=" << stats2.framesTaken.load()
+              << " pos=" << player.audioPositionMs()
+              << " state=" << static_cast<int>(player.state()) << std::endl;
+    EXPECT_GT(stats2.framesTaken.load(), 0) << "EOF 后重播取不到视频帧";
+    EXPECT_EQ(player.state(), PlaybackState::Playing);
+    // 残留 seek(2500) 若被消费，首帧 pts 会落在 2500 附近；从头播应远小于它
+    EXPECT_LT(stats2.lastFramePts.load(), 1000)
+        << "重播首帧 pts=" << stats2.lastFramePts.load();
+    player.stop();
+}

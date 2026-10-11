@@ -108,6 +108,14 @@ public:
     bool checkPreloadComplete();
 
     bool getVideoFrame(int64_t targetPtsMs, VideoFrame& frame);
+    // 逐帧回退专用 seek：以 anchorPtsMs（当前显示帧 pts）为上界，
+    // 落点是解码序上 pts < anchor 的最大帧，即真正的上一帧。
+    // 与 fps/容器精度/B 帧重排深度都无关
+    void seekStepBack(int64_t anchorPtsMs);
+    // 暂停 seek/逐帧回退的落点帧：等补解码窗口收齐后取帧。
+    // 普通 seek 取队首（pts 最小）；回退落点取队尾（pts < anchor 最大），
+    // 队列为空且回退落点就绪时返回 true 且 frame 为空（已是第一帧）
+    bool getStepLandingFrame(VideoFrame& frame);
 
     // 画面调节参数变化后用基础帧就地重算 frame.data（仅主线程调用）；
     // 无需更新或无基础帧返回 false
@@ -279,10 +287,24 @@ private:
     int64_t m_audioTrimBeforeMs = -1;      // seek 后丢弃整帧都早于此时间的音频帧
     int64_t m_videoTrimBeforeMs = -1;      // seek 后丢弃 pts 早于此时间的视频帧
 
-    // Video frame queue with PTS ordering
+    // Video frame queue（按 pts 排序，B 帧重排的解码顺序不会破坏单调性）
     std::deque<VideoFrame> m_videoFrameQueue;
     std::mutex m_videoQueueMutex;
     static constexpr size_t kMaxVideoQueueSize = 10;
+    // paused seek 补解码窗口期间允许队列超限，避免落点帧在 B 重排
+    // 窗口收齐前被队首丢弃
+    static constexpr size_t kSeekBurstQueueSize = 64;
+    // 目标到达后再补约 800ms 的解码量，覆盖 B 帧重排窗口
+    static constexpr int64_t kSeekGuardMs = 800;
+    std::atomic<bool> m_seekBurstActive{false};
+    std::atomic<int64_t> m_seekLandingReady{-1};  // paused seek 落点已收齐可消费
+    std::atomic<bool> m_landingIsStepBack{false}; // 本次落点按回退模式取 pts<anchor 最大帧
+    // 逐帧回退锚点（当前显示帧 pts）：>=0 时为回退补解码模式，
+    // 落点是 pts < anchor 的最大帧；>=anchor 的帧也入队供 +1 步进消费
+    std::atomic<int64_t> m_stepBackAnchorMs{-1};
+    int64_t m_stepBackDecodedMaxMs = -1;          // 回退窗口内已解出的最大 pts（仅解码线程）
+    int m_stepBackFwdCount = 0;                   // 回退窗口内已解出的 >=anchor 帧数（仅解码线程）
+    static constexpr int kStepBackFwdKeep = 32;   // 回退补解码保留的锚点后帧数（覆盖重排+步进缓冲）
     static constexpr int kMaxAudioQueueMs = 1000;
     static constexpr int kPreloadAudioMs = 40;
     static constexpr int kPreloadTimeoutMs = 1000;

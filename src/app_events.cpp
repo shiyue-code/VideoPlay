@@ -97,6 +97,15 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         case MenuId::NextEpisodePlayMenu: // 下一集（播放菜单就近入口）
             playNextEpisode();
             break;
+        case MenuId::FramePrev: // 上一帧
+            stepFrame(-1);
+            break;
+        case MenuId::FrameNext: // 下一帧
+            stepFrame(1);
+            break;
+        case MenuId::GotoTime: // 跳转到时间
+            showGotoTimeDialog();
+            break;
         case MenuId::PrevEpisode: // 上一集
             playPreviousEpisode();
             break;
@@ -200,6 +209,9 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             break;
         case MenuId::Screenshot: // 截图
             takeScreenshot();
+            break;
+        case MenuId::ScreenshotToClipboard: // 复制截图到剪贴板
+            copyScreenshotToClipboard();
             break;
         case MenuId::ABLoopSetA: // AB循环: 设置A点
             setLoopPointA();
@@ -539,6 +551,9 @@ void VideoPlayerApp::showHelp() {
     row("S", "停止");
     row("← / →", "后退/前进 5秒");
     row("Shift+← / Shift+→", "后退/前进 30秒");
+    row("Ctrl+← / Ctrl+→", "上一帧/下一帧（逐帧步进）");
+    row(",", "上一帧");
+    row("Ctrl+G", "跳转到时间");
     row(".", "切换播放速度");
     row("F", "全屏切换");
     row("N", "下一个（优先下一集）");
@@ -578,6 +593,7 @@ void VideoPlayerApp::showHelp() {
     row("T", "窗口置顶");
     row("Tab", "媒体信息");
     row("F12", "截图");
+    row("Shift+F12", "复制截图到剪贴板");
     row("Ctrl+F", "搜索内容");
     row("Ctrl+O", "打开文件");
     row("Ctrl+U", "打开 URL");
