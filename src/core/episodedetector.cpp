@@ -5,6 +5,7 @@
 #include <regex>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 
 namespace VideoPlay {
 
@@ -21,6 +22,22 @@ namespace {
         ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
         ".mp3", ".aac", ".wav", ".flac", ".ogg", ".m4v", ".ts"
     };
+
+    // 归一化时按标点/空白丢弃的码位区间（C1 控制与 Latin-1 标点、
+    // 通用标点、CJK 标点、中点、CJK 兼容形式、全角标点）。
+    // 区间之外的非 ASCII 字符（含中日韩文字）全部保留
+    bool isIgnoredCodePoint(uint32_t cp)
+    {
+        return (cp >= 0x0080 && cp <= 0x00BF) ||
+               (cp >= 0x2000 && cp <= 0x206F) ||
+               (cp >= 0x3000 && cp <= 0x303F) ||
+               cp == 0x30FB ||
+               (cp >= 0xFE30 && cp <= 0xFE4F) ||
+               (cp >= 0xFF00 && cp <= 0xFF0F) ||
+               (cp >= 0xFF1A && cp <= 0xFF20) ||
+               (cp >= 0xFF3B && cp <= 0xFF40) ||
+               (cp >= 0xFF5B && cp <= 0xFF65);
+    }
 }
 
 bool EpisodeDetector::isMediaFile(const std::string& path)
@@ -33,13 +50,61 @@ bool EpisodeDetector::isMediaFile(const std::string& path)
 
 std::string EpisodeDetector::normalizeSeriesName(const std::string& name)
 {
+    // 按 UTF-8 码位逐个归一化：ASCII 只保留字母数字并转小写；
+    // 多字节字符整体保留（纯中文系列名不能归一化为空），
+    // 但标点/空白码位丢弃（见 isIgnoredCodePoint）；
+    // 非法或被截断的字节单独丢弃，不污染后续字符
     std::string result;
-    for (char c : name)
+    const auto* bytes = reinterpret_cast<const unsigned char*>(name.data());
+    const size_t size = name.size();
+    for (size_t i = 0; i < size; )
     {
-        if (std::isalnum(static_cast<unsigned char>(c)))
+        const unsigned char c = bytes[i];
+        if (c < 0x80)
         {
-            result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (std::isalnum(c))
+            {
+                result += static_cast<char>(std::tolower(c));
+            }
+            ++i;
+            continue;
         }
+
+        int need = 0;
+        uint32_t cp = 0;
+        if (c >= 0xC2 && c <= 0xDF) { need = 1; cp = c & 0x1F; }
+        else if (c >= 0xE0 && c <= 0xEF) { need = 2; cp = c & 0x0F; }
+        else if (c >= 0xF0 && c <= 0xF4) { need = 3; cp = c & 0x07; }
+        else { ++i; continue; } // 非法前导字节，丢弃该字节
+
+        if (i + static_cast<size_t>(need) >= size)
+        {
+            ++i; // 序列被截断，丢弃该字节
+            continue;
+        }
+
+        bool valid = true;
+        for (int k = 1; k <= need; ++k)
+        {
+            const unsigned char cc = bytes[i + k];
+            if ((cc & 0xC0) != 0x80)
+            {
+                valid = false;
+                break;
+            }
+            cp = (cp << 6) | (cc & 0x3F);
+        }
+        if (!valid)
+        {
+            ++i; // 序列不完整，只丢弃当前字节继续扫描
+            continue;
+        }
+
+        if (!isIgnoredCodePoint(cp))
+        {
+            result.append(name, i, static_cast<size_t>(need) + 1);
+        }
+        i += static_cast<size_t>(need) + 1;
     }
     return result;
 }
@@ -93,7 +158,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 4. 匹配 第02集 / 第2话 / 第02回
     {
-        std::regex re(R"((.*?)\s*第\s*(\d+)\s*[集话回].*)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*第\s*(\d+)\s*(?:集|话|回).*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {
@@ -105,7 +170,7 @@ std::optional<std::tuple<std::string, int, int>> EpisodeDetector::parseEpisodeIn
 
     // 5. 匹配 [02] / (02) / 【02】 在开头或中间
     {
-        std::regex re(R"((.*?)\s*[\[\(【]\s*(\d+)\s*[\]\)】].*)", std::regex::ECMAScript);
+        std::regex re(R"((.*?)\s*(?:\[|\(|【)\s*(\d+)\s*(?:\]|\)|】).*)", std::regex::ECMAScript);
         std::smatch match;
         if (std::regex_match(name, match, re))
         {

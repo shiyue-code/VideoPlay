@@ -85,6 +85,25 @@ target_include_directories(test_settings_maintenance PRIVATE ${VIDEOPLAY_TEST_IN
 target_link_libraries(test_settings_maintenance PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_settings_maintenance)
 
+add_executable(test_episodedetector
+    test_episodedetector_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/episodedetector.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_episodedetector PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_episodedetector PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_episodedetector)
+
+add_executable(test_settings
+    test_settings_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/settings_maintenance.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
+)
+target_include_directories(test_settings PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_settings PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_settings)
+
 # 集成测试依赖 cmd /c 与内置 ffmpeg.exe，仅 Windows 可构建运行
 if(WIN32)
 add_executable(test_ffmpegplayer_playback

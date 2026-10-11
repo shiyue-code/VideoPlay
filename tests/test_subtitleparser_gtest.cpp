@@ -260,3 +260,204 @@ TEST(SubtitleParser, ParsesUnsortedAss)
 
     std::filesystem::remove(path);
 }
+
+TEST(SubtitleParser, ParsesAssTextKeepingCommasAndConvertingNewlines)
+{
+    // Text 字段里的逗号原样保留；{\...} 覆盖标签剥离；\N 与 \n 都换成换行
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\an8}Hello, world\\NSecond\\nThird\n";
+
+    std::string path = createTempFile("gtest_ass_text.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    auto entries = parser.entries();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].text, "Hello, world\nSecond\nThird");
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, ParsesAssTimecodes)
+{
+    // ASS 小数部分是百分之一秒；支持小时位
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.50,0:00:02.25,Default,,0,0,0,,First\n"
+        "Dialogue: 0,1:02:03.45,1:02:04.00,Default,,0,0,0,,Second\n";
+
+    std::string path = createTempFile("gtest_ass_time.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    auto entries = parser.entries();
+    ASSERT_EQ(entries.size(), 2u);
+    EXPECT_EQ(entries[0].startTime, 1500);
+    EXPECT_EQ(entries[0].endTime, 2250);
+    EXPECT_EQ(entries[1].startTime, 3723450);
+    EXPECT_EQ(entries[1].endTime, 3724000);
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, ParsesAssCustomFormatOrder)
+{
+    // Format 行决定字段顺序，Text 之后的逗号仍属于文本
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Start, End, Style, Text\n"
+        "Dialogue: 0:00:01.00,0:00:02.00,Default,Reordered, ok\n";
+
+    std::string path = createTempFile("gtest_ass_format.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    auto entries = parser.entries();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].text, "Reordered, ok");
+    EXPECT_EQ(entries[0].startTime, 1000);
+    EXPECT_EQ(entries[0].endTime, 2000);
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, IgnoresAssCommentAndTagOnlyDialogue)
+{
+    // Comment 行不参与解析；剥完标签为空的 Dialogue 被丢弃
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,ignored comment\n"
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}\n"
+        "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Visible\n";
+
+    std::string path = createTempFile("gtest_ass_comment.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    auto entries = parser.entries();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].text, "Visible");
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, StopsAssParsingAtNextSection)
+{
+    // [Events] 之后的下一个 section 头会终止对白解析
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Visible\n"
+        "\n"
+        "[Fonts]\n"
+        "fontname: arial.ttf\n"
+        "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Should be ignored\n";
+
+    std::string path = createTempFile("gtest_ass_section.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    auto entries = parser.entries();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].text, "Visible");
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, AssFormatWithoutDialogueFails)
+{
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+
+    std::string path = createTempFile("gtest_ass_empty.ass", content);
+    SubtitleParser parser;
+
+    EXPECT_FALSE(parser.loadFile(path));
+    EXPECT_FALSE(parser.isLoaded());
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, ParsesSsaExtension)
+{
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00\n"
+        "\n"
+        "[Events]\n"
+        "Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: Marked=0,0:00:01.00,0:00:03.00,Default,,0,0,0,,SSA line\n";
+
+    std::string path = createTempFile("gtest_ext.ssa", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    EXPECT_EQ(parser.subtitleAt(2000), "SSA line");
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, AutoDetectsAssInTxtFile)
+{
+    // 未知扩展名按内容自动识别：[Script Info] 触发 ASS 解析
+    std::string content =
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Auto detected\n";
+
+    std::string path = createTempFile("gtest_autodetect.txt", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    EXPECT_EQ(parser.subtitleAt(2000), "Auto detected");
+
+    std::filesystem::remove(path);
+}
+
+TEST(SubtitleParser, ParsesUtf8BomAssWithChineseText)
+{
+    std::string content = "\xEF\xBB\xBF";
+    content +=
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,";
+    content += u8"你好，世界";
+    content += "\n";
+
+    std::string path = createTempBinaryFile("gtest_ass_bom.ass", content);
+    SubtitleParser parser;
+
+    ASSERT_TRUE(parser.loadFile(path));
+    EXPECT_EQ(parser.subtitleAt(2000), std::string(u8"你好，世界"));
+
+    std::filesystem::remove(path);
+}

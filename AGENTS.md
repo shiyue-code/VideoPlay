@@ -2,7 +2,7 @@
 
 > **读者**：开发者、Agent  
 > **状态**：现行  
-> **更新**：2026-10-10
+> **更新**：2026-10-11
 
 给改代码的人看。用户功能与快捷键见 [`README.md`](README.md)。未完成功能见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。文档怎么写见 [`docs/README.md`](docs/README.md)。
 
@@ -40,7 +40,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 FFmpeg 默认指向 `3rdparty/FFmpeg/`。输出在 `build/bin/<Config>/`。添加源文件必须改根目录 `CMakeLists.txt` 的 `SOURCES` / `HEADERS`，不要用 `file(GLOB)`。
 
-当前测试 8 个 gtest 目标、共 53 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_ffmpegplayer_playback`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。剧集识别、Settings 读写、ASS 尚无单测。
+当前测试 10 个 gtest 目标、共 101 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具、Settings 读写/容错/AI 配置归一化、剧集识别。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
 
 ## 源码结构
 

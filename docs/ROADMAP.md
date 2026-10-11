@@ -2,7 +2,7 @@
 
 > **读者**：维护者、贡献者  
 > **状态**：现行  
-> **更新**：2026-10-10
+> **更新**：2026-10-11
 
 对照 PotPlayer 的常用能力，列出本项目还缺什么、先做什么。已稳定的用法见 [`../README.md`](../README.md)。实现约束见 [`../AGENTS.md`](../AGENTS.md)。
 
@@ -129,7 +129,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 1. ~~修三个播放正确性问题：无音轨定格、暂停 seek、内封字幕标签/时长~~ ✅ 已修
 2. ~~外挂字幕编码探测（GBK/UTF-16）；内封文本字幕走 `removeFormatting`~~ ✅ 已修
 3. ~~半成品功能接线：音量/窗口尺寸持久化、`MenuId::Borderless`、help 文本~~ ✅ 已修（字幕样式 UI 未做）
-4. 给 `EpisodeDetector`、Settings、ASS 补测试（字幕解析测试已补 7 例）
+4. ~~给 `EpisodeDetector`、Settings、ASS 补测试~~ ✅ 已补
 5. 打开 URL 对话框、逐帧步进、跳转时间、截图到剪贴板等低成本交互项
 
 ## 已知缺陷（2026-10-09 审核）
@@ -146,6 +146,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | ~~倍速未作用到音频~~ ✅ | `ffmpegplayer_filters.cpp` / `audioplayer.cpp` | 音频滤镜链末尾追加 `atempo`；修复前音频按 1x 消耗而解码按倍速推进，队列满后直接丢弃音频包 |
 | ~~长 GOP seek 后音画错位~~ ✅ | `ffmpegplayer.cpp` `handleSeek` | `av_seek_frame(BACKWARD)` 落在目标前关键帧，解码出的目标前音频/视频帧按 `m_audioTrimBeforeMs`/`m_videoTrimBeforeMs` 裁剪 |
 | ~~EOF 截尾~~ ✅ | `ffmpegplayer.cpp` `drainEndOfStream` | EOF 先 send NULL flush 解码器，再等视频队列与音频缓冲排空才置 Stopped，不再丢弃最后约 1 秒 |
+| ~~纯中文系列名无法组成剧集~~ ✅ | `episodedetector.cpp` `normalizeSeriesName` | `normalizeSeriesName` 保留非 ASCII 字符、丢弃全角/CJK 标点；`第N集`、`【N】` 正则改为多字节交替，修复系列名残留半个 UTF-8 字符（会导致配置 dump 抛异常、save 失败） |
 
 ## 半成品功能（声明但未接线）
 
@@ -166,7 +167,7 @@ HDR tone mapping、GIF、实时统计、快捷键自定义、主题。
 | `autoAnalyze` | 配置有字段，打开文件不会自动分析 |
 | 证书校验关闭 | WinHTTP `SECURITY_FLAG_IGNORE_*` |
 | CI | 只构建 Windows |
-| 测试 | 8 个目标 53 个用例；Settings 读写、ASS、剧集识别仍无单测 |
+| 测试 | 10 个目标 101 个用例；剧集识别、Settings 读写、ASS 已有单测 |
 | ~~帮助文本~~ ✅ | F1 已补齐 Shift+G/H、Ctrl+B/Shift+B、Ctrl+F、C/F6、Ctrl(±Shift)+方向键、Ctrl+0、Delete |
 | ~~渲染循环~~ ✅ | 已开 vsync（`SDL_SetRenderVSync`）；vsync 下最小帧间隔 4ms，present 未阻塞时补睡 |
 
