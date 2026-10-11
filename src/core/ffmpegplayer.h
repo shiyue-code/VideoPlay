@@ -69,6 +69,9 @@ public:
     int64_t position() const;
     int64_t duration() const;
     int64_t audioPositionMs() const;
+    // 实时统计：视频队列帧数 / 音频已入队毫秒数
+    int videoQueueSize() const;
+    int64_t audioQueuedMs() const;
 
     void setPlaybackSpeed(double speed);
     double playbackSpeed() const;
@@ -296,7 +299,7 @@ private:
 
     // Video frame queue（按 pts 排序，B 帧重排的解码顺序不会破坏单调性）
     std::deque<VideoFrame> m_videoFrameQueue;
-    std::mutex m_videoQueueMutex;
+    mutable std::mutex m_videoQueueMutex;
     static constexpr size_t kMaxVideoQueueSize = 10;
     // paused seek 补解码窗口期间允许队列超限，避免落点帧在 B 重排
     // 窗口收齐前被队首丢弃

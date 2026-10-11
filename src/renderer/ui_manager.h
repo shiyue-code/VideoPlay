@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/common.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -18,7 +20,7 @@ public:
                   const std::string& subtitle = {},
                   const std::vector<std::string>& playlist = {}, size_t currentPlaylistIndex = 0,
                   int64_t audioPts = 0, int64_t videoPts = 0, double avDiff = 0.0,
-                  bool isPreloading = false);
+                  bool isPreloading = false, const PlaybackStats& stats = {});
 
 private:
     SDLRenderer* m_renderer = nullptr;

@@ -13,10 +13,10 @@ void UIManager::renderUI(int64_t position, int64_t duration, int volume, bool is
                          const std::string& subtitle,
                          const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
                          int64_t audioPts, int64_t videoPts, double avDiff,
-                         bool isPreloading) {
+                         bool isPreloading, const PlaybackStats& stats) {
     m_renderer->renderUIImpl(position, duration, volume, isMuted, isPlaying, speed,
                              filename, subtitle, playlist, currentPlaylistIndex,
-                             audioPts, videoPts, avDiff, isPreloading);
+                             audioPts, videoPts, avDiff, isPreloading, stats);
 }
 
 } // namespace VideoPlay

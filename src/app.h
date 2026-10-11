@@ -156,6 +156,12 @@ private:
     bool m_waitingStepFrame = false;
     std::chrono::steady_clock::time_point m_stepDeadline; // 步进超时（+1:1s，-1:8s）
     int m_pendingStepDir = 0;   // 步进飞行期累计的方向键数，落点到达后逐帧执行
+    // 右上角实时统计：上屏帧率按滚动窗口计数（显示帧 pts 变化即 +1）
+    double m_displayFps = 0.0;
+    int m_fpsFrameCount = 0;
+    int64_t m_lastDisplayPts = -1;
+    std::chrono::steady_clock::time_point m_fpsWindowStart =
+        std::chrono::steady_clock::now();
     bool m_isPlaying = false;
     int m_volume = 100;
     bool m_isMuted = false;

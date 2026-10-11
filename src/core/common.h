@@ -190,6 +190,14 @@ inline const char* networkStateText(NetworkState state) {
     return "";
 }
 
+// 右上角实时统计（A/V/Diff 行下方第二行小字）
+struct PlaybackStats {
+    double displayFps = 0.0;    // 上屏帧率（每秒新显示帧数）
+    int64_t bitrateBps = 0;     // 容器总码率
+    int videoQueue = 0;         // 解码线程视频队列帧数
+    int64_t audioQueueMs = 0;   // 音频已入队毫秒数
+};
+
 struct MediaInfo {
     std::string source;
     SourceType sourceType = SourceType::LocalFile;

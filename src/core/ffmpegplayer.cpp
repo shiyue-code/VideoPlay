@@ -1781,6 +1781,16 @@ MediaInfo FFmpegPlayer::mediaInfo() const {
     return m_mediaInfo;
 }
 
+int FFmpegPlayer::videoQueueSize() const {
+    std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+    return static_cast<int>(m_videoFrameQueue.size());
+}
+
+int64_t FFmpegPlayer::audioQueuedMs() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_audioPlayer ? m_audioPlayer->queuedMs() : 0;
+}
+
 std::string FFmpegPlayer::ffmpegVersion() {
     return std::string(av_version_info());
 }

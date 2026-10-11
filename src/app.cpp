@@ -852,6 +852,28 @@ void VideoPlayerApp::render() {
         }
     }
 
+    // 右上角实时统计：上屏帧率滚动窗口 + 解码队列/码率快照
+    if (m_displayFrame.pts != m_lastDisplayPts) {
+        ++m_fpsFrameCount;
+        m_lastDisplayPts = m_displayFrame.pts;
+    }
+    const auto fpsNow = std::chrono::steady_clock::now();
+    const auto fpsWinMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        fpsNow - m_fpsWindowStart).count();
+    if (fpsWinMs >= 1000) {
+        m_displayFps = m_fpsFrameCount * 1000.0 / fpsWinMs;
+        m_fpsFrameCount = 0;
+        m_fpsWindowStart = fpsNow;
+    }
+    PlaybackStats stats;
+    stats.displayFps = m_displayFps;
+    if (m_player) {
+        const MediaInfo info = m_player->mediaInfo();
+        stats.bitrateBps = info.bitrate;
+        stats.videoQueue = m_player->videoQueueSize();
+        stats.audioQueueMs = m_player->audioQueuedMs();
+    }
+
     m_renderer->renderUI(
         m_position,
         m_duration,
@@ -866,7 +888,8 @@ void VideoPlayerApp::render() {
         audioPts,
         videoPts,
         avDiff,
-        isPreloading
+        isPreloading,
+        stats
     );
     double dtRenderUI = elapsedMs(t3);
 

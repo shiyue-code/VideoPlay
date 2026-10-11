@@ -116,7 +116,7 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
                            const std::string& subtitle,
                            const std::vector<std::string>& playlist, size_t currentPlaylistIndex,
                            int64_t audioPts, int64_t videoPts, double avDiff,
-                           bool isPreloading) {
+                           bool isPreloading, const PlaybackStats& stats) {
     // 清空控件区域
     m_controlRects.clear();
     m_isPlaying = isPlaying;
@@ -161,8 +161,11 @@ void SDLRenderer::renderUIImpl(int64_t position, int64_t duration, int volume, b
         if (!filename.empty()) {
             renderFilename(filename);
         }
-        // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏）
-        renderSyncInfo(audioPts, videoPts, avDiff, m_showPlaylistPanel && !playlist.empty());
+        // 渲染音视频同步调试信息（右上角，随控制栏自动隐藏，I 键总开关）
+        if (m_showSyncInfo) {
+            renderSyncInfo(audioPts, videoPts, avDiff, stats,
+                           m_showPlaylistPanel && !playlist.empty());
+        }
 
         if (m_showSearchPanel) {
             renderSearchPanel();
@@ -1713,7 +1716,8 @@ void SDLRenderer::renderTooltip() {
     drawText(m_tooltip, tx + paddingX, ty + paddingY, 255, 255, 255, fontSize);
 }
 
-void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible) {
+void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff,
+                                 const PlaybackStats& stats, bool playlistVisible) {
     // 分三列渲染，每列独立圆角背景，列间留白自然分隔，不使用线�?    // A/V/Diff 固定在右上角，播放列表面板在 y=44 开始，自然垂直错开
     const int COL_A_WIDTH = 65;
     const int COL_V_WIDTH = 65;
@@ -1790,6 +1794,33 @@ void SDLRenderer::renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDi
     drawText("Diff:", diffColX + 4, y + 3, COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], fontSize);
     drawText(diffVal, std::max(diffColX + diffLabelW + 8, diffColX + COL_DIFF_WIDTH - diffValW - 4), y + 3,
              r, g, b, fontSize);
+
+    // 第二行：实时统计（上屏帧率 / 码率 / 视频队列 / 音频缓冲）。
+    // 与主行一致的固定列宽：标签左对齐、数值右对齐，列位置不随数值宽度抖动
+    const int y2 = y + 26;
+    const uint8_t dimA = 180;  // 统计行用略暗的文字色，不与主行抢焦点
+    std::ostringstream fpsOss;
+    fpsOss << std::fixed << std::setprecision(1) << stats.displayFps;
+    struct { const char* label; std::string value; int width; } statCols[4] = {
+        { "F:",  fpsOss.str(),                                    56 },
+        { "B:",  std::to_string(stats.bitrateBps / 1000) + "k",   68 },
+        { "Q:",  std::to_string(stats.videoQueue),                40 },
+        { "Aq:", std::to_string(stats.audioQueueMs) + "ms",       72 },
+    };
+
+    int statRight = panelRight - PADDING;
+    for (int i = 3; i >= 0; --i) {
+        const auto& col = statCols[i];
+        const int cx = statRight - col.width;
+        fillRoundRect(cx, y2, col.width, 22, 4, 40, 40, 40, 160);
+        const int labelW = getTextWidth(col.label, fontSize);
+        const int valW = getTextWidth(col.value, fontSize);
+        drawText(col.label, cx + 4, y2 + 3, dimA, dimA, dimA, fontSize);
+        drawText(col.value,
+                 std::max(cx + labelW + 8, cx + col.width - valW - 4),
+                 y2 + 3, dimA, dimA, dimA, fontSize);
+        statRight = cx - COL_GAP;
+    }
 }
 
 void SDLRenderer::renderSearchPanel() {

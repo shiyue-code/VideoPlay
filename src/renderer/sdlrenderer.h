@@ -237,6 +237,7 @@ struct RendererCallbacks {
     std::function<void()> liveRender;  // 系统拖动/缩放模态循环期间实时重绘
 };
 
+// 右上角实时统计定义在 core/common.h（PlaybackStats）
 enum class OSDType {
     Message,
     Play,
@@ -431,7 +432,7 @@ public:
                   const std::string& subtitle = {},
                   const std::vector<std::string>& playlist = {}, size_t currentPlaylistIndex = 0,
                   int64_t audioPts = 0, int64_t videoPts = 0, double avDiff = 0.0,
-                  bool isPreloading = false);
+                  bool isPreloading = false, const PlaybackStats& stats = {});
 
     // 打开文件对话框（异步回调）
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
@@ -491,7 +492,7 @@ private:
                       bool isPlaying, double speed, const std::string& filename,
                       const std::string& subtitle, const std::vector<std::string>& playlist,
                       size_t currentPlaylistIndex, int64_t audioPts, int64_t videoPts,
-                      double avDiff, bool isPreloading);
+                      double avDiff, bool isPreloading, const PlaybackStats& stats);
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);
     void handleMouseMotion(int x, int y);
@@ -542,7 +543,8 @@ private:
     void renderFilename(const std::string& filename);
     void renderSubtitle(const std::string& subtitle);
     void renderSubtitleBitmap(int64_t positionMs);
-    void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff, bool playlistVisible = false);
+    void renderSyncInfo(int64_t audioPts, int64_t videoPts, double avDiff,
+                        const PlaybackStats& stats, bool playlistVisible = false);
     void renderTooltip();
     void renderOSD();
     void renderInfoPanel(const InfoPanelContent& content);
@@ -680,6 +682,11 @@ private:
     size_t m_searchSelectionStart = 0;
     size_t m_searchSelectionEnd = 0;
     uint64_t m_lastSearchInputTime = 0;
+    // 按住的非重复按键各自的修饰键快照（scancode→首次按下时的 mods）：
+    // 自动重复事件沿用首次按下时的修饰键，中途松开 Ctrl/Shift 不会让
+    // Ctrl+→ 的连续步进退化成裸方向键的 ±5s seek；失焦时清空
+    std::unordered_map<SDL_Scancode, SDL_Keymod> m_heldKeyMods;
+    bool m_showSyncInfo = true;  // I 键切换右上角 A/V/Diff + 统计信息显隐
     std::vector<ChatMessage> m_chatHistory;
     std::mutex m_chatMutex;
     bool m_isPlaying = false;

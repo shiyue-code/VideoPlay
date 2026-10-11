@@ -204,6 +204,11 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             break;
         }
 
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            // 失焦期间松开的键收不到 keyup，清空防止残留修饰键污染后续按键
+            m_heldKeyMods.clear();
+            break;
+
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             m_windowWidth = event.window.data1;
@@ -221,7 +226,21 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
             // 合并系统实时修饰键：启动早期 SDL 内部状态可能漏掉
             // 窗口创建前已按住的 Ctrl/Shift，见 liveKeyMods
-            const SDL_Keymod mods = liveKeyMods(event.key.mod);
+            SDL_Keymod mods = liveKeyMods(event.key.mod);
+            // 自动重复的按键沿用首次按下时的修饰键：按住 Ctrl+→ 期间
+            // 先松 Ctrl，后续 repeat 不能退化成裸 → 触发 +5s seek
+            if (pressed) {
+                if (event.key.repeat) {
+                    auto held = m_heldKeyMods.find(event.key.scancode);
+                    if (held != m_heldKeyMods.end()) {
+                        mods = static_cast<SDL_Keymod>(mods | held->second);
+                    }
+                } else {
+                    m_heldKeyMods[event.key.scancode] = mods;
+                }
+            } else {
+                m_heldKeyMods.erase(event.key.scancode);
+            }
 
             //  菜单快捷键处理
             if (pressed) {
@@ -282,18 +301,19 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
             //  内置快捷�?
             if (pressed) {
                 if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) {
-                    logger().info("key arrow pressed: eventMod={:#x} sdlMod={:#x} merged={:#x}"
+                    char modBuf[64];
+                    snprintf(modBuf, sizeof(modBuf), "%#x/%#x/%#x",
+                             static_cast<unsigned>(event.key.mod),
+                             static_cast<unsigned>(SDL_GetModState()),
+                             static_cast<unsigned>(mods));
+                    logger().info(std::string("key arrow pressed: mod=") + modBuf
 #ifdef _WIN32
-                                  " asyncCtrl={} asyncShift={}"
+                                  + " asyncCtrl=" +
+                                  (((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) ? "1" : "0")
+                                  + " asyncShift=" +
+                                  (((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) ? "1" : "0")
 #endif
-                                  , static_cast<unsigned>(event.key.mod)
-                                  , static_cast<unsigned>(SDL_GetModState())
-                                  , static_cast<unsigned>(mods)
-#ifdef _WIN32
-                                  , (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
-                                  , (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
-#endif
-                    );
+                                  + " repeat=" + std::to_string(event.key.repeat));
                 }
                 switch (event.key.key) {
                     case SDLK_SPACE:
@@ -321,6 +341,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_F:
                         toggleFullscreen();
+                        break;
+                    case SDLK_I:
+                        // I 切换右上角 A/V/Diff 与统计信息行
+                        if (!(mods & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+                            m_showSyncInfo = !m_showSyncInfo;
+                        }
                         break;
                     case SDLK_S:
                         if (m_callbacks.stop) m_callbacks.stop();
