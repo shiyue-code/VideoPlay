@@ -40,6 +40,8 @@ enum class MenuId : int {
     RecentFiles = 5,
     MediaInfo = 6,
     OpenUrl = 7,
+    SetDefaultPlayer = 8,
+    RemoveFileAssoc = 9,
     Exit = 3,
 
     // 播放菜单
@@ -485,7 +487,7 @@ private:
     void handleEvent(const SDL_Event& event);
     void handleMouseClick(int x, int y);
     void handleMouseMotion(int x, int y);
-    void handleMouseButtonDown(int x, int y);
+    void handleMouseButtonDown(int x, int y, int clicks);
     void handleMouseButtonUp(int x, int y);
     void handleMouseWheel(int y);
 

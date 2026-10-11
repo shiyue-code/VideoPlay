@@ -40,7 +40,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 FFmpeg 默认指向 `3rdparty/FFmpeg/`。输出在 `build/bin/<Config>/`。添加源文件必须改根目录 `CMakeLists.txt` 的 `SOURCES` / `HEADERS`，不要用 `file(GLOB)`。
 
-当前测试 14 个 gtest 目标、共 193 个用例：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_common`、`test_ai_utils`、`test_searchengine`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`、`test_videoadjuster`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具（含括号/HMS 时间戳解析）、轨道标签/语言名/滤镜默认值等 common.h 内联助手、AI provider 归一化与 JSON 提示词/应答解析、检索引擎（转录/字幕/章节倒排索引）、Settings 读写/容错/AI 配置归一化、剧集识别、画面调节（eq/hue + BGRA）。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
+当前测试 15 个 gtest 目标：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_fileassoc`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_common`、`test_ai_utils`、`test_searchengine`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`、`test_videoadjuster`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具（含括号/HMS 时间戳解析）、轨道标签/语言名/滤镜默认值等 common.h 内联助手、AI provider 归一化与 JSON 提示词/应答解析、检索引擎（转录/字幕/章节倒排索引）、Settings 读写/容错/AI 配置归一化、剧集识别、画面调节（eq/hue + BGRA）、文件关联默认值接管决策与扩展名列表约定。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
 
 ## 源码结构
 
@@ -63,7 +63,8 @@ src/
 │   ├── settings.h/cpp           # JSON 配置单例
 │   ├── settings_maintenance.*   # 配置中失效本地文件条目的清理
 │   ├── episodedetector.h/cpp    # 剧集文件名识别
-│   └── common.h                 # 枚举、VideoFrame、轨道标签
+│   ├── fileassoc.h/cpp          # HKCU 文件关联（仅 Windows 实装，其它平台 no-op）
+│   └── common.h                 # 枚举、VideoFrame、轨道标签、mediaExtensions()
 ├── renderer/
 │   ├── sdlrenderer.h/cpp        # 构造、纹理、菜单栏
 │   ├── sdlrenderer_events.cpp   # 鼠标键盘、命中检测
@@ -126,6 +127,7 @@ VideoPlayerApp
 
 - 先画视频，再叠字幕（文本或 PGS 位图），再画 UI
 - 控件全是坐标命中，没有原生控件
+- 视频空白区域左键双击切全屏：`handleMouseButtonDown` 在菜单栏/打开菜单/信息面板拦截之后、控件分发之前判断 `clicks >= 2 && m_pressedControl == None`，并按几何排除底部控制栏（栏内控件间隙同样返回 None，不触发）
 - 进度条只在鼠标释放时 seek，拖动只更新 `m_dragProgressRatio`
 - 画面旋转/翻转/中心裁剪在 `SDLRenderer::renderFrame` 用 `SDL_RenderTextureRotated` 完成，不要改成 FFmpeg `transpose`（硬解路径过不去）
 - 渲染已开 vsync（`SDL_SetRenderVSync`）；vsync 生效时主循环最小帧间隔降到 4ms，只在 present 未阻塞（最小化/遮挡）时补睡 `SDL_DelayPrecise`，否则保持 16ms
@@ -181,6 +183,7 @@ Linux 仍是自绘拖动，`usesNativeResize()` 为 false。
 5. `AIConfig::autoAnalyze` 已写入配置，打开文件时不会自动分析。
 6. HTTPS 请求忽略证书错误（`SECURITY_FLAG_IGNORE_*`），不要在新代码里扩大这个范围。
 7. 应用内帮助文本仍把 `[` / `]` 同时写成调速和 AB 循环；实际按键以 [`README.md`](README.md) 为准（`.` 调速，`[` `]` 为 AB 循环）。
+8. 文件关联（`fileassoc.*`）只写 `HKCU\Software\Classes` 与 `HKCU\Software\RegisteredApplications`，不写 HKLM/HKCR、不要管理员权限；扩展名默认值被其它应用占用时只加 `OpenWithProgids`，不抢占。
 
 ## 安全
 

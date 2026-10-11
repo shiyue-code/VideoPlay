@@ -1022,10 +1022,7 @@ void VideoPlayerApp::openFolderDialog() {
         logger().info("Selected folder: " + folderPath);
 
         std::vector<std::string> mediaFiles;
-        const std::vector<std::string> extensions = {
-            ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
-            ".mp3", ".aac", ".wav", ".flac", ".ogg"
-        };
+        const auto& extensions = mediaExtensions();
 
         try {
             for (const auto& entry : std::filesystem::directory_iterator(folderPath)) {

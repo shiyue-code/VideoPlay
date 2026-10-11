@@ -1,6 +1,7 @@
 #include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
+#include "core/fileassoc.h"
 #include "core/settings.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
@@ -57,6 +58,12 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             break;
         case MenuId::ImportSubtitle: // 导入字幕
             openSubtitleDialog();
+            break;
+        case MenuId::SetDefaultPlayer: // 设为默认播放器
+            registerAsDefaultPlayer();
+            break;
+        case MenuId::RemoveFileAssoc: // 取消文件关联
+            removeFileAssociations();
             break;
         case MenuId::Exit: // 退出
             m_running = false;
@@ -445,6 +452,36 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
         }
         return;
+    }
+}
+
+void VideoPlayerApp::registerAsDefaultPlayer() {
+    if (!m_renderer) return;
+
+    if (registerFileAssociations()) {
+        logger().info("File associations registered");
+        m_renderer->showMessageBox("设为默认播放器",
+            "已注册 VideoPlay 为支持的媒体格式的默认播放器候选。\n"
+            "如果双击媒体文件仍未用 VideoPlay 打开，\n"
+            "请在打开的「默认应用」设置中选择 VideoPlay。");
+        openDefaultAppsSettings();
+    } else {
+        logger().error("Failed to register file associations");
+        m_renderer->showMessageBox("设为默认播放器",
+            "文件关联注册失败，详见日志。", true);
+    }
+}
+
+void VideoPlayerApp::removeFileAssociations() {
+    if (!m_renderer) return;
+
+    if (unregisterFileAssociations()) {
+        logger().info("File associations removed");
+        m_renderer->showOSD(OSDType::Info, "已取消文件关联");
+    } else {
+        logger().error("Failed to unregister file associations");
+        m_renderer->showMessageBox("取消文件关联",
+            "部分文件关联移除失败，详见日志。", true);
     }
 }
 

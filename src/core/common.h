@@ -442,6 +442,16 @@ struct SearchResult {
     int source = 0;         // 0=转录, 1=外挂字幕
 };
 
+// 支持的媒体文件扩展名（含点，小写）。
+// 文件关联注册、剧集识别、文件夹批量导入共用这一份列表
+inline const std::vector<std::string>& mediaExtensions() {
+    static const std::vector<std::string> extensions = {
+        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
+        ".mp3", ".aac", ".wav", ".flac", ".ogg", ".m4v", ".ts"
+    };
+    return extensions;
+}
+
 // 判断路径/URL 是否为网络串流
 inline bool isNetworkUrl(const std::string& path) {
     const std::string lower = toLower(path);

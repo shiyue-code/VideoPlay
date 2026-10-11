@@ -70,6 +70,10 @@ private:
     void showHelp();
     void showAbout();
 
+    // 文件关联（Windows 默认播放器注册）
+    void registerAsDefaultPlayer();
+    void removeFileAssociations();
+
     // AI 功能
     void startAIAnalysis();
     void handleSearch(const std::string& query);

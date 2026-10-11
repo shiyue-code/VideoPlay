@@ -423,7 +423,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     m_menuManager->handleContextMenuClick(m_mouseX, m_mouseY);
                     break;
                 }
-                handleMouseButtonDown(m_mouseX, m_mouseY);
+                handleMouseButtonDown(m_mouseX, m_mouseY, event.button.clicks);
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
                 // 右键菜单
                 m_menuManager->showContextMenu(m_mouseX, m_mouseY);
@@ -769,7 +769,7 @@ void SDLRenderer::handleMouseMotion(int x, int y) {
     }
 }
 
-void SDLRenderer::handleMouseButtonDown(int x, int y) {
+void SDLRenderer::handleMouseButtonDown(int x, int y, int clicks) {
     // 无边框模式下优先检�?resize 区域（避免被控件检测拦截）
     if (m_borderless && m_windowFrame && !(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED)) {
         ResizeMode mode = getResizeModeAt(x, y);
@@ -890,6 +890,21 @@ void SDLRenderer::handleMouseButtonDown(int x, int y) {
         }
         m_pressedControl = ControlType::None;
         return;
+    }
+
+    // 视频空白区域双击：切换全屏。
+    // 到达此处时已排除菜单栏、打开中的菜单与信息面板；
+    // 命中无交互控件（ControlType::None）才算落在画面背景上。
+    // 底部悬浮控制栏区域不注册背景矩形，按钮间隙同样返回 None，需按几何排除
+    if (clicks >= 2 && m_pressedControl == ControlType::None) {
+        const int controlBarY = m_windowHeight - m_controlHeight - 24;
+        const bool overControlBar = m_showControls &&
+            x >= 24 && x <= m_windowWidth - 24 &&
+            y >= controlBarY && y <= controlBarY + m_controlHeight;
+        if (!overControlBar) {
+            toggleFullscreen();
+            return;
+        }
     }
 
     // 处理控件点击

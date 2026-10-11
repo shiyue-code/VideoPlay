@@ -1,4 +1,5 @@
 ﻿#include "core/episodedetector.h"
+#include "core/common.h"
 #include "utils/logger.h"
 
 #include <filesystem>
@@ -18,11 +19,6 @@ Logger& logger() {
 
 
 namespace {
-    const std::vector<std::string> kMediaExtensions = {
-        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
-        ".mp3", ".aac", ".wav", ".flac", ".ogg", ".m4v", ".ts"
-    };
-
     // 归一化时按标点/空白丢弃的码位区间（C1 控制与 Latin-1 标点、
     // 通用标点、CJK 标点、中点、CJK 兼容形式、全角标点）。
     // 区间之外的非 ASCII 字符（含中日韩文字）全部保留
@@ -45,7 +41,8 @@ bool EpisodeDetector::isMediaFile(const std::string& path)
     std::string ext = std::filesystem::u8path(path).extension().u8string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return std::find(kMediaExtensions.begin(), kMediaExtensions.end(), ext) != kMediaExtensions.end();
+    const auto& exts = mediaExtensions();
+    return std::find(exts.begin(), exts.end(), ext) != exts.end();
 }
 
 std::string EpisodeDetector::normalizeSeriesName(const std::string& name)

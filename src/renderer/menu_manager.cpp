@@ -3,6 +3,7 @@
 #include "renderer/sdlrenderer_internal.h"
 #include "core/settings.h"
 #include "core/common.h"
+#include "core/fileassoc.h"
 #include "utils/logger.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -40,6 +41,11 @@ void MenuManager::initMenus() {
     fileMenu->addChild(MenuItem::create(MenuId::MediaInfo, "视频信息", [this]{
         if (m_renderer) m_renderer->toggleMediaInfoPanel();
     }));
+    fileMenu->addChild(MenuItem::separator());
+    fileMenu->addChild(MenuItem::create(MenuId::SetDefaultPlayer, "设为默认播放器")
+        ->setEnabled([]{ return fileAssocSupported() && !isFileAssocRegistered(); }));
+    fileMenu->addChild(MenuItem::create(MenuId::RemoveFileAssoc, "取消文件关联")
+        ->setEnabled([]{ return fileAssocSupported() && isFileAssocRegistered(); }));
     fileMenu->addChild(MenuItem::separator());
     fileMenu->addChild(MenuItem::create(MenuId::Exit, "退出", nullptr, "Alt+F4"));
     m_topMenus.push_back(fileMenu);
