@@ -506,8 +506,9 @@ void SDLRenderer::showMessageBox(const std::string& title, const std::string& me
 }
 
 void SDLRenderer::showInputDialog(const std::string& title, const std::string& placeholder,
+                                  const std::string& initialValue,
                                   std::function<void(const std::string&)> callback) {
-    m_dialogManager->showInputDialog(title, placeholder, std::move(callback));
+    m_dialogManager->showInputDialog(title, placeholder, initialValue, std::move(callback));
 }
 
 void SDLRenderer::setLoopMode(int mode) {

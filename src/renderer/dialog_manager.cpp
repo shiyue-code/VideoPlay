@@ -13,13 +13,14 @@ DialogManager::DialogManager(SDLRenderer* renderer) : m_sdlRenderer(renderer) {
 DialogManager::~DialogManager() = default;
 
 void DialogManager::showInputDialog(const std::string& title, const std::string& placeholder,
+                                    const std::string& initialValue,
                                     std::function<void(const std::string&)> callback) {
     if (!m_inputDialog) {
         m_inputDialog = std::make_unique<InputDialog>(m_sdlRenderer->getWindow(),
                                                       m_sdlRenderer->getFont(),
                                                       m_sdlRenderer->getTitleFont());
     }
-    m_inputDialog->show(title, placeholder, "", std::move(callback));
+    m_inputDialog->show(title, placeholder, initialValue, std::move(callback));
 }
 
 void DialogManager::openSubtitleDialog(std::function<void(const std::string&)> callback) {

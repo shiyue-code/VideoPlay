@@ -22,6 +22,7 @@ public:
     void openSubtitleDialog(std::function<void(const std::string&)> callback);
     void openFolderDialog(std::function<void(const std::string&)> callback);
     void showInputDialog(const std::string& title, const std::string& placeholder,
+                         const std::string& initialValue,
                          std::function<void(const std::string&)> callback);
     void processPendingResult();
 

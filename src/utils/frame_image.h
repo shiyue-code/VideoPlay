@@ -4,6 +4,7 @@
 #include "core/common.h"
 
 #include <string>
+#include <vector>
 
 namespace VideoPlay {
 
@@ -18,6 +19,9 @@ VideoFrame transformFrame(const VideoFrame& bgra, int rotation,
 
 // BGRA -> RGBA（alpha 置 255）后用 stb_image_write 写 PNG，成功返回 true
 bool saveFramePng(const VideoFrame& bgra, const std::string& path);
+
+// 与 saveFramePng 相同的编码，但结果写入内存缓冲区（剪贴板截图用）
+bool encodeFramePng(const VideoFrame& bgra, std::vector<uint8_t>& outPng);
 
 } // namespace VideoPlay
 

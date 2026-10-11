@@ -5,12 +5,41 @@
 #include <algorithm>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace VideoPlay {
 
 namespace {
 Logger& logger() {
     static auto logger = Logger::get("renderer.events");
     return *logger;
+}
+
+// event.key.mod 来自 SDL 内部按键状态表：窗口创建/聚焦前已按住的
+// 修饰键（先按住 Ctrl 再启动程序）没有对应 keydown，mod 会缺失。
+// 用系统实时按键状态补齐（只补不删），Ctrl+← 等才不会退化成裸方向键
+SDL_Keymod liveKeyMods(SDL_Keymod eventMod) {
+    SDL_Keymod mods = eventMod | SDL_GetModState();
+#ifdef _WIN32
+    if ((GetAsyncKeyState(VK_LCONTROL) & 0x8000) ||
+        (GetAsyncKeyState(VK_RCONTROL) & 0x8000)) {
+        mods |= SDL_KMOD_CTRL;
+    }
+    if ((GetAsyncKeyState(VK_LSHIFT) & 0x8000) ||
+        (GetAsyncKeyState(VK_RSHIFT) & 0x8000)) {
+        mods |= SDL_KMOD_SHIFT;
+    }
+    if ((GetAsyncKeyState(VK_LMENU) & 0x8000) ||
+        (GetAsyncKeyState(VK_RMENU) & 0x8000)) {
+        mods |= SDL_KMOD_ALT;
+    }
+#endif
+    return mods;
 }
 
 }
@@ -190,18 +219,21 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
             bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
-            
+            // 合并系统实时修饰键：启动早期 SDL 内部状态可能漏掉
+            // 窗口创建前已按住的 Ctrl/Shift，见 liveKeyMods
+            const SDL_Keymod mods = liveKeyMods(event.key.mod);
+
             //  菜单快捷键处理
             if (pressed) {
                 // Ctrl+O 打开文件
-                if (event.key.key == SDLK_O && (event.key.mod & SDL_KMOD_CTRL)) {
+                if (event.key.key == SDLK_O && (mods & SDL_KMOD_CTRL)) {
                     if (m_callbacks.fileOpen) m_callbacks.fileOpen();
                     break;
                 }
 
                 // 处理搜索输入框快捷键
                 if (m_isSearchInputFocused) {
-                    bool ctrl = (event.key.mod & SDL_KMOD_CTRL) != 0;
+                    bool ctrl = (mods & SDL_KMOD_CTRL) != 0;
                     if (ctrl && event.key.key == SDLK_A) {
                         selectAllSearchQuery();
                         return;
@@ -237,7 +269,7 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                     }
                     return; // 焦点在输入框时拦截所有按键，防止空格暂停等
                 } else if (m_showSearchPanel && event.key.key == SDLK_C &&
-                           (event.key.mod & SDL_KMOD_CTRL)) {
+                           (mods & SDL_KMOD_CTRL)) {
                     copyLastAIChatMessage();
                     return;
                 }
@@ -280,10 +312,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_callbacks.stop) m_callbacks.stop();
                         break;
                     case SDLK_LEFT: {
-                        bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
-                        bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
+                        bool ctrlShift = (mods & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        bool ctrlOnly = (mods & SDL_KMOD_CTRL) && !(mods & SDL_KMOD_SHIFT);
+                        bool shiftOnly = (mods & SDL_KMOD_SHIFT) && !(mods & SDL_KMOD_CTRL);
                         if (ctrlShift && m_callbacks.episodePrev) {
                             m_callbacks.episodePrev();
+                        } else if (ctrlOnly && m_callbacks.frameStep) {
+                            m_callbacks.frameStep(-1); // Ctrl+左: 上一帧
                         } else if (shiftOnly && m_callbacks.seek) {
                             m_callbacks.seek(-30.0); // Shift+左: 后退30秒
                         } else if (!ctrlShift && m_callbacks.seek) {
@@ -292,10 +327,13 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     }
                     case SDLK_RIGHT: {
-                        bool ctrlShift = (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
-                        bool shiftOnly = (event.key.mod & SDL_KMOD_SHIFT) && !(event.key.mod & SDL_KMOD_CTRL);
+                        bool ctrlShift = (mods & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+                        bool ctrlOnly = (mods & SDL_KMOD_CTRL) && !(mods & SDL_KMOD_SHIFT);
+                        bool shiftOnly = (mods & SDL_KMOD_SHIFT) && !(mods & SDL_KMOD_CTRL);
                         if (ctrlShift && m_callbacks.episodeNext) {
                             m_callbacks.episodeNext();
+                        } else if (ctrlOnly && m_callbacks.frameStep) {
+                            m_callbacks.frameStep(1); // Ctrl+右: 下一帧
                         } else if (shiftOnly && m_callbacks.seek) {
                             m_callbacks.seek(30.0);  // Shift+右: 前进30秒
                         } else if (!ctrlShift && m_callbacks.seek) {
@@ -303,19 +341,22 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         }
                         break;
                     }
+                    case SDLK_COMMA:
+                        if (m_callbacks.frameStep) m_callbacks.frameStep(-1); // ,: 上一帧
+                        break;
                     case SDLK_UP:
-                        if ((event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
+                        if ((mods & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
                             adjustContrast(0.1f);
-                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                        } else if (mods & SDL_KMOD_CTRL) {
                             adjustBrightness(0.05f);
                         } else if (m_callbacks.volume) {
                             m_callbacks.volume(5);
                         }
                         break;
                     case SDLK_DOWN:
-                        if ((event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
+                        if ((mods & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) == (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)) {
                             adjustContrast(-0.1f);
-                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                        } else if (mods & SDL_KMOD_CTRL) {
                             adjustBrightness(-0.05f);
                         } else if (m_callbacks.volume) {
                             m_callbacks.volume(-5);
@@ -323,12 +364,12 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         break;
                     case SDLK_0:
                     case SDLK_KP_0:
-                        if (event.key.mod & SDL_KMOD_CTRL) {
+                        if (mods & SDL_KMOD_CTRL) {
                             resetVideoFilter();
                         }
                         break;
                     case SDLK_C:
-                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                        if (!(mods & SDL_KMOD_CTRL)) {
                             toggleVideoControlPanel();
                         }
                         break;
@@ -345,17 +386,21 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         if (m_callbacks.speed) m_callbacks.speed(0); // 循环速度
                         break;
                     case SDLK_F12:
-                        if (m_callbacks.screenshot) m_callbacks.screenshot();
+                        if (mods & SDL_KMOD_SHIFT) {
+                            if (m_callbacks.screenshotClipboard) m_callbacks.screenshotClipboard();
+                        } else if (m_callbacks.screenshot) {
+                            m_callbacks.screenshot();
+                        }
                         break;
                     case SDLK_L:
-                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                        if (!(mods & SDL_KMOD_CTRL)) {
                             // L 键循环切换循环模式
                             m_loopMode = (m_loopMode + 1) % 3;
                             if (m_callbacks.loopMode) m_callbacks.loopMode(m_loopMode);
                         }
                         break;
                     case SDLK_A:
-                        if (!(event.key.mod & SDL_KMOD_CTRL)) {
+                        if (!(mods & SDL_KMOD_CTRL)) {
                             // A 键循环切换画面比例
                             int next = (static_cast<int>(m_aspectMode) + 1) % 4;
                             m_aspectMode = static_cast<AspectMode>(next);
@@ -365,21 +410,23 @@ void SDLRenderer::handleEvent(const SDL_Event& event) {
                         toggleAlwaysOnTop();
                         break;
                     case SDLK_B:
-                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                        if (mods & SDL_KMOD_SHIFT) {
                             if (m_callbacks.clearBookmarks) m_callbacks.clearBookmarks();
-                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                        } else if (mods & SDL_KMOD_CTRL) {
                             if (m_callbacks.addBookmark) m_callbacks.addBookmark();
                         }
                         break;
                     case SDLK_G:
-                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                        if (mods & SDL_KMOD_CTRL) {
+                            if (m_callbacks.gotoTime) m_callbacks.gotoTime(); // Ctrl+G: 跳转到时间
+                        } else if (mods & SDL_KMOD_SHIFT) {
                             if (m_callbacks.audioSync) m_callbacks.audioSync(-500);  // 音频提前 0.5s
                         } else {
                             if (m_callbacks.subtitleSync) m_callbacks.subtitleSync(-500); // 字幕提前 0.5s
                         }
                         break;
                     case SDLK_H:
-                        if (event.key.mod & SDL_KMOD_SHIFT) {
+                        if (mods & SDL_KMOD_SHIFT) {
                             if (m_callbacks.audioSync) m_callbacks.audioSync(500);   // 音频延后 0.5s
                         } else {
                             if (m_callbacks.subtitleSync) m_callbacks.subtitleSync(500);  // 字幕延后 0.5s

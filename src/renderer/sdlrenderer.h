@@ -59,6 +59,10 @@ enum class MenuId : int {
     PlaylistRemove = 23,
     PlaylistClear = 24,
     PlaylistPlayItem = 25,
+    FramePrev = 26,
+    FrameNext = 27,
+    GotoTime = 28,
+    ScreenshotToClipboard = 29,
     EpisodePanel = 32,
 
     // 剧集菜单
@@ -227,6 +231,9 @@ struct RendererCallbacks {
     SubtitleTrackCallback subtitleTrack;
     VideoFilterConfigCallback videoFilterConfig;
     std::function<void()> screenshot;   // 截图请求（由 app 截取当前视频帧）
+    std::function<void()> screenshotClipboard;  // 截图复制到剪贴板
+    std::function<void(int)> frameStep; // 逐帧步进，-1 上一帧 / +1 下一帧
+    std::function<void()> gotoTime;     // 跳转到时间对话框
     std::function<void()> liveRender;  // 系统拖动/缩放模态循环期间实时重绘
 };
 
@@ -429,6 +436,7 @@ public:
     // 打开文件对话框（异步回调）
     void openFileDialog(std::function<void(const std::string&)> callback, const std::vector<std::string>& filters = {});
     void showInputDialog(const std::string& title, const std::string& placeholder,
+                         const std::string& initialValue,
                          std::function<void(const std::string&)> callback);
     void openSubtitleDialog(std::function<void(const std::string&)> callback);
     void openFolderDialog(std::function<void(const std::string&)> callback);

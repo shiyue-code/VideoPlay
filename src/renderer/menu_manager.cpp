@@ -61,6 +61,10 @@ void MenuManager::initMenus() {
     playMenu->addChild(MenuItem::create(MenuId::PrevEpisode, "上一集", nullptr, "Ctrl+Shift+Left"));
     playMenu->addChild(MenuItem::create(MenuId::NextEpisode, "下一集", nullptr, "Ctrl+Shift+Right"));
     playMenu->addChild(MenuItem::separator());
+    playMenu->addChild(MenuItem::create(MenuId::FramePrev, "上一帧", nullptr, "Ctrl+Left"));
+    playMenu->addChild(MenuItem::create(MenuId::FrameNext, "下一帧", nullptr, "Ctrl+Right"));
+    playMenu->addChild(MenuItem::create(MenuId::GotoTime, "跳转到时间...", nullptr, "Ctrl+G"));
+    playMenu->addChild(MenuItem::separator());
     playMenu->addChild(MenuItem::create(MenuId::Playlist, "播放列表", nullptr, "Ctrl+L"));
     playMenu->addChild(MenuItem::create(MenuId::PlaylistClear, "清空播放列表"));
     playMenu->addChild(MenuItem::separator());
@@ -205,6 +209,7 @@ void MenuManager::initMenus() {
         ->setChecked([this]{ return m_renderer && m_renderer->m_hardwareDecodingEnabled; }));
     videoMenu->addChild(MenuItem::separator());
     videoMenu->addChild(MenuItem::create(MenuId::Screenshot, "截图", nullptr, "F12"));
+    videoMenu->addChild(MenuItem::create(MenuId::ScreenshotToClipboard, "复制截图到剪贴板", nullptr, "Shift+F12"));
     videoMenu->addChild(MenuItem::create(MenuId::AlwaysOnTop, "始终置顶", nullptr, "T")
         ->setChecked([this]{ return m_renderer && m_renderer->m_alwaysOnTop; }));
     videoMenu->addChild(MenuItem::create(MenuId::Borderless, "无边框窗口")

@@ -570,7 +570,21 @@ void SDLRenderer::renderTimeDisplay(int64_t position, int64_t duration, int cont
     if (m_mediaInfo.sourceType == SourceType::NetworkStream && duration <= 0) {
         timeText = "直播流";
     } else {
-        timeText = VideoPlay::formatTime(position) + " / " + VideoPlay::formatTime(duration);
+        // 位置按 mm:ss.ff 显示（ff = 秒内帧号），逐帧步进时便于确认；时长保持原格式
+        std::string posText = VideoPlay::formatTime(position);
+        if (m_mediaInfo.fps > 0 && duration > 0) {
+            int64_t fpsInt = static_cast<int64_t>(std::llround(m_mediaInfo.fps));
+            if (fpsInt > 0) {
+                int64_t frame = static_cast<int64_t>(
+                    std::llround(static_cast<double>(position) * m_mediaInfo.fps / 1000.0));
+                int64_t ff = frame % fpsInt;
+                if (ff < 0) ff += fpsInt;
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), ".%02lld", static_cast<long long>(ff));
+                posText += buf;
+            }
+        }
+        timeText = posText + " / " + VideoPlay::formatTime(duration);
     }
     
     // 渲染时间文字

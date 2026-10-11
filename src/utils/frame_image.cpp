@@ -79,24 +79,58 @@ VideoFrame transformFrame(const VideoFrame& bgra, int rotation,
     return out;
 }
 
-bool saveFramePng(const VideoFrame& bgra, const std::string& path)
+namespace {
+
+// BGRA -> RGBA（alpha 强制不透明）；尺寸非法返回 false
+bool bgraToRgba(const VideoFrame& bgra, std::vector<uint8_t>& rgba)
 {
     if (bgra.width <= 0 || bgra.height <= 0 ||
         bgra.data.size() < static_cast<size_t>(bgra.width) * bgra.height * 4) {
         return false;
     }
-
-    // BGRA -> RGBA，alpha 强制不透明
-    std::vector<uint8_t> rgba(static_cast<size_t>(bgra.width) * bgra.height * 4);
+    rgba.resize(static_cast<size_t>(bgra.width) * bgra.height * 4);
     for (size_t i = 0; i + 3 < rgba.size(); i += 4) {
         rgba[i] = bgra.data[i + 2];
         rgba[i + 1] = bgra.data[i + 1];
         rgba[i + 2] = bgra.data[i];
         rgba[i + 3] = 255;
     }
+    return true;
+}
+
+// stbi_write_png_to_func 的输出回调：把编码数据追加进 vector
+void appendPngBytes(void* context, void* data, int size)
+{
+    auto* out = static_cast<std::vector<uint8_t>*>(context);
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    out->insert(out->end(), bytes, bytes + size);
+}
+
+} // namespace
+
+bool saveFramePng(const VideoFrame& bgra, const std::string& path)
+{
+    std::vector<uint8_t> rgba;
+    if (!bgraToRgba(bgra, rgba)) {
+        return false;
+    }
 
     return stbi_write_png(path.c_str(), bgra.width, bgra.height, 4,
                           rgba.data(), bgra.width * 4) != 0;
+}
+
+bool encodeFramePng(const VideoFrame& bgra, std::vector<uint8_t>& outPng)
+{
+    std::vector<uint8_t> rgba;
+    if (!bgraToRgba(bgra, rgba)) {
+        return false;
+    }
+
+    outPng.clear();
+    return stbi_write_png_to_func(appendPngBytes, &outPng,
+                                  bgra.width, bgra.height, 4,
+                                  rgba.data(), bgra.width * 4) != 0 &&
+           !outPng.empty();
 }
 
 } // namespace VideoPlay

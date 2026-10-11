@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <vector>
 
@@ -204,4 +205,37 @@ TEST(FrameImage, SavePngRejectsEmptyFrame)
 {
     VideoFrame empty;
     EXPECT_FALSE(saveFramePng(empty, "should_not_exist.png"));
+}
+
+TEST(FrameImage, EncodePngProducesDecodablePng)
+{
+    VideoFrame src = makeFrame(3, 2);
+    std::vector<uint8_t> png;
+    ASSERT_TRUE(encodeFramePng(src, png));
+    ASSERT_GT(png.size(), 8u);
+    // PNG magic: 89 50 4E 47 0D 0A 1A 0A
+    const uint8_t magic[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    EXPECT_EQ(std::memcmp(png.data(), magic, sizeof(magic)), 0);
+
+    int w = 0, h = 0, channels = 0;
+    uint8_t* pixels = stbi_load_from_memory(png.data(), static_cast<int>(png.size()),
+                                            &w, &h, &channels, 4);
+    ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(w, 3);
+    EXPECT_EQ(h, 2);
+    // 源 BGRA (B=i, G=64+i, R=128+i) -> PNG RGBA (R=128+i, G=64+i, B=i, A=255)
+    for (int i = 0; i < w * h; ++i) {
+        EXPECT_EQ(pixels[i * 4], static_cast<uint8_t>(128 + i)) << "R at " << i;
+        EXPECT_EQ(pixels[i * 4 + 1], static_cast<uint8_t>(64 + i)) << "G at " << i;
+        EXPECT_EQ(pixels[i * 4 + 2], static_cast<uint8_t>(i)) << "B at " << i;
+        EXPECT_EQ(pixels[i * 4 + 3], 255) << "A at " << i;
+    }
+    stbi_image_free(pixels);
+}
+
+TEST(FrameImage, EncodePngRejectsEmptyFrame)
+{
+    std::vector<uint8_t> png{1, 2, 3};
+    VideoFrame empty;
+    EXPECT_FALSE(encodeFramePng(empty, png));
 }
