@@ -606,6 +606,34 @@ void VideoPlayerApp::render() {
         }
     }
 
+    // GIF 导出结果：后台 ffmpeg 完成后提示一次
+    if (m_gifExport) {
+        bool done = false;
+        bool ok = false;
+        std::string outPath;
+        std::string errLog;
+        {
+            std::lock_guard<std::mutex> lock(m_gifExport->mutex);
+            done = m_gifExport->done;
+            ok = m_gifExport->ok;
+            outPath = m_gifExport->outputPath;
+            errLog = m_gifExport->errorLog;
+        }
+        if (done && m_renderer) {
+            if (ok) {
+                std::string filename =
+                    std::filesystem::path(outPath).filename().u8string();
+                m_renderer->showOSD(OSDType::Info, "GIF 已保存：" + filename);
+                logger().info("GIF exported: " + outPath);
+            } else {
+                m_renderer->showMessageBox("导出 GIF 失败",
+                    "GIF 导出失败，详见日志。", true);
+                logger().error("GIF export failed: " + errLog);
+            }
+            m_gifExport.reset();
+        }
+    }
+
     // 画面调节配置的防抖落盘（拖动滑杆结束后 500ms 写一次）
     if (m_videoFilterSavePending &&
         std::chrono::steady_clock::now() >= m_videoFilterSaveDeadline) {

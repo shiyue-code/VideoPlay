@@ -1,10 +1,16 @@
+#define NOMINMAX
 #include "app.h"
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
 #include "utils/frame_image.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
+#include "utils/subprocess_runner.h"
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -13,6 +19,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 namespace {
     const int MIN_VOLUME = 0;
@@ -278,6 +285,132 @@ void VideoPlayerApp::copyScreenshotToClipboard() {
         logger().error("Failed to set clipboard data: " + std::string(SDL_GetError()));
         m_renderer->showMessageBox("截图失败", "无法复制到剪贴板", true);
     }
+}
+
+void VideoPlayerApp::exportGifClip() {
+    if (!m_renderer || !m_player) return;
+
+    if (m_currentFile.empty()) {
+        m_renderer->showOSD(OSDType::Info, "请先打开一个视频文件");
+        return;
+    }
+    if (m_gifExport) {
+        m_renderer->showOSD(OSDType::Info, "GIF 导出进行中");
+        return;
+    }
+
+    // AB 循环区间已设：直接作为导出范围
+    if (m_loopA >= 0 && m_loopB > m_loopA) {
+        startGifExport(m_loopA, m_loopB - m_loopA);
+        return;
+    }
+
+    m_renderer->showInputDialog("导出 GIF", "从当前位置起的时长（秒，最多 60）", "5",
+        [this](const std::string& text) {
+            std::string trimmed = trim(text);
+            if (trimmed.empty()) return;   // 取消
+            double seconds = -1.0;
+            try {
+                seconds = std::stod(trimmed);
+            } catch (...) {
+                seconds = -1.0;
+            }
+            if (!(seconds > 0.0)) {
+                m_renderer->showOSD(OSDType::Info, "时长无效，请输入秒数");
+                return;
+            }
+            startGifExport(m_position, static_cast<int64_t>(seconds * 1000.0));
+        });
+}
+
+void VideoPlayerApp::startGifExport(int64_t startMs, int64_t durationMs) {
+    if (!m_renderer || !m_player || m_currentFile.empty() || m_gifExport) return;
+
+    startMs = std::max<int64_t>(startMs, 0);
+    durationMs = std::clamp<int64_t>(durationMs, 500, 60000);
+    if (m_duration > 0 && startMs + durationMs > m_duration) {
+        durationMs = m_duration - startMs;
+    }
+    if (durationMs < 500) {
+        m_renderer->showOSD(OSDType::Info, "导出区间不足 0.5 秒");
+        return;
+    }
+
+    // 内置 ffmpeg：优先 exe 同目录（构建产物已拷到 bin 下），否则退到 PATH
+    std::string ffmpegExe = "ffmpeg";
+#ifdef _WIN32
+    {
+        char exePath[MAX_PATH];
+        if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) > 0) {
+            std::filesystem::path bundled =
+                std::filesystem::path(exePath).parent_path() / "ffmpeg.exe";
+            std::error_code ec;
+            if (std::filesystem::exists(bundled, ec)) {
+                ffmpegExe = bundled.u8string();
+            }
+        }
+    }
+#endif
+
+    // 输出路径与截图一致：桌面 / VideoPlay_GIF_YYYYMMDD_HHMMSS.gif
+    std::string dir;
+#ifdef _WIN32
+    if (const char* userProfile = getenv("USERPROFILE")) {
+        dir = std::string(userProfile) + "/Desktop/";
+    } else {
+        dir = "./";
+    }
+#else
+    const char* home = getenv("HOME");
+    dir = home ? std::string(home) + "/Desktop/" : "./";
+#endif
+
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    std::ostringstream name;
+    name << "VideoPlay_GIF_" << std::put_time(&tm, "%Y%m%d_%H%M%S") << ".gif";
+    const std::string outPath = dir + name.str();
+
+    std::ostringstream cmd;
+    cmd.imbue(std::locale::classic());
+    cmd << '"' << ffmpegExe << "\" -hide_banner -loglevel error -y"
+        << " -ss " << std::fixed << std::setprecision(3) << startMs / 1000.0
+        << " -i \"" << m_currentFile << '"'
+        << " -t " << durationMs / 1000.0
+        // 单遍 palettegen + paletteuse 专用调色板，明显优于 GIF 默认通用调色板
+        << " -an -filter_complex \"fps=12,scale=480:-2:flags=lanczos,"
+           "split[s0][s1];[s0]palettegen=max_colors=128[p];"
+           "[s1][p]paletteuse=dither=bayer\""
+        << " \"" << outPath << '"';
+    const std::string command = cmd.str();
+
+    auto state = std::make_shared<GifExportState>();
+    state->outputPath = outPath;
+    m_gifExport = state;
+    logger().info("GIF export started: " + command);
+    m_renderer->showOSD(OSDType::Info,
+        "正在导出 GIF（" + formatTime(startMs) + " 起 " +
+        std::to_string(durationMs / 1000) + " 秒）");
+
+    // 只碰共享状态：即使主线程已退出也不写 this
+    std::thread([state, command]() {
+        std::string err;
+        int ret = SubprocessRunner::run(command, err);
+        std::error_code ec;
+        bool produced = ret == 0 &&
+            std::filesystem::file_size(
+                std::filesystem::u8path(state->outputPath), ec) > 0;
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->ok = produced;
+        state->errorLog = std::move(err);
+        state->done = true;
+    }).detach();
 }
 
 void VideoPlayerApp::stepFrame(int direction) {

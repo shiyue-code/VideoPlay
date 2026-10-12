@@ -133,6 +133,7 @@ VideoPlayerApp
 - 画面旋转/翻转/中心裁剪在 `SDLRenderer::renderFrame` 用 `SDL_RenderTextureRotated` 完成，不要改成 FFmpeg `transpose`（硬解路径过不去）
 - 渲染已开 vsync（`SDL_SetRenderVSync`）；vsync 生效时主循环最小帧间隔降到 4ms，只在 present 未阻塞（最小化/遮挡）时补睡 `SDL_DelayPrecise`，否则保持 16ms
 - 截图走 `VideoPlayerApp::takeScreenshot`：对 `m_displayFrame` 按与渲染一致的「裁剪 → 翻转 → 顺时针旋转」顺序变换后写 PNG（依 `SDL_RenderTextureRotated` 语义，先翻转后旋转），不含 UI/OSD
+- GIF 导出走 `VideoPlayerApp::startGifExport`：AB 区间优先，否则当前位置+输入秒数（≤60s）；后台线程跑 `SubprocessRunner` 调 exe 同目录 `ffmpeg.exe`（palettegen/paletteuse 单遍调色板，fps=12、宽 480），结果经 `m_gifExport` 共享状态在 render() 消费，detached 线程不触碰 this
 - 字幕样式取自 `setSubtitleStyle` 缓存的 `SubtitleStyle`（字号/颜色/描边生效，`fontFamily` 暂不支持）；有描边时不画背景框、按偏移叠加描边层
 - 消息型弹窗统一用窗口内信息面板（`renderInfoPanel`，媒体信息/关于/帮助/消息共用）：模态遮罩，点背板/Esc/Enter/右上角 × 关闭；命中在 `getControlAt` 分发前拦截，只有 `InfoPanelClose`/`InfoPanelLink` 可悬停。`showMessageBox`/`showInfoPanel` 仅主线程调用；Custom 面板显示期间新消息入队（≤8，丢弃最旧），关闭后依次显示；内容超高时滚动（滚轮接管，标题与 × 不滚动）；正文里的 `[mm:ss]` 高亮可点击。轻量提示走 `showOSD`（如「请先打开一个视频文件」「AI 缓存已清除」「截图已保存」）。CustomMessageBox 独立窗口已删除
 - 输入型弹窗（`InputDialog`/`SettingsDialog`/`InputField`，`ModalDialog` 子类）仍是独立窗口模态，但视觉与信息面板一致：UiStyle 提供全部配色/尺寸，`UiDraw` 统一绘制圆角矩形/按钮/×；标题用 `getTitleFont()`（18px）

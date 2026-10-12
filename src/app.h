@@ -58,6 +58,8 @@ private:
     void toggleAlwaysOnTop();
     void takeScreenshot();
     void copyScreenshotToClipboard();
+    void exportGifClip();   // AB 区间已设则直接用，否则弹时长输入框
+    void startGifExport(int64_t startMs, int64_t durationMs);
     VideoFrame captureCurrentFrame(); // 当前显示帧套用画面变换；失败返回空帧
     void stepFrame(int direction);    // 逐帧步进：-1 上一帧 / +1 下一帧
     void showGotoTimeDialog();        // Ctrl+G 跳转到时间
@@ -199,6 +201,16 @@ private:
     int64_t m_loopA = -1;
     int64_t m_loopB = -1;
     bool m_loopSeeking = false;
+
+    // GIF 导出：后台 ffmpeg 子进程写状态，主线程在 render() 消费后置空
+    struct GifExportState {
+        std::mutex mutex;
+        bool done = false;
+        bool ok = false;
+        std::string outputPath;
+        std::string errorLog;
+    };
+    std::shared_ptr<GifExportState> m_gifExport;
 
     // AI 功能
     std::unique_ptr<AIAnalyzer> m_aiAnalyzer;

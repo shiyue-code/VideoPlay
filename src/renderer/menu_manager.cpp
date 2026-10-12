@@ -220,6 +220,7 @@ void MenuManager::initMenus() {
     videoMenu->addChild(MenuItem::separator());
     videoMenu->addChild(MenuItem::create(MenuId::Screenshot, "截图", nullptr, "F12"));
     videoMenu->addChild(MenuItem::create(MenuId::ScreenshotToClipboard, "复制截图到剪贴板", nullptr, "Shift+F12"));
+    videoMenu->addChild(MenuItem::create(MenuId::GifExport, "导出 GIF 片段..."));
     videoMenu->addChild(MenuItem::create(MenuId::AlwaysOnTop, "始终置顶", nullptr, "T")
         ->setChecked([this]{ return m_renderer && m_renderer->m_alwaysOnTop; }));
     videoMenu->addChild(MenuItem::create(MenuId::Borderless, "无边框窗口")

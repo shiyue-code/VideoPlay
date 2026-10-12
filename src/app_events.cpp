@@ -213,6 +213,9 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
         case MenuId::ScreenshotToClipboard: // 复制截图到剪贴板
             copyScreenshotToClipboard();
             break;
+        case MenuId::GifExport: // 导出 GIF 片段
+            exportGifClip();
+            break;
         case MenuId::ABLoopSetA: // AB循环: 设置A点
             setLoopPointA();
             break;
