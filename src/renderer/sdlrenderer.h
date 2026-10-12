@@ -142,6 +142,15 @@ enum class MenuId : int {
     HdrAlgoReinhard = 152,
     HdrAlgorithmMenu = 153,
 
+    // 声道映射
+    ChannelMap = 154,
+    ChannelMapOriginal = 155,
+    ChannelMapMono = 156,
+    ChannelMapSwapLR = 157,
+
+    // GIF 导出
+    GifExport = 158,
+
     // AI 菜单
     AIAnalyze = 300,
     AISummary = 301,
@@ -417,6 +426,7 @@ public:
     void showOSD(OSDType type, const std::string& text, float progress = -1.0f);
     void setHardwareDecodingEnabled(bool enabled);
     void setAudioFilterPreset(AudioFilterPreset preset);
+    void setChannelMapMode(ChannelMapMode mode);
     void setDeinterlaceMode(DeinterlaceMode mode);
     void setHdrToneMapMode(HdrToneMapMode mode);
     void setHdrToneMapAlgorithm(HdrToneMapAlgorithm algo);
@@ -693,6 +703,7 @@ private:
     int m_loopMode = 2; // 0=None, 1=Single, 2=Playlist
     bool m_hardwareDecodingEnabled = true;
     AudioFilterPreset m_audioFilterPreset = AudioFilterPreset::Off;
+    ChannelMapMode m_channelMapMode = ChannelMapMode::Original;
     DeinterlaceMode m_deinterlaceMode = DeinterlaceMode::Off;
     HdrToneMapMode m_hdrToneMapMode = HdrToneMapMode::Auto;
     HdrToneMapAlgorithm m_hdrToneMapAlgorithm = HdrToneMapAlgorithm::Hable;

@@ -240,6 +240,23 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             }
             break;
         }
+        case MenuId::ChannelMapOriginal:
+        case MenuId::ChannelMapMono:
+        case MenuId::ChannelMapSwapLR: {
+            auto mode = static_cast<ChannelMapMode>(
+                rawId - static_cast<int>(MenuId::ChannelMapOriginal));
+            Settings::instance().setChannelMapMode(mode);
+            Settings::instance().save();
+            if (m_player) {
+                m_player->setChannelMapMode(mode);
+            }
+            if (m_renderer) {
+                m_renderer->setChannelMapMode(mode);
+                m_renderer->showOSD(OSDType::Info,
+                    std::string("声道映射 ") + channelMapModeName(mode));
+            }
+            break;
+        }
         case MenuId::DeinterlaceOff:
         case MenuId::DeinterlaceAuto:
         case MenuId::DeinterlaceYadif:

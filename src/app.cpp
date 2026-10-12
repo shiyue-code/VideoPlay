@@ -107,6 +107,9 @@ bool VideoPlayerApp::initialize() {
     auto audioFilterConfig = Settings::instance().audioFilterConfig();
     m_player->setAudioFilterConfig(audioFilterConfig);
     m_renderer->setAudioFilterPreset(audioFilterConfig.preset);
+    auto channelMapMode = Settings::instance().channelMapMode();
+    m_player->setChannelMapMode(channelMapMode);
+    m_renderer->setChannelMapMode(channelMapMode);
 
     m_renderer->refreshAudioOutputDevices();
     const std::string savedAudioDevice = Settings::instance().audioOutputDeviceName();

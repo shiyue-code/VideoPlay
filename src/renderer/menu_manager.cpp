@@ -98,6 +98,16 @@ void MenuManager::initMenus() {
     auto audioOutSub = MenuItem::create(MenuId::AudioOutput, "音频输出");
     playMenu->addChild(audioOutSub);
 
+    // 声道映射子菜单
+    auto channelMapSub = MenuItem::create(MenuId::ChannelMap, "声道映射");
+    channelMapSub->addChild(MenuItem::create(MenuId::ChannelMapOriginal, "原始")
+        ->setChecked([this]{ return m_renderer && m_renderer->m_channelMapMode == ChannelMapMode::Original; }));
+    channelMapSub->addChild(MenuItem::create(MenuId::ChannelMapMono, "单声道")
+        ->setChecked([this]{ return m_renderer && m_renderer->m_channelMapMode == ChannelMapMode::Mono; }));
+    channelMapSub->addChild(MenuItem::create(MenuId::ChannelMapSwapLR, "左右交换")
+        ->setChecked([this]{ return m_renderer && m_renderer->m_channelMapMode == ChannelMapMode::SwapLR; }));
+    playMenu->addChild(channelMapSub);
+
     m_topMenus.push_back(playMenu);
 
     // 3. 画面菜单

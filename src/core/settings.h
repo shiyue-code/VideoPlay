@@ -105,6 +105,8 @@ public:
     std::string audioOutputDeviceName() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
+    void setChannelMapMode(ChannelMapMode mode);
+    ChannelMapMode channelMapMode() const;
     void setVideoFilterConfig(const VideoFilterConfig& config);
     VideoFilterConfig videoFilterConfig() const;
     void setVideoTransform(const VideoTransform& transform);

@@ -852,6 +852,10 @@ void SDLRenderer::setAudioFilterPreset(AudioFilterPreset preset) {
     m_audioFilterPreset = preset;
 }
 
+void SDLRenderer::setChannelMapMode(ChannelMapMode mode) {
+    m_channelMapMode = mode;
+}
+
 void SDLRenderer::setDeinterlaceMode(DeinterlaceMode mode) {
     m_deinterlaceMode = mode;
 }

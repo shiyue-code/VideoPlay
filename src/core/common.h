@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <utility>
 #include <vector>
 
 struct AVFrame;
@@ -372,6 +373,50 @@ inline AudioFilterConfig audioFilterConfigForPreset(AudioFilterPreset preset) {
     }
 
     return config;
+}
+
+enum class ChannelMapMode {
+    Original = 0,  // 保持原始声道
+    Mono = 1,      // 单声道：所有声道混为同一信号
+    SwapLR = 2     // 左右声道交换
+};
+
+inline const char* channelMapModeName(ChannelMapMode mode) {
+    switch (mode) {
+        case ChannelMapMode::Original: return "原始";
+        case ChannelMapMode::Mono:     return "单声道";
+        case ChannelMapMode::SwapLR:   return "左右交换";
+    }
+    return "原始";
+}
+
+// 声道映射：对重采样后的交错 float 采样就地处理。
+// samples 为 channels 声道交错数据；声道序遵循 FFmpeg 默认布局（≥2 声道时 0=FL,1=FR）
+inline void mapAudioChannels(std::vector<float>& samples, int channels, ChannelMapMode mode) {
+    if (channels <= 0 || mode == ChannelMapMode::Original) {
+        return;
+    }
+    const size_t ch = static_cast<size_t>(channels);
+    const size_t frames = samples.size() / ch;
+    if (mode == ChannelMapMode::SwapLR) {
+        if (channels < 2) {
+            return;
+        }
+        for (size_t i = 0; i < frames; ++i) {
+            std::swap(samples[i * ch], samples[i * ch + 1]);
+        }
+    } else if (mode == ChannelMapMode::Mono) {
+        for (size_t i = 0; i < frames; ++i) {
+            float sum = 0.0f;
+            for (size_t c = 0; c < ch; ++c) {
+                sum += samples[i * ch + c];
+            }
+            const float mono = sum / static_cast<float>(ch);
+            for (size_t c = 0; c < ch; ++c) {
+                samples[i * ch + c] = mono;
+            }
+        }
+    }
 }
 
 enum class PlaybackSpeed {

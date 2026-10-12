@@ -112,6 +112,7 @@ VideoPlayerApp
 - 视频：`avcodec_send_packet` / `avcodec_receive_frame`
 - 音频：`SwrContext` → F32LE；主时钟是音频时钟
 - 变速：音频滤镜链末尾追加 `atempo`（保持音高），速度 <0.5 时拆成多级串联
+- 声道映射（单声道/左右交换）不经滤镜图：`resampleAudioFrame` 尾部对交错 F32 采样就地处理（`mapAudioChannels`），滤镜与直通路径共用
 - 音频时钟不是挂钟：`AudioClock` 记录每段入队采样的媒体 pts 与单帧媒体时长，按 SDL 未取走的帧数推算当前媒体位置
 - 时间戳统一经 `streamPtsToMs` 以容器 `start_time` 为基准（视频/音频/内封字幕）
 - Seek：异步请求，解码线程处理；解码出的目标位置之前的音频/视频帧会被裁剪

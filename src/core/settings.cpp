@@ -499,6 +499,23 @@ AudioFilterConfig Settings::audioFilterConfig() const {
     return config;
 }
 
+void Settings::setChannelMapMode(ChannelMapMode mode) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config["playback"]["channelMapping"] = static_cast<int>(mode);
+}
+
+ChannelMapMode Settings::channelMapMode() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    int mode = 0;
+    if (m_config.contains("playback")) {
+        mode = m_config["playback"].value("channelMapping", 0);
+    }
+    if (mode < 0 || mode > 2) {
+        mode = 0;
+    }
+    return static_cast<ChannelMapMode>(mode);
+}
+
 void Settings::setVideoFilterConfig(const VideoFilterConfig& config) {
     std::lock_guard<std::mutex> lock(m_mutex);
 

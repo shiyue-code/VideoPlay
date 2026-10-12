@@ -206,3 +206,63 @@ TEST(Common, FrameDurationMs)
     // 极高帧率不低于 1ms
     EXPECT_EQ(frameDurationMs(5000.0), 1);
 }
+
+TEST(Common, ChannelMapModeName)
+{
+    EXPECT_STREQ(channelMapModeName(ChannelMapMode::Original), u8"原始");
+    EXPECT_STREQ(channelMapModeName(ChannelMapMode::Mono), u8"单声道");
+    EXPECT_STREQ(channelMapModeName(ChannelMapMode::SwapLR), u8"左右交换");
+}
+
+TEST(Common, MapAudioChannelsOriginalIsNoop)
+{
+    std::vector<float> samples = {0.1f, 0.2f, 0.3f, 0.4f};
+    const auto orig = samples;
+    mapAudioChannels(samples, 2, ChannelMapMode::Original);
+    EXPECT_EQ(samples, orig);
+    // 非法声道数同样不动
+    mapAudioChannels(samples, 0, ChannelMapMode::Mono);
+    EXPECT_EQ(samples, orig);
+}
+
+TEST(Common, MapAudioChannelsSwapLR)
+{
+    // 2 帧立体声：逐帧交换 0/1 声道
+    std::vector<float> samples = {1.f, 2.f, 3.f, 4.f};
+    mapAudioChannels(samples, 2, ChannelMapMode::SwapLR);
+    EXPECT_FLOAT_EQ(samples[0], 2.f);
+    EXPECT_FLOAT_EQ(samples[1], 1.f);
+    EXPECT_FLOAT_EQ(samples[2], 4.f);
+    EXPECT_FLOAT_EQ(samples[3], 3.f);
+
+    // 单声道输入无可交换
+    std::vector<float> mono = {0.5f, -0.5f};
+    mapAudioChannels(mono, 1, ChannelMapMode::SwapLR);
+    EXPECT_FLOAT_EQ(mono[0], 0.5f);
+    EXPECT_FLOAT_EQ(mono[1], -0.5f);
+}
+
+TEST(Common, MapAudioChannelsMonoDownmix)
+{
+    // 立体声：两声道都变为均值
+    std::vector<float> stereo = {1.f, -1.f, 0.5f, 0.5f};
+    mapAudioChannels(stereo, 2, ChannelMapMode::Mono);
+    EXPECT_FLOAT_EQ(stereo[0], 0.f);
+    EXPECT_FLOAT_EQ(stereo[1], 0.f);
+    EXPECT_FLOAT_EQ(stereo[2], 0.5f);
+    EXPECT_FLOAT_EQ(stereo[3], 0.5f);
+
+    // 多声道：均值填充全部声道
+    std::vector<float> quad = {1.f, 2.f, 3.f, 4.f};
+    mapAudioChannels(quad, 4, ChannelMapMode::Mono);
+    for (float v : quad) {
+        EXPECT_FLOAT_EQ(v, 2.5f);
+    }
+
+    // 非整帧尾数不处理、不越界
+    std::vector<float> tail = {1.f, 3.f, 9.f};
+    mapAudioChannels(tail, 2, ChannelMapMode::Mono);
+    EXPECT_FLOAT_EQ(tail[0], 2.f);
+    EXPECT_FLOAT_EQ(tail[1], 2.f);
+    EXPECT_FLOAT_EQ(tail[2], 9.f);
+}

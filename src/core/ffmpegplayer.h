@@ -85,6 +85,9 @@ public:
     SDL_AudioDeviceID audioOutputDevice() const;
     void setAudioFilterConfig(const AudioFilterConfig& config);
     AudioFilterConfig audioFilterConfig() const;
+    // 声道映射（单声道/左右交换）：重采样后就地处理，不经滤镜图
+    void setChannelMapMode(ChannelMapMode mode);
+    ChannelMapMode channelMapMode() const;
 
     void setVideoFilterConfig(const VideoFilterConfig& config);
     VideoFilterConfig videoFilterConfig() const;
@@ -274,6 +277,7 @@ private:
     std::atomic<bool> m_muted{false};
     std::atomic<bool> m_hardwareDecodingEnabled{true};
     SDL_AudioDeviceID m_audioOutputDeviceId = SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    std::atomic<ChannelMapMode> m_channelMapMode{ChannelMapMode::Original};
     std::atomic<PlaybackState> m_state{PlaybackState::Stopped};
     std::atomic<NetworkState> m_networkState{NetworkState::Idle};
     SourceType m_sourceType = SourceType::LocalFile;

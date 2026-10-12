@@ -197,6 +197,7 @@ TEST_F(SettingsTest, SaveLoadRoundTrip)
     s.setAlwaysOnTop(true);
     s.setHardwareDecodingEnabled(false);
     s.setAudioOutputDeviceName(u8"扬声器 (测试)");
+    s.setChannelMapMode(ChannelMapMode::SwapLR);
     s.setRememberPosition(false);
 
     WindowConfig window{10, 20, 800, 600, true, false};
@@ -259,6 +260,7 @@ TEST_F(SettingsTest, SaveLoadRoundTrip)
     s.setAlwaysOnTop(false);
     s.setHardwareDecodingEnabled(true);
     s.setAudioOutputDeviceName("changed");
+    s.setChannelMapMode(ChannelMapMode::Original);
     s.setRememberPosition(true);
     s.setWindowConfig(WindowConfig{});
     s.setSubtitleStyle(SubtitleStyle{});
@@ -279,6 +281,7 @@ TEST_F(SettingsTest, SaveLoadRoundTrip)
     EXPECT_TRUE(s.alwaysOnTop());
     EXPECT_FALSE(s.hardwareDecodingEnabled());
     EXPECT_EQ(s.audioOutputDeviceName(), std::string(u8"扬声器 (测试)"));
+    EXPECT_EQ(s.channelMapMode(), ChannelMapMode::SwapLR);
     EXPECT_FALSE(s.rememberPosition());
 
     WindowConfig w = s.windowConfig();
@@ -372,6 +375,7 @@ TEST_F(SettingsTest, SanitizesInvalidValuesOnLoad)
         {"playback", {
             {"loopMode", 9},
             {"aspectMode", -1},
+            {"channelMapping", 9},
             {"videoTransform", {
                 {"rotation", 45},
                 {"cropPercent", 15}
@@ -401,6 +405,7 @@ TEST_F(SettingsTest, SanitizesInvalidValuesOnLoad)
 
     EXPECT_EQ(s.loopMode(), LoopMode::Playlist);
     EXPECT_EQ(s.aspectMode(), AspectMode::Original);
+    EXPECT_EQ(s.channelMapMode(), ChannelMapMode::Original);
 
     VideoTransform t = s.videoTransform();
     EXPECT_EQ(t.rotation, 0);

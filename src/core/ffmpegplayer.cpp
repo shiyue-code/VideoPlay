@@ -1525,6 +1525,8 @@ std::vector<float> FFmpegPlayer::resampleAudioFrame(AVFrame* frame) {
     }
     
     result.resize(converted * dstChannels);
+    // 声道映射（单声道/左右交换）：交错 F32 就地处理，滤镜与直通两条路径都会经过这里
+    mapAudioChannels(result, dstChannels, m_channelMapMode.load());
     return result;
 }
 

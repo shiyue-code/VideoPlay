@@ -254,6 +254,15 @@ AudioFilterConfig FFmpegPlayer::audioFilterConfig() const {
     return m_audioFilterConfig;
 }
 
+void FFmpegPlayer::setChannelMapMode(ChannelMapMode mode) {
+    m_channelMapMode = mode;
+    logger().info(std::string("Channel map mode: ") + channelMapModeName(mode));
+}
+
+ChannelMapMode FFmpegPlayer::channelMapMode() const {
+    return m_channelMapMode.load();
+}
+
 void FFmpegPlayer::setVideoFilterConfig(const VideoFilterConfig& config) {
     std::lock_guard<std::mutex> lock(m_videoFilterMutex);
     // 画面调节（eq/hue）参数变化才推进代次，让已出队帧可被 refreshVideoFrame 重算；
