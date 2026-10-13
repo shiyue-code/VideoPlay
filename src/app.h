@@ -15,6 +15,7 @@
 #include <optional>
 #include <mutex>
 #include <deque>
+#include <unordered_map>
 
 namespace VideoPlay {
 
@@ -92,6 +93,7 @@ private:
     void showSearchPanel();
     void clearAICache();
     void showAISettings();
+    void showSubtitleStyleDialog();
     std::vector<SearchResult> performSearch(const std::string& query);
 
     // 播放列表
@@ -103,6 +105,9 @@ private:
     void playNext();
     void playPrevious();
     void playFromPlaylist(size_t index);
+    // M3U/M3U8 清单：本地文件读取、远程 .m3u 抓取后展开入列；
+    // 已处理（含空清单）返回 true，HLS 或读取失败返回 false 让 FFmpeg 接手
+    bool openM3uSource(const std::string& source);
 
     // 剧集管理
     void detectSeries(const std::string& path);
@@ -137,6 +142,10 @@ private:
     // 播放列表
     std::vector<std::string> m_playlist;
     size_t m_currentIndex = 0;
+    // M3U #EXTINF 标题（URI → 显示名），仅会话内有效，随清空播放列表清除
+    std::unordered_map<std::string, std::string> m_playlistTitles;
+    // 清单展开防递归：展开期间点击到嵌套清单直接跳过
+    bool m_m3uExpanding = false;
 
     // 状态
     std::atomic<bool> m_running{false};
@@ -176,6 +185,8 @@ private:
     // 进度缓存（避免 render() 每帧查询 Settings）
     std::vector<float> m_cachedPlaylistProgress;
     std::vector<float> m_cachedEpisodeProgress;
+    // 播放列表显示名缓存（#EXTINF 标题优先，与 m_playlist 等长对齐）
+    std::vector<std::string> m_cachedPlaylistDisplay;
     bool m_progressCacheDirty = true;
 
     // 手动操作标志（防止 stop/playEpisode 触发自动连播）

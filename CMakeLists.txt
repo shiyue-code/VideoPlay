@@ -153,6 +153,7 @@ set(SOURCES
     src/renderer/inputdialog.cpp
     src/renderer/modaldialog.cpp
     src/renderer/settingsdialog.cpp
+    src/renderer/subtitlestyledialog.cpp
     src/ai/httpclient.cpp
     src/ai/aianalyzer.cpp
     src/ai/transcriber.cpp
@@ -201,6 +202,7 @@ set(HEADERS
     src/renderer/modaldialog.h
     src/renderer/textutils.h
     src/renderer/settingsdialog.h
+    src/renderer/subtitlestyledialog.h
     src/ai/httpclient.h
     src/ai/aianalyzer.h
     src/ai/transcriber.h

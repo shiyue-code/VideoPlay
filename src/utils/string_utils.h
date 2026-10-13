@@ -64,6 +64,13 @@ inline bool parseHexColor(const std::string& s, uint8_t& r, uint8_t& g, uint8_t&
     return true;
 }
 
+// 格式化为 "#RRGGBB"（大写），与 parseHexColor 互逆
+inline std::string formatHexColor(uint8_t r, uint8_t g, uint8_t b) {
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+    return buf;
+}
+
 // 解析 AI 分析文本里的括号时间戳 "[mm:ss]" / "[hh:mm:ss]"（毫秒）
 inline bool parseBracketTimestampMs(const std::string& text, int64_t& timestampMs) {
     int first = 0;

@@ -1,5 +1,6 @@
 #include "app.h"
 #include "renderer/sdlrenderer.h"
+#include "renderer/subtitlestyledialog.h"
 #include "core/ffmpegplayer.h"
 #include "core/fileassoc.h"
 #include "core/settings.h"
@@ -58,6 +59,9 @@ void VideoPlayerApp::handleMenu(MenuId menuId) {
             break;
         case MenuId::ImportSubtitle: // 导入字幕
             openSubtitleDialog();
+            break;
+        case MenuId::SubtitleStyle: // 字幕样式
+            showSubtitleStyleDialog();
             break;
         case MenuId::SetDefaultPlayer: // 设为默认播放器
             registerAsDefaultPlayer();
@@ -896,6 +900,21 @@ void VideoPlayerApp::showAISettings() {
         logger().info("[AI] Settings saved, provider: " + config.provider +
                       ", baseUrl: " + config.baseUrl +
                       ", model: " + config.model);
+    });
+}
+
+void VideoPlayerApp::showSubtitleStyleDialog() {
+    if (!m_renderer) return;
+
+    SubtitleStyleDialog dialog(m_renderer->getWindow(), m_renderer->getFont(),
+                               m_renderer->getTitleFont());
+    dialog.show(Settings::instance().subtitleStyle(), [this](const SubtitleStyle& style) {
+        Settings::instance().setSubtitleStyle(style);
+        Settings::instance().save();
+        if (m_renderer) {
+            m_renderer->setSubtitleStyle(style);
+            m_renderer->showOSD(OSDType::Info, "字幕样式已保存");
+        }
     });
 }
 

@@ -274,7 +274,9 @@ bool FFmpegPlayer::loadFile(const std::string& filePath) {
     // 扫描所有音轨和字幕轨
     scanTracks();
 
-    if (m_sourceType == SourceType::LocalFile && m_videoCtx.codecContext) {
+    // 网络流也启动预览线程：容器首个悬停请求才懒打开，pb 报不可 seek 的流自行放弃
+    if (m_videoCtx.codecContext &&
+        (m_sourceType == SourceType::LocalFile || m_sourceType == SourceType::NetworkStream)) {
         startPreviewDecoder();
     }
 

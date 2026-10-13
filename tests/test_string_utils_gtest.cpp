@@ -44,6 +44,22 @@ TEST(StringUtils, ParseHexColorRejectsInvalid)
     EXPECT_FALSE(parseHexColor("0xFF8040", r, g, b));  // 0x 前缀不支持
 }
 
+TEST(StringUtils, FormatHexColor)
+{
+    EXPECT_EQ(formatHexColor(0xFF, 0x80, 0x40), "#FF8040");
+    EXPECT_EQ(formatHexColor(0x00, 0x00, 0x00), "#000000");
+    EXPECT_EQ(formatHexColor(0x0A, 0xB0, 0x0C), "#0AB00C");  // 小写位以大写输出
+}
+
+TEST(StringUtils, FormatHexColorRoundTrip)
+{
+    uint8_t r = 0, g = 0, b = 0;
+    EXPECT_TRUE(parseHexColor(formatHexColor(0x12, 0xAB, 0xF0), r, g, b));
+    EXPECT_EQ(r, 0x12);
+    EXPECT_EQ(g, 0xAB);
+    EXPECT_EQ(b, 0xF0);
+}
+
 TEST(StringUtils, SplitTimestampTokensPlainText)
 {
     auto tokens = splitTimestampTokens("没有标记的一行");

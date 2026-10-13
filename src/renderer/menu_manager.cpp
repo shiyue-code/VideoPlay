@@ -38,6 +38,7 @@ void MenuManager::initMenus() {
     fileMenu->addChild(MenuItem::create(MenuId::RecentFiles, "最近播放"));
     fileMenu->addChild(MenuItem::separator());
     fileMenu->addChild(MenuItem::create(MenuId::ImportSubtitle, "导入字幕..."));
+    fileMenu->addChild(MenuItem::create(MenuId::SubtitleStyle, "字幕样式..."));
     fileMenu->addChild(MenuItem::create(MenuId::MediaInfo, "视频信息", [this]{
         if (m_renderer) m_renderer->toggleMediaInfoPanel();
     }));
@@ -530,15 +531,11 @@ void MenuManager::renderCascadeLevel(const MenuCascadeLevel& level, float alpha)
     const int checkColumnWidth = 20;
     const int labelFontSize = 14;
     const int shortcutFontSize = 12;
-    uint8_t baseAlpha = scaledAlpha(244, alpha);
+    uint8_t baseAlpha = scaledAlpha(246, alpha);
 
-    // 菜单阴影和背景
-    m_renderer->fillRoundRect(level.x + 2, level.y + 5, level.width, level.height, 8,
-                              0, 0, 0, scaledAlpha(95, alpha));
-    m_renderer->fillRoundRect(level.x, level.y, level.width, level.height, 8,
-                              38, 39, 43, baseAlpha);
-    m_renderer->drawRect(level.x + 1, level.y + 1, level.width - 2, level.height - 2,
-                         255, 255, 255, scaledAlpha(26, alpha));
+    // 菜单背景（平面纯色弹层）
+    m_renderer->fillRoundRect(level.x, level.y, level.width, level.height, 10,
+                              COLOR_MENU_BG[0], COLOR_MENU_BG[1], COLOR_MENU_BG[2], baseAlpha);
 
     int itemY = level.y + menuPadY;
     for (size_t i = 0; i < level.parent->children.size(); ++i) {
@@ -547,7 +544,7 @@ void MenuManager::renderCascadeLevel(const MenuCascadeLevel& level, float alpha)
 
         if (child->isSeparator) {
             m_renderer->fillRect(level.x + 12, itemY + separatorHeight / 2,
-                                 level.width - 24, 1, 255, 255, 255, scaledAlpha(35, alpha));
+                                 level.width - 24, 1, 255, 255, 255, scaledAlpha(26, alpha));
             itemY += separatorHeight;
             continue;
         }
@@ -556,10 +553,12 @@ void MenuManager::renderCascadeLevel(const MenuCascadeLevel& level, float alpha)
         bool enabled = child->isEnabled();
 
         if (hovered && enabled) {
-            m_renderer->fillRoundRect(level.x + 5, itemY + 1, level.width - 10, itemHeight - 2, 5,
-                                      48, 96, 132, scaledAlpha(215, alpha));
-            m_renderer->fillRect(level.x + 8, itemY + 6, 2, itemHeight - 12,
-                                 COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1], COLOR_PROGRESS_FILL[2], scaledAlpha(230, alpha));
+            // 现代悬浮态：中性白色叠加 + 左侧强调色小竖条
+            m_renderer->fillRoundRect(level.x + 6, itemY + 1, level.width - 12, itemHeight - 2, 6,
+                                      255, 255, 255, scaledAlpha(20, alpha));
+            m_renderer->fillRoundRect(level.x + 6, itemY + 7, 3, itemHeight - 14, 2,
+                                      COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1],
+                                      COLOR_PROGRESS_FILL[2], scaledAlpha(235, alpha));
         }
 
         int checkX = level.x + leftPadding;
@@ -578,19 +577,21 @@ void MenuManager::renderCascadeLevel(const MenuCascadeLevel& level, float alpha)
                                  labelFontSize, scaledAlpha(255, alpha));
         } else {
             m_renderer->drawText(child->getLabel(), labelX, labelY,
-                                 130, 130, 135,
+                                 COLOR_TEXT_FAINT[0], COLOR_TEXT_FAINT[1], COLOR_TEXT_FAINT[2],
                                  labelFontSize, scaledAlpha(180, alpha));
         }
 
         if (child->hasChildren()) {
             int arrowX = level.x + level.width - 16;
             m_renderer->drawText(">", arrowX, labelY,
-                                 160, 160, 160, 12, scaledAlpha(200, alpha));
+                                 COLOR_TEXT_DIM[0], COLOR_TEXT_DIM[1], COLOR_TEXT_DIM[2],
+                                 12, scaledAlpha(200, alpha));
         } else if (!child->shortcut.empty()) {
             int sw = m_renderer->getTextWidth(child->shortcut, shortcutFontSize);
             int shortcutX = level.x + level.width - 14 - sw;
             m_renderer->drawText(child->shortcut, shortcutX, labelY,
-                                 160, 160, 160, shortcutFontSize, scaledAlpha(200, alpha));
+                                 COLOR_TEXT_DIM[0], COLOR_TEXT_DIM[1], COLOR_TEXT_DIM[2],
+                                 shortcutFontSize, scaledAlpha(200, alpha));
         }
 
         itemY += itemHeight;
@@ -600,9 +601,10 @@ void MenuManager::renderCascadeLevel(const MenuCascadeLevel& level, float alpha)
 void MenuManager::renderMenuBar() {
     if (!m_renderer) return;
 
-    // 绘制菜单栏底色
-    m_renderer->fillRect(0, 0, m_renderer->m_windowWidth, m_renderer->m_menuBarHeight, 34, 35, 39, 245);
-    m_renderer->fillRect(0, 0, m_renderer->m_windowWidth, 1, 255, 255, 255, 18);
+    // 绘制菜单栏底色（比弹层面更深的顶栏，底部 1px 分隔线）
+    m_renderer->fillRect(0, 0, m_renderer->m_windowWidth, m_renderer->m_menuBarHeight, 18, 21, 27, 245);
+    m_renderer->fillRect(0, m_renderer->m_menuBarHeight - 1, m_renderer->m_windowWidth, 1,
+                         255, 255, 255, 14);
 
     // 绘制顶级菜单项
     int x = kTopMenuX;
@@ -618,16 +620,19 @@ void MenuManager::renderMenuBar() {
                         m_renderer->m_mouseY >= 0 && m_renderer->m_mouseY <= itemHeight);
 
         if (active) {
-            m_renderer->fillRoundRect(x, 2, itemWidth, itemHeight - 4, 4,
-                                      48, 96, 132, 230);
+            // 展开态：强调色淡填充
+            m_renderer->fillRoundRect(x + 2, 3, itemWidth - 4, itemHeight - 6, 6,
+                                      COLOR_PROGRESS_FILL[0], COLOR_PROGRESS_FILL[1],
+                                      COLOR_PROGRESS_FILL[2], 46);
         } else if (hovered) {
-            m_renderer->fillRoundRect(x, 2, itemWidth, itemHeight - 4, 4,
-                                      255, 255, 255, 30);
+            m_renderer->fillRoundRect(x + 2, 3, itemWidth - 4, itemHeight - 6, 6,
+                                      255, 255, 255, 22);
         }
 
         int textY = (itemHeight - m_renderer->getFontHeight(14)) / 2;
+        const uint8_t* textColor = active ? COLOR_BUTTON_HOVER : COLOR_TEXT;
         m_renderer->drawText(item->getLabel(), x + kTopMenuPaddingX, textY,
-                             COLOR_TEXT[0], COLOR_TEXT[1], COLOR_TEXT[2], 14, 255);
+                             textColor[0], textColor[1], textColor[2], 14, 255);
 
         x += itemWidth + kTopMenuGap;
     }

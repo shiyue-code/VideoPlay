@@ -151,6 +151,9 @@ enum class MenuId : int {
     // GIF 导出
     GifExport = 158,
 
+    // 字幕样式设置对话框
+    SubtitleStyle = 159,
+
     // AI 菜单
     AIAnalyze = 300,
     AISummary = 301,

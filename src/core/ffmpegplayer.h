@@ -337,17 +337,29 @@ private:
 
     static constexpr int kPreviewWidth = 120;
     static constexpr int kPreviewHeight = 68;
+    // 缓存桶粒度，与渲染层请求量化（500ms）一致
+    static constexpr int64_t kPreviewBucketMs = 500;
+    // 桶上限：120x68 BGRA ≈ 32KB/帧，96 桶约 3MB
+    static constexpr size_t kPreviewCacheCap = 96;
+    // 目标在上次解出帧之后该跨度内时顺序续解，不再 seek
+    static constexpr int64_t kPreviewForwardMs = 4000;
     void startPreviewDecoder();
     void stopPreviewDecoder();
     void previewLoop();
     bool openPreviewContext();
     void closePreviewContext();
-    bool decodePreviewFrame(int64_t ptsMs, VideoFrame& out);
+    bool decodePreviewFrame(int64_t ptsMs, VideoFrame& out, uint32_t seq);
+    // 解码帧转 120x68 BGRA 缩略图（信箱填充）；仅预览线程调用
+    bool convertToPreviewFrame(const AVFrame* src, int64_t ptsMs, VideoFrame& out);
+    // 桶内无帧才插入并做 LRU 淘汰；内部加锁
+    void cachePreviewFrame(int64_t bucketPts, const VideoFrame& frame);
 
     std::thread m_previewThread;
     std::mutex m_previewMutex;
     std::condition_variable m_previewCv;
     std::atomic<bool> m_previewAbort{false};
+    // 请求代次：解码循环轮询它，发现更新的请求立即放弃当前解码
+    std::atomic<uint32_t> m_previewRequestSeq{0};
     std::string m_previewPath;
     AVFormatContext* m_previewFmt = nullptr;
     AVCodecContext* m_previewCodec = nullptr;
@@ -356,6 +368,14 @@ private:
     bool m_previewHasRequest = false;
     VideoFrame m_previewFrame;
     bool m_previewReady = false;
+    // 最近交付的请求 pts，避免悬停同一点位反复解码（m_previewMutex 保护）
+    int64_t m_previewServedPts = -1;
+    // 500ms 桶 → 缩略图，deque 记 LRU 顺序（均受 m_previewMutex 保护）
+    std::map<int64_t, VideoFrame> m_previewCache;
+    std::deque<int64_t> m_previewCacheOrder;
+    // 以下仅预览线程访问：上次解码产出的最大帧 pts，用于判断能否顺序续解
+    bool m_previewCanContinue = false;
+    int64_t m_previewLastPts = -1;
 
     bool isHdrFrame(const AVFrame* frame) const;
     std::string buildVideoFilterDescription(const AVFrame* frame) const;
