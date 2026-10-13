@@ -506,11 +506,13 @@ struct SearchResult {
 };
 
 // 支持的媒体文件扩展名（含点，小写）。
-// 文件关联注册、剧集识别、文件夹批量导入共用这一份列表
+// 文件关联注册、剧集识别、文件夹批量导入共用这一份列表；
+// .m3u/.m3u8 是播放列表清单，打开时按内容展开（HLS 交给 FFmpeg 直接播）
 inline const std::vector<std::string>& mediaExtensions() {
     static const std::vector<std::string> extensions = {
         ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
-        ".mp3", ".aac", ".wav", ".flac", ".ogg", ".m4v", ".ts"
+        ".mp3", ".aac", ".wav", ".flac", ".ogg", ".m4v", ".ts",
+        ".m3u", ".m3u8"
     };
     return extensions;
 }

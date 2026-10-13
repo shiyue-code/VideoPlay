@@ -119,11 +119,20 @@ gtest_discover_tests(test_settings_maintenance)
 add_executable(test_episodedetector
     test_episodedetector_gtest.cpp
     ${CMAKE_SOURCE_DIR}/src/core/episodedetector.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/m3uplaylist.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/logger.cpp
 )
 target_include_directories(test_episodedetector PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
 target_link_libraries(test_episodedetector PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
 gtest_discover_tests(test_episodedetector)
+
+add_executable(test_m3uplaylist
+    test_m3uplaylist_gtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/m3uplaylist.cpp
+)
+target_include_directories(test_m3uplaylist PRIVATE ${VIDEOPLAY_TEST_INCLUDE_DIRS})
+target_link_libraries(test_m3uplaylist PRIVATE ${VIDEOPLAY_GTEST_MAIN_TARGET})
+gtest_discover_tests(test_m3uplaylist)
 
 add_executable(test_settings
     test_settings_gtest.cpp

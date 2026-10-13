@@ -1,5 +1,6 @@
 ﻿#include "core/episodedetector.h"
 #include "core/common.h"
+#include "core/m3uplaylist.h"
 #include "utils/logger.h"
 
 #include <filesystem>
@@ -38,6 +39,10 @@ namespace {
 
 bool EpisodeDetector::isMediaFile(const std::string& path)
 {
+    // 播放列表清单不算媒体文件：同目录的 .m3u 不应被识别成一集
+    if (isM3uPlaylistPath(path)) {
+        return false;
+    }
     std::string ext = std::filesystem::u8path(path).extension().u8string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

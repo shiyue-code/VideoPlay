@@ -133,7 +133,9 @@ std::string gbkToUtf8(const std::string& gbk) {
 #endif
 }
 
-// 把字幕文件原始字节转成 UTF-8 文本：UTF-8 BOM / UTF-16(带或不带 BOM) / GBK
+} // namespace
+
+// 把文本文件原始字节转成 UTF-8 文本：UTF-8 BOM / UTF-16(带或不带 BOM) / GBK
 std::string decodeToUtf8(std::string content) {
     if (content.empty()) return content;
     const auto* p = reinterpret_cast<const unsigned char*>(content.data());
@@ -169,9 +171,8 @@ std::string decodeToUtf8(std::string content) {
         logger().info("Subtitle decoded as GBK/GB18030");
         return converted;
     }
-    logger().warning("Subtitle encoding not recognized, using raw bytes");
+    logger().warning("Text encoding not recognized, using raw bytes");
     return content;
-}
 }
 
 // 字幕解析器通常不涉及初始 STDOUT/STDERR，但若日志初始化失败，

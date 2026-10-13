@@ -6,6 +6,7 @@
 #include "utils/logger.h"
 #include "subtitles/subtitleparser.h"
 #include "core/episodedetector.h"
+#include "core/m3uplaylist.h"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -846,6 +847,15 @@ void VideoPlayerApp::render() {
                 }
             }
         }
+
+        // 播放列表显示名：M3U #EXTINF 标题优先，否则渲染层自取文件名
+        m_cachedPlaylistDisplay.clear();
+        m_cachedPlaylistDisplay.reserve(m_playlist.size());
+        for (const auto& path : m_playlist) {
+            auto it = m_playlistTitles.find(path);
+            m_cachedPlaylistDisplay.push_back(
+                it != m_playlistTitles.end() ? it->second : path);
+        }
         m_progressCacheDirty = false;
     }
     m_renderer->setPlaylistProgress(m_cachedPlaylistProgress);
@@ -905,6 +915,11 @@ void VideoPlayerApp::render() {
         stats.audioQueueMs = m_player->audioQueuedMs();
     }
 
+    // 当前文件名显示同样优先 #EXTINF 标题
+    const auto curTitleIt = m_playlistTitles.find(m_currentFile);
+    const std::string& displayFile =
+        curTitleIt != m_playlistTitles.end() ? curTitleIt->second : m_currentFile;
+
     m_renderer->renderUI(
         m_position,
         m_duration,
@@ -912,9 +927,9 @@ void VideoPlayerApp::render() {
         m_isMuted,
         m_isPlaying,
         m_speed,
-        m_currentFile,
+        displayFile,
         subtitleText,
-        m_playlist,
+        m_cachedPlaylistDisplay,
         m_currentIndex,
         audioPts,
         videoPts,
@@ -976,6 +991,12 @@ void VideoPlayerApp::openFile(const std::string& path) {
         return;
     }
 
+    // M3U/M3U8 清单分流：普通播放列表展开入列，
+    // HLS 清单与远程 .m3u8 交给 FFmpeg 直接播
+    if (isM3uPlaylistPath(path) && openM3uSource(path)) {
+        return;
+    }
+
     logger().info("openFile: " + path + ", currentIndex=" + std::to_string(m_currentIndex));
 
     // 停止当前播放
@@ -1013,9 +1034,11 @@ void VideoPlayerApp::openFile(const std::string& path) {
         // 添加到最近文件
         Settings::instance().addRecentFile(path);
 
-        // 更新窗口标题
-        std::string title = displayNameForSource(path) + " - " + APP_TITLE;
-        m_renderer->setWindowTitle(title);
+        // 更新窗口标题（M3U 条目优先显示 #EXTINF 频道名）
+        auto titleIt = m_playlistTitles.find(path);
+        const std::string& displayName =
+            titleIt != m_playlistTitles.end() ? titleIt->second : displayNameForSource(path);
+        m_renderer->setWindowTitle(displayName + " - " + APP_TITLE);
 
         if (m_renderer) {
             m_renderer->setMediaInfo(m_player->mediaInfo());

@@ -48,6 +48,10 @@ private:
     int64_t m_offset = 0;
 };
 
+// 把文本文件原始字节转成 UTF-8：UTF-8 BOM / UTF-16(带或不带 BOM) / GBK。
+// 字幕与 M3U 播放列表共用这份编码探测
+std::string decodeToUtf8(std::string content);
+
 } // namespace VideoPlay
 
 #endif // SUBTITLEPARSER_H

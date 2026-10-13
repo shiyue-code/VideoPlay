@@ -2,11 +2,19 @@
 #include "renderer/sdlrenderer.h"
 #include "core/ffmpegplayer.h"
 #include "core/settings.h"
+#include "core/m3uplaylist.h"
+#include "subtitles/subtitleparser.h"
 #include "utils/logger.h"
+#include "utils/string_utils.h"
 #include "core/episodedetector.h"
+#ifdef _WIN32
+#include "ai/httpclient.h"
+#endif
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 
 namespace VideoPlay {
 
@@ -15,6 +23,13 @@ Logger& logger() {
     static auto logger = Logger::get("app.playlist");
     return *logger;
 }
+
+// M3U 展开期置位、作用域结束复位（含异常路径）
+struct M3uExpandGuard {
+    bool& flag;
+    explicit M3uExpandGuard(bool& f) : flag(f) { flag = true; }
+    ~M3uExpandGuard() { flag = false; }
+};
 }
 
 
@@ -90,6 +105,7 @@ void VideoPlayerApp::reorderPlaylist(size_t fromIndex, size_t toIndex) {
 
 void VideoPlayerApp::clearPlaylist() {
     m_playlist.clear();
+    m_playlistTitles.clear();
     m_currentIndex = 0;
     m_progressCacheDirty = true;
     persistPlaylist();
@@ -136,6 +152,111 @@ void VideoPlayerApp::playPrevious() {
 
     m_isManualOperation = true;
     playFromPlaylist(m_currentIndex);
+}
+
+bool VideoPlayerApp::openM3uSource(const std::string& source) {
+    // 展开期间遇到嵌套清单直接跳过（条目保留在列表里，之后点击再展开），
+    // 防止两个清单互相引用时递归爆栈
+    if (m_m3uExpanding) {
+        return true;
+    }
+
+    const bool remote = isNetworkUrl(source);
+    // 远程 .m3u8 大概率是 HLS 流：不抓取，直接交 FFmpeg（其 hls 解复用器原生支持）
+    if (remote) {
+        std::string clean = source;
+        size_t suffix = clean.find_first_of("?#");
+        if (suffix != std::string::npos) {
+            clean = clean.substr(0, suffix);
+        }
+        if (endsWith(toLower(clean), ".m3u8")) {
+            return false;
+        }
+    }
+
+    std::string content;
+    if (remote) {
+        // 远程 .m3u 是 IPTV 频道表：抓下来按清单解析
+#ifdef _WIN32
+        HttpClient http;
+        http.setTimeout(15);
+        HttpResponse resp = http.get(source);
+        if (!resp.success() || resp.body.empty()) {
+            logger().warning("Failed to fetch M3U playlist: " + source +
+                             " (HTTP " + std::to_string(resp.statusCode) + ")");
+            return false;
+        }
+        content = decodeToUtf8(std::move(resp.body));
+#else
+        return false;
+#endif
+    } else {
+        std::ifstream file(std::filesystem::u8path(source), std::ios::binary);
+        if (!file.is_open()) {
+            logger().warning("Cannot open M3U playlist: " + source);
+            return false;
+        }
+        content.assign(std::istreambuf_iterator<char>(file),
+                       std::istreambuf_iterator<char>());
+        content = decodeToUtf8(std::move(content));
+    }
+
+    M3uPlaylist list = parseM3uPlaylist(content);
+    if (list.isHlsManifest) {
+        return false;  // 本地 HLS 清单同样交 FFmpeg
+    }
+
+    stop();
+    if (m_renderer) {
+        m_renderer->clearPreview();
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_embeddedSubtitleMutex);
+        m_embeddedSubtitleText.clear();
+        m_embeddedSubtitleStartMs = 0;
+        m_embeddedSubtitleEndMs = 0;
+    }
+
+    M3uExpandGuard guard(m_m3uExpanding);
+    std::string firstUri;
+    int total = 0;
+    for (const auto& entry : list.entries) {
+        std::string uri = resolveM3uUri(source, entry.uri);
+        if (uri.empty()) continue;
+        ++total;
+        if (firstUri.empty()) {
+            firstUri = uri;
+        }
+        if (!entry.title.empty()) {
+            m_playlistTitles[uri] = entry.title;
+        }
+        addToPlaylist(uri);
+    }
+    m_progressCacheDirty = true;
+
+    logger().info("M3U playlist expanded: " + source + ", " +
+                  std::to_string(total) + " entries");
+
+    if (firstUri.empty()) {
+        if (m_renderer) {
+            m_renderer->showOSD(OSDType::Info, "播放列表为空或无法解析");
+        }
+        return true;
+    }
+
+    Settings::instance().addRecentFile(source);
+    if (m_renderer) {
+        m_renderer->showOSD(OSDType::Info,
+                            "已加载 " + std::to_string(total) + " 个条目");
+        m_renderer->updateRecentFilesMenu();
+    }
+
+    auto it = std::find(m_playlist.begin(), m_playlist.end(), firstUri);
+    if (it != m_playlist.end()) {
+        m_isManualOperation = true;
+        playFromPlaylist(static_cast<size_t>(std::distance(m_playlist.begin(), it)));
+    }
+    return true;
 }
 
 void VideoPlayerApp::playFromPlaylist(size_t index) {

@@ -137,6 +137,7 @@ set(SOURCES
     src/core/settings_maintenance.cpp
     src/core/episodedetector.cpp
     src/core/fileassoc.cpp
+    src/core/m3uplaylist.cpp
     src/subtitles/subtitleparser.cpp
     src/utils/logger.cpp
     src/renderer/sdlrenderer.cpp
@@ -183,6 +184,7 @@ set(HEADERS
     src/core/common.h
     src/core/episodedetector.h
     src/core/fileassoc.h
+    src/core/m3uplaylist.h
     src/subtitles/subtitleparser.h
     src/utils/logger.h
     src/utils/string_utils.h

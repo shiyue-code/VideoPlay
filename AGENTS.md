@@ -2,7 +2,7 @@
 
 > **读者**：开发者、Agent  
 > **状态**：现行  
-> **更新**：2026-10-11
+> **更新**：2026-10-13
 
 给改代码的人看。用户功能与快捷键见 [`README.md`](README.md)。未完成功能见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。文档怎么写见 [`docs/README.md`](docs/README.md)。
 
@@ -40,7 +40,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 FFmpeg 默认指向 `3rdparty/FFmpeg/`。输出在 `build/bin/<Config>/`。添加源文件必须改根目录 `CMakeLists.txt` 的 `SOURCES` / `HEADERS`，不要用 `file(GLOB)`。
 
-当前测试 15 个 gtest 目标：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_fileassoc`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_common`、`test_ai_utils`、`test_searchengine`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`、`test_videoadjuster`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具（含括号/HMS 时间戳解析）、轨道标签/语言名/滤镜默认值等 common.h 内联助手、AI provider 归一化与 JSON 提示词/应答解析、检索引擎（转录/字幕/章节倒排索引）、Settings 读写/容错/AI 配置归一化、剧集识别、画面调节（eq/hue + BGRA）、文件关联默认值接管决策与扩展名列表约定。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
+当前测试 16 个 gtest 目标：`test_playbackcontroller`、`test_subtitleparser`、`test_menuitem`、`test_fileassoc`、`test_audioclock`、`test_settings_maintenance`、`test_frame_image`、`test_string_utils`、`test_common`、`test_ai_utils`、`test_searchengine`、`test_ffmpegplayer_playback`、`test_settings`、`test_episodedetector`、`test_videoadjuster`、`test_m3uplaylist`。覆盖倍速映射、时间格式化、音频滤镜预设、SRT/VTT/ASS、菜单项、AudioClock、配置清理、帧变换/PNG、字符串工具（含括号/HMS 时间戳解析）、轨道标签/语言名/滤镜默认值等 common.h 内联助手、AI provider 归一化与 JSON 提示词/应答解析、检索引擎（转录/字幕/章节倒排索引）、Settings 读写/容错/AI 配置归一化、剧集识别、画面调节（eq/hue + BGRA）、文件关联默认值接管决策与扩展名列表约定。`test_ffmpegplayer_playback` 仅 Windows：用内置 `3rdparty/FFmpeg/bin/ffmpeg.exe` 现场生成媒体素材，走 `SDL_AUDIO_DRIVER=dummy` 真实时间消耗，整轮约 15 秒。`test_settings` 通过 `::testing::Environment` 把 `APPDATA`/`HOME` 重定向到临时目录后才初始化 `Settings` 单例，重定向失败直接 `abort`，不会读写真实配置。
 
 ## 源码结构
 
@@ -63,6 +63,7 @@ src/
 │   ├── settings.h/cpp           # JSON 配置单例
 │   ├── settings_maintenance.*   # 配置中失效本地文件条目的清理
 │   ├── episodedetector.h/cpp    # 剧集文件名识别
+│   ├── m3uplaylist.h/cpp        # M3U/M3U8 清单解析（EXTINF 标题、HLS 识别、URI 解析）
 │   ├── fileassoc.h/cpp          # HKCU 文件关联（仅 Windows 实装，其它平台 no-op）
 │   └── common.h                 # 枚举、VideoFrame、轨道标签、mediaExtensions()
 ├── renderer/
@@ -75,7 +76,7 @@ src/
 │   ├── menu_manager / ui_manager / dialog_manager
 │   ├── modaldialog.*            # 无边框模态对话框基类
 │   ├── textutils.h              # 独立窗口共享的文本绘制/测量
-│   ├── settingsdialog / inputfield / inputdialog
+│   ├── settingsdialog / subtitlestyledialog / inputfield / inputdialog
 │   ├── ui_style.h / ui_draw.*   # 信息面板样式常量与通用绘制原语
 │   └── windowframe*.cpp         # 无边框；Win32 与 Linux 分流编译
 ├── subtitles/subtitleparser.*   # SRT/ASS/VTT
@@ -134,10 +135,11 @@ VideoPlayerApp
 - 渲染已开 vsync（`SDL_SetRenderVSync`）；vsync 生效时主循环最小帧间隔降到 4ms，只在 present 未阻塞（最小化/遮挡）时补睡 `SDL_DelayPrecise`，否则保持 16ms
 - 截图走 `VideoPlayerApp::takeScreenshot`：对 `m_displayFrame` 按与渲染一致的「裁剪 → 翻转 → 顺时针旋转」顺序变换后写 PNG（依 `SDL_RenderTextureRotated` 语义，先翻转后旋转），不含 UI/OSD
 - GIF 导出走 `VideoPlayerApp::startGifExport`：AB 区间优先，否则当前位置+输入秒数（≤60s）；后台线程跑 `SubprocessRunner` 调 exe 同目录 `ffmpeg.exe`（palettegen/paletteuse 单遍调色板，fps=12、宽 480），结果经 `m_gifExport` 共享状态在 render() 消费，detached 线程不触碰 this
-- 字幕样式取自 `setSubtitleStyle` 缓存的 `SubtitleStyle`（字号/颜色/描边生效，`fontFamily` 暂不支持）；有描边时不画背景框、按偏移叠加描边层
+- 字幕样式取自 `setSubtitleStyle` 缓存的 `SubtitleStyle`（字号/颜色/描边生效，`fontFamily` 暂不支持）；有描边时不画背景框、按偏移叠加描边层。设置 UI 为文件菜单「字幕样式...」的 `SubtitleStyleDialog`，保存即写盘并即时生效
 - 消息型弹窗统一用窗口内信息面板（`renderInfoPanel`，媒体信息/关于/帮助/消息共用）：模态遮罩，点背板/Esc/Enter/右上角 × 关闭；命中在 `getControlAt` 分发前拦截，只有 `InfoPanelClose`/`InfoPanelLink` 可悬停。`showMessageBox`/`showInfoPanel` 仅主线程调用；Custom 面板显示期间新消息入队（≤8，丢弃最旧），关闭后依次显示；内容超高时滚动（滚轮接管，标题与 × 不滚动）；正文里的 `[mm:ss]` 高亮可点击。轻量提示走 `showOSD`（如「请先打开一个视频文件」「AI 缓存已清除」「截图已保存」）。CustomMessageBox 独立窗口已删除
-- 输入型弹窗（`InputDialog`/`SettingsDialog`/`InputField`，`ModalDialog` 子类）仍是独立窗口模态，但视觉与信息面板一致：UiStyle 提供全部配色/尺寸，`UiDraw` 统一绘制圆角矩形/按钮/×；标题用 `getTitleFont()`（18px）
+- 输入型弹窗（`InputDialog`/`SettingsDialog`/`SubtitleStyleDialog`/`InputField`，`ModalDialog` 子类）仍是独立窗口模态，但视觉与信息面板一致：UiStyle 提供全部配色/尺寸，`UiDraw` 统一绘制圆角矩形/按钮/×；标题用 `getTitleFont()`（18px）
 - 章节来自 `AVFormatContext::chapters`；进度条书签独立命中 `ControlType::ChapterMarker`
+- M3U/M3U8 在 `openFile` 分流：`openM3uSource` 读本地文件 / WinHTTP 抓远程 .m3u，`parseM3uPlaylist` 判定含 `#EXT-X` 的 HLS 清单返回 false 让 FFmpeg 接手（远程 .m3u8 不抓取直接交 FFmpeg）；普通清单解析后 `resolveM3uUri` 按清单位置解析相对路径，全部入 `m_playlist` 并播首项；`#EXTINF` 标题存 `m_playlistTitles`（会话内有效），渲染层经 `m_cachedPlaylistDisplay` 显示名替代路径；展开期置 `m_m3uExpanding` 防嵌套清单递归
 - 绝对 seek 回调编码：`1000.0 + ratio * 1000.0`
 
 ### 无边框窗口（Win32）
@@ -181,7 +183,7 @@ Linux 仍是自绘拖动，`usesNativeResize()` 为 false。
 1. `HttpClient` 只有 WinHTTP。非 Windows 编 AI 模块会失败。
 2. `AudioPlayer` 可通过播放菜单「音频输出」切换设备，按设备名写入配置。
 3. 播放列表可删除、清空、拖拽排序并持久化。窗口宽小于 860px 时若两栏同时开则关闭剧集面板。
-4. 进度条缩略图由 `FFmpegPlayer` 独立预览解码线程生成，不要从主视频队列 `getVideoFrame` 里抽帧。
+4. 进度条缩略图由 `FFmpegPlayer` 独立预览解码线程生成（首个悬停请求才懒打开容器；500ms 桶 LRU 缓存、前向 4s 内顺序续解；pb 报不可 seek 的流自动放弃），不要从主视频队列 `getVideoFrame` 里抽帧。
 5. `AIConfig::autoAnalyze` 已写入配置，打开文件时不会自动分析。
 6. HTTPS 请求忽略证书错误（`SECURITY_FLAG_IGNORE_*`），不要在新代码里扩大这个范围。
 7. 应用内帮助文本（F1）已与实际按键一致：`.` 调速，`[` `]` `\` 为 AB 循环；改键位时同步更新 `app_events.cpp` 的帮助表与 README。
